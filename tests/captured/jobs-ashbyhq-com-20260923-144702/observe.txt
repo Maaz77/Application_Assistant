@@ -1,0 +1,13 @@
+[obs#4] https://jobs.ashbyhq.com/elevenlabs/507e390a-eaeb-4000-936e-83e3e498c760/application  "Data Scientist - AI Safety @ ElevenLabs"  scroll=0/860  reachable=8/8
+e1   lnk    ElevenLabs
+e2   lnk    Back to ElevenLabs’s Job Listings
+e3   tab    Overview
+e4   tab    Application
+e5   lnk    Learn more about Ashby
+e6   lnk    Privacy Policy
+e7   lnk    Security
+e8   lnk    Vulnerability Disclosure
+text:
+Data Scientist - AI Safety Location London Employment Type Full time Location Type Hybrid Department Engineering & Product AI Safety Overview Application Fetching application form Powered by Privacy Policy Security Vulnerability Disclosure
+
+json: {"url": "https://jobs.ashbyhq.com/elevenlabs/507e390a-eaeb-4000-936e-83e3e498c760/application", "title": "Data Scientist - AI Safety @ ElevenLabs", "elements": [{"ref": "e1", "role": "link", "name": "ElevenLabs", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e2", "role": "link", "name": "Back to ElevenLabs’s Job Listings", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e3", "role": "tab", "name": "Overview", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e4", "role": "tab", "name": "Application", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e5", "role": "link", "name": "Learn more about Ashby", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e6", "role": "link", "name": "Privacy Policy", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e7", "role": "link", "name": "Security", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e8", "role": "link", "name": "Vulnerability Disclosure", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}]}

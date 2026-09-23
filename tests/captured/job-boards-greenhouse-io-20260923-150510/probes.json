@@ -1,0 +1,66 @@
+{
+ "required_empty": {
+  "n": 17,
+  "more": true,
+  "items": [
+   [
+    "First Name",
+    "text"
+   ],
+   [
+    "Last Name",
+    "text"
+   ],
+   [
+    "Email",
+    "text"
+   ],
+   [
+    "What is your current country",
+    "text"
+   ],
+   [
+    "input",
+    "text"
+   ]
+  ]
+ },
+ "maxlengths": {
+  "n": 7,
+  "more": true,
+  "items": [
+   [
+    "First Name",
+    255
+   ],
+   [
+    "Last Name",
+    255
+   ],
+   [
+    "Email",
+    255
+   ],
+   [
+    "Phone",
+    255
+   ],
+   [
+    "LinkedIn Profile",
+    255
+   ],
+   [
+    "What's the name you'd prefer",
+    255
+   ]
+  ],
+  "min": 255
+ },
+ "iframe_srcs": {
+  "n": 0,
+  "more": false,
+  "items": [],
+  "long": 0
+ },
+ "captcha": false
+}

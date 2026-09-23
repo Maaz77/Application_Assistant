@@ -36,6 +36,7 @@ class Report:
     started: datetime
     results: list[JobResult] = field(default_factory=list)
     anomalies: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     recovered: list[str] = field(default_factory=list)
     stopped: str | None = None
 
@@ -83,6 +84,8 @@ class Report:
             L += [f"### {r.label}", f"- Reason: {a.cls} — {a.what}",
                   f"- Where: {a.url or r.url} · \"{a.title}\" · page {a.page} · {a.stage}", f"- Folder: {r.folder}", ""]
         L += ["## Queue anomalies", ""] + [f"- {x}" for x in self.anomalies] + [""]
+        if self.warnings:
+            L += ["## Warnings", ""] + [f"- {x}" for x in self.warnings] + [""]
         L += ["## Questions for your Scratch Pad", ""] + self.scratch_questions() + [""]
         L += ["## Timings", ""] + [f"- {r.label}: {r.seconds:.0f} s" for r in self.results]
         return "\n".join(L) + "\n"

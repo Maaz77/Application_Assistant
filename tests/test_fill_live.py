@@ -7,6 +7,7 @@ from pypdf import PdfWriter
 
 from assistant.answers import Policy, Sources, answer_page
 from assistant.blockers import NeedsAttention
+from assistant import tabs
 from assistant.fill import JobCtx, run_pages
 from tests.support import CDP_URL
 
@@ -44,7 +45,7 @@ def test_parked_live(new_browser, fixture_server, api_key, cfg, resume, tmp_path
 
     with new_browser(api_key) as browser:
         browser.open(fixture_server.url(page), "live")
-        ctx = JobCtx(browser=browser, session="live", cdp_url=CDP_URL, resume_pdf=resume, answer_fn=engine,
+        ctx = JobCtx(browser=browser, session="live", book=tabs.TabBook(browser), resume_pdf=resume, answer_fn=engine,
                      baseline={t["id"] for t in chrome.tabs()}, answers_log=tmp_path / "answers.json",
                      shots_dir=tmp_path / "shots", folder=page)
         try:

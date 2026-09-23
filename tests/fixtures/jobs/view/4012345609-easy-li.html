@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Junior C++ Software Engineer | Acme | LinkedIn</title>
+<style>.dc{display:contents}.step{display:none}.step.on{display:block}
+#modal{display:none;position:fixed;inset:40px;background:#fff;border:1px solid #333;padding:16px}#modal.on{display:block}</style></head>
+<body><div id="root" class="dc">
+<nav><input type="text" role="combobox" aria-label="Search" placeholder="Search"> <a href="#">Home</a> <span>0 notifications</span></nav>
+<main id="workspace"><div class="dc"><section>
+  <h1>Junior C++ Software Engineer</h1>
+  <p>Acme · Kildare, Ireland · Hybrid · Full-time. About the job: real-time systems in modern C++ for industrial customers.</p>
+  <button type="button" aria-label="Easy Apply to this job" onclick="document.getElementById('modal').classList.add('on')">Easy Apply</button>
+  <button type="button">Save</button>
+</section></div></main>
+<footer><select aria-label="Select language"><option value="en_US" selected>English (English)</option><option value="it_IT">Italiano (Italian)</option></select></footer>
+<div class="dc"><div id="modal" role="dialog" aria-modal="true" aria-label="Apply to Acme"><form action="/submit" method="post" onsubmit="return false">
+  <div class="step on" id="s1"><fieldset><legend>Willing to relocate?</legend>
+    <label><input type="radio" name="rel" required> Yes</label><label><input type="radio" name="rel"> No</label></fieldset>
+    <button type="button" onclick="go('s2')">Next</button></div>
+  <div class="step" id="s2"><label>Resume <input type="file" id="cv" required></label>
+    <button type="button" onclick="go('s3')">Review</button></div>
+  <div class="step" id="s3"><p>Review your application</p><p>Resume: <span id="rn"></span></p><button type="submit">Submit application</button></div>
+</form></div></div>
+</div>
+<script>document.getElementById('cv').addEventListener('change', e => document.getElementById('rn').textContent = e.target.files[0].name);
+function go(id){document.querySelectorAll('.step').forEach(s=>s.classList.toggle('on',s.id===id))}</script>
+</body></html>

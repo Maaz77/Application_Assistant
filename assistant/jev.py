@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -21,6 +22,9 @@ from assistant.config import Config
 from assistant.guard import TRANSMIT
 
 STRIPPED_PREFIXES = ("JEVMCP_", "TYPESAFE_", "TEXT_MODEL_", "OPENROUTER_")
+# 0.1.5 plus three vendored observer fixes (vendor/*.patch): display:contents wrappers hide nothing; while a
+# modal <dialog> is open only the topmost one's content is listed; opacity-0 native radio/checkbox/file inputs are listed. Stock 0.1.5 cannot see LinkedIn's job card or Easy Apply dialog.
+EXPECTED_PACKAGE_VERSION = "0.1.5+aa6"
 DEFAULT_TIMEOUT = 60.0
 GOAL_TIMEOUT = 300.0
 EXIT_STOPPED = 3
@@ -120,12 +124,20 @@ def apply_env(cfg: Config, key: str, cdp_url: str | None = None) -> None:
     os.environ.update(_applied)
 
 
+def package_version() -> str:
+    from importlib.metadata import version
+    return version("jev-ultrafast-mcp")
+
+
 def load():
     """Import jev_ultrafast_mcp.server (once per process), after apply_env()."""
     global _server
     if _server is None:
         if _applied is None:
             raise RuntimeError("call jev.apply_env() before jev.load()")
+        if package_version() != EXPECTED_PACKAGE_VERSION:
+            raise RuntimeError(f"jev-ultrafast-mcp {package_version()} is installed; this project needs "
+                               f"{EXPECTED_PACKAGE_VERSION} from vendor/ (see README, Setup)")
         from jev_ultrafast_mcp import server
         _server = server
     return _server
@@ -180,11 +192,13 @@ class Jev:
         with open(self.calls_log, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
-    def call(self, name: str, **kwargs: Any) -> str:
+    def call(self, name: str, *, _timeout: float | None = None, **kwargs: Any) -> str:
         """getattr(server, name)(**kwargs) on the worker thread. A hung call cannot be cancelled: on timeout
-        the report is written and the process exits 3 without running exit hooks (the job's tab stays open)."""
+        the report is written and the process exits 3 without running exit hooks (the job's tab stays open).
+        `_timeout` overrides the default for one call (preflight's first connection waits for Chrome's
+        "Allow remote debugging?" prompt, which a person has to click)."""
         fn = getattr(self.server, name)
-        timeout = self.timeouts[1] if name == "browser_goal" else self.timeouts[0]
+        timeout = _timeout or (self.timeouts[1] if name == "browser_goal" else self.timeouts[0])
         t0 = time.monotonic()
         future = _executor().submit(fn, **kwargs)
         try:
@@ -196,6 +210,13 @@ class Jev:
                 if self.on_timeout:
                     self.on_timeout(msg)
             finally:
+                # os._exit skips interpreter shutdown, including flushing stdout: with output redirected to a
+                # file, every line of the run would be lost (live run, 2026-09-23).
+                for stream in (sys.stdout, sys.stderr):
+                    try:
+                        stream.flush()
+                    except Exception:  # noqa: BLE001 - exiting anyway
+                        pass
                 os._exit(EXIT_STOPPED)
         except Exception as exc:  # noqa: BLE001 - a raising function is reported like an error result
             text = f"error({type(exc).__name__}): {exc}"
@@ -203,8 +224,8 @@ class Jev:
         self._log(name, kwargs, text, int((time.monotonic() - t0) * 1000))
         return text
 
-    def checked(self, name: str, **kwargs: Any) -> str:
-        text = self.call(name, **kwargs)
+    def checked(self, name: str, *, _timeout: float | None = None, **kwargs: Any) -> str:
+        text = self.call(name, _timeout=_timeout, **kwargs)
         if text.startswith(ERROR_PREFIXES):
             raise JevError(text)
         return text
@@ -214,8 +235,8 @@ class Jev:
     def doctor(self) -> dict:
         return json.loads(self.checked("browser_doctor"))
 
-    def open(self, url: str, session: str) -> str:
-        return self.checked("browser_open", url=url, session=session)
+    def open(self, url: str, session: str, *, timeout: float | None = None) -> str:
+        return self.checked("browser_open", url=url, session=session, _timeout=timeout)
 
     def observe(self, session: str, *, mode: str = "full", include_json: bool = True,
                 include_text: bool = True) -> str:
@@ -254,8 +275,9 @@ class Jev:
         return self.call("browser_goal", goal=goal, session=session, max_steps=max_steps, verify=verify,
                          verbose=True)
 
-    def tabs(self, session: str, action: str = "list", *, target_id: str = "", url: str = "about:blank") -> str:
-        return self.checked("browser_tabs", session=session, action=action, target_id=target_id, url=url)
+    def tabs(self, session: str, action: str = "list", *, target_id: str = "", url: str = "about:blank",
+             index: int = -1) -> str:
+        return self.checked("browser_tabs", session=session, action=action, index=index, target_id=target_id, url=url)
 
     def close(self, session: str) -> str:
         return self.checked("browser_close", session=session)

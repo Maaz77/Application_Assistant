@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Junior C++ Software Engineer | Acme | LinkedIn</title>
+<style>.dc{display:contents}.step{display:none}.step.on{display:block}dialog{width:640px}dialog::backdrop{background:rgba(0,0,0,.6)}</style></head>
+<body>
+<nav><input type="text" role="combobox" aria-label="Search" placeholder="Search"> <a href="#">Home</a> <span>0 notifications</span></nav>
+<main id="workspace"><div class="dc"><section>
+  <h1>Junior C++ Software Engineer</h1>
+  <p>Acme · Kildare, Ireland · Hybrid · Full-time. About the job: real-time systems in modern C++ for industrial customers across Europe.</p>
+  <button type="button" aria-label="Easy Apply to this job" onclick="setTimeout(() => document.getElementById('ea').showModal(), 1500)">Easy Apply</button>
+  <button type="button">Save the job</button>
+  <label><input type="checkbox" role="switch" checked> Set alert for similar jobs as Junior C++ Software Engineer</label>
+</section></div></main>
+<footer><select aria-label="Select language"><option value="en_US" selected>English (English)</option><option value="it_IT">Italiano (Italian)</option></select></footer>
+<div class="dc"><dialog id="ea" aria-labelledby="dialog-header"><form action="/submit" method="post" onsubmit="return false">
+  <h2 id="dialog-header">Apply to Acme</h2><button type="button" aria-label="Dismiss" onclick="document.getElementById('save').showModal()">x</button>
+  <div class="step on" id="s1"><h3>Contact info</h3>
+    <label for="em">Email address*</label><select id="em" required><option>abbaszadehmohammadamin@yahoo.com</option></select>
+    <label for="cc">Phone country code*</label><select id="cc" required><option value="it">Italy (+39)</option><option value="ie">Ireland (+353)</option></select>
+    <label for="ph">Mobile phone number*</label><input id="ph" type="tel" required value="351 935 8813">
+    <button type="button" aria-label="Continue to next step" onclick="go('s2')">Next</button></div>
+  <div class="step" id="s2"><h3>Resume*</h3><p>Select or upload a resume in DOC, DOCX, or PDF format</p>
+    <div id="cards"><div role="radio" aria-label="Amin_Old-Company_Old-Role.pdf" aria-checked="true" tabindex="0" onclick="pick(this)">PDF Amin_Old-Company_Old-Role.pdf 9/8/2026</div></div>
+    <button type="button" id="up">Upload resume</button>
+    <button type="button" aria-label="Continue to next step" onclick="go('q')">Next</button></div>
+  <div class="step" id="q"><h3>Additional Questions</h3>
+    <fieldset><legend>Have you completed the following level of education: Bachelor's Degree?*</legend>
+      <div role="radio" aria-label="Have you completed the following level of education: Bachelor's Degree" aria-checked="false" tabindex="0" onclick="pickQ(this)">Yes<input type="radio" name="bd" style="display:none"></div>
+      <div role="radio" aria-label="Have you completed the following level of education: Bachelor's Degree" aria-checked="false" tabindex="0" onclick="pickQ(this)">No<input type="radio" name="bd" style="display:none"></div></fieldset>
+    <button type="button" aria-label="Review your application" onclick="go('s3r')">Review</button></div>
+  <div class="step" id="s3r"><h3>Review your application</h3><p>Resume: <span id="rn"></span></p>
+    <button type="submit" aria-label="Submit application">Submit application</button></div>
+</form></dialog></div>
+<dialog id="save"><h3>Save this application?</h3><p>Save to return to this application later.</p>
+  <button type="button" onclick="document.getElementById('save').close();document.getElementById('ea').close()">Discard</button>
+  <button type="button" onclick="document.getElementById('save').close();document.getElementById('ea').close()">Save</button></dialog>
+<script>
+// Like LinkedIn: no <input type=file> in the page; the button creates one and opens the file chooser.
+document.getElementById('up').addEventListener('click', () => {
+  const i = document.createElement('input'); i.type = 'file'; i.accept = '.pdf,.doc,.docx';
+  i.addEventListener('change', () => {
+    const name = i.files[0].name; const c = document.createElement('div');
+    c.setAttribute('role', 'radio'); c.setAttribute('aria-label', name); c.tabIndex = 0; c.onclick = () => pick(c);
+    c.textContent = 'PDF ' + name + ' 9/23/2026'; document.getElementById('cards').prepend(c); pick(c);
+    document.getElementById('rn').textContent = name; });
+  i.click(); });
+function pick(c) { document.querySelectorAll('#cards [role=radio]').forEach(x => x.setAttribute('aria-checked', x === c ? 'true' : 'false')); }
+function pickQ(c) { c.parentNode.querySelectorAll('[role=radio]').forEach(x => x.setAttribute('aria-checked', x === c ? 'true' : 'false')); }
+function go(id){document.querySelectorAll('.step').forEach(s=>s.classList.toggle('on',s.id===id))}</script>
+</body></html>

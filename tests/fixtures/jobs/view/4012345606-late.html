@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Data Engineer | Acme | LinkedIn</title></head><body>
+<nav><input type="text" role="combobox" aria-label="Search" placeholder="Search"> <a href="#">Home</a> <a href="#">Network</a> <a href="#">Jobs</a> <span>0 notifications</span></nav>
+<main id="job"></main>
+<script>
+// Like LinkedIn: the job card is drawn a few seconds after the page has loaded.
+setTimeout(() => { document.getElementById('job').innerHTML =
+  '<h1>Data Engineer</h1><p>Acme · Milan, Italy · Hybrid · Full-time. About the job: build and run data ' +
+  'pipelines for robotics telemetry, own the warehouse models, and work with the ML team on features.</p>' +
+  '<button type="button">Easy Apply</button> <button type="button">Save</button>'; }, 3000);
+</script></body></html>

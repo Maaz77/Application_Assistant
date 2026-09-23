@@ -1,0 +1,28 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Job Application for AI Engineer at Acme</title>
+<style>.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.select__control{display:flex;border:1px solid #999;width:320px}
+.select__value-container{flex:1;padding:4px}.select__input-container input{border:0;width:2px}.tog{width:24px;height:24px}
+.grecaptcha-badge{position:fixed;bottom:14px;right:-186px;width:256px;height:60px}</style></head>
+<body><h1>AI Engineer</h1><p>Remote, Europe</p>
+<button type="button" onclick="document.getElementById('app').scrollIntoView()">Apply</button>
+<p>Acme builds developer tools. We are hiring an AI Engineer to work on agents.</p>
+<form id="app" action="/submit" method="post" onsubmit="return false">
+  <label for="first_name">First Name*</label><input id="first_name" type="text" aria-required="true" required>
+  <label for="email">Email*</label><input id="email" type="text" aria-required="true" required>
+  <div role="group" aria-labelledby="upload-label-resume"><div id="upload-label-resume">Resume/CV*</div>
+    <button type="button" onclick="document.getElementById('resume').click()">Attach</button>
+    <label for="resume" class="vh">Attach</label><input id="resume" type="file" class="vh" required></div>
+  <div role="group" aria-labelledby="upload-label-cover_letter"><div id="upload-label-cover_letter">Cover Letter</div>
+    <button type="button" onclick="document.getElementById('cover_letter').click()">Attach</button>
+    <label for="cover_letter" class="vh">Attach</label><input id="cover_letter" type="file" class="vh"></div>
+  <label id="q1-label" for="q1">Will you now or in the future require sponsorship for a visa?*</label>
+  <div class="select__control"><div class="select__value-container"><div class="select__single-value">No</div>
+    <div class="select__input-container"><input id="q1" role="combobox" aria-labelledby="q1-label" aria-required="true" value=""></div></div>
+    <button type="button" class="tog" aria-label="Toggle flyout"></button></div>
+  <label id="q2-label" for="q2">Gender</label>
+  <div class="select__control"><div class="select__value-container"><div class="select__placeholder">Select...</div>
+    <div class="select__input-container"><input id="q2" role="combobox" aria-labelledby="q2-label" value=""></div></div>
+    <button type="button" class="tog" aria-label="Toggle flyout"></button></div>
+  <button type="submit">Submit application</button>
+</form>
+<div class="grecaptcha-badge"><iframe title="reCAPTCHA" src="/recaptcha/api2/anchor?ar=1&k=test&size=invisible" width="256" height="60"></iframe></div>
+</body></html>

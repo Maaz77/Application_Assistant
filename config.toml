@@ -14,7 +14,7 @@ max_actions = 2000
 max_pages_per_job = 15
 
 [models]                           # OpenRouter slugs
-answer_engine = "qwen/qwen3.8-27b:free"
+answer_engine = "qwen/qwen3.7-flash"
 text_helper = "deepseek/deepseek-chat"
 jev = "jev-latest"
 

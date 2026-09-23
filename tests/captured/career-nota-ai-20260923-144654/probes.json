@@ -1,0 +1,22 @@
+{
+ "required_empty": {
+  "n": 0,
+  "more": false,
+  "items": []
+ },
+ "maxlengths": {
+  "n": 0,
+  "more": false,
+  "items": [],
+  "min": null
+ },
+ "iframe_srcs": {
+  "n": 2,
+  "more": true,
+  "items": [
+   "https://www.google.com/maps/embed/v1/place?key=AIzaSyDr25ObG37Vy2k60TLygm2f2PH9yLOef9M&region=kr&q=place_id:ChIJAcGliB5RqEcRocB8dcsIvCw"
+  ],
+  "long": 0
+ },
+ "captcha": false
+}

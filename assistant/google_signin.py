@@ -8,25 +8,25 @@ from assistant.blockers import NeedsAttention
 from assistant.jev import Jev
 
 
-def sign_in(browser: Jev, session: str, cdp_url: str, email: str, baseline: set[str]) -> None:
+def sign_in(browser: Jev, session: str, book: tabs.TabBook, email: str, baseline: set[str]) -> None:
     """From a page offering Google (or already on accounts.google.com), pick `email` once and return to the site.
     Raises NeedsAttention(signup/credentials) whenever §6.2 says blocker."""
     if not email:
         raise NeedsAttention("credentials", "Google sign-in offered but no google.account_email is configured")
     p = pages.read_page(browser, session)
-    site_tab = tabs.current_tab(browser, session, cdp_url)
+    site_tab = book.current_handle(session)
     popup = None
     if not pages.is_google_page(p):
         btn = pages.google_button(p)
         if btn is None:
             raise NeedsAttention("credentials", "sign-in wall without a Google option")
-        before = tabs.tab_ids(cdp_url)
+        before = book.handles()
         browser.act([{"op": "click", "ref": btn.ref}, {"op": "wait_for_load", "timeout_ms": 20000}],
                       session, p.table, stop_on_error=False)
-        new = tabs.tab_ids(cdp_url) - before - baseline
+        new = book.handles() - before - baseline
         if len(new) == 1:                                   # Google opened a popup window
             popup = new.pop()
-            browser.tabs(session, "switch", target_id=popup)
+            book.switch(session, popup)
         p = pages.read_page(browser, session)
     if not pages.is_google_page(p):
         return _back_on_site(browser, session)            # already signed in: Google returned at once
@@ -39,13 +39,13 @@ def sign_in(browser: Jev, session: str, cdp_url: str, email: str, baseline: set[
                   session, p.table, stop_on_error=False)
     if popup:
         for _ in range(40):                                  # the popup closes itself after the choice
-            if popup not in tabs.tab_ids(cdp_url):
+            if popup not in book.handles():
                 break
             time.sleep(0.25)
         else:
             q = pages.read_page(browser, session)
             raise NeedsAttention("credentials", pages.google_blocker(q) or "a second Google click is needed")
-        browser.tabs(session, "switch", target_id=site_tab)
+        book.switch(session, site_tab)
     else:
         q = pages.read_page(browser, session)
         if pages.is_google_page(q):

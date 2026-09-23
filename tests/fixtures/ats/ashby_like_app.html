@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Data Scientist @ Acme</title>
+<style>.grecaptcha-badge{position:fixed;bottom:14px;right:-186px;width:256px;height:60px}</style></head><body>
+<h1>Data Scientist</h1><p>Location London. Employment Type Full time. Location Type Hybrid. Department Engineering and Product.</p>
+<div role="tablist"><a role="tab" href="ashby_like.html">Overview</a><a role="tab" href="#">Application</a></div>
+<div id="app">Fetching application form</div>
+<div class="grecaptcha-badge"><iframe title="reCAPTCHA" src="/recaptcha/api2/anchor?ar=1&k=test&size=invisible" width="256" height="60"></iframe></div>
+<script>setTimeout(() => { document.getElementById('app').innerHTML =
+  '<form action="/submit" method="post" onsubmit="return false">' +
+  '<label for="n">Name*</label><input id="n" type="text" required>' +
+  '<label for="e">Email*</label><input id="e" type="email" required>' +
+  '<label for="r">Resume*</label><input id="r" type="file" required>' +
+  '<fieldset><legend>How did you hear about Acme?*</legend><label><input type="radio" name="h" style="opacity:0;width:24px;height:24px" required> Job board</label><label><input type="radio" name="h" style="opacity:0;width:24px;height:24px"> Referral</label></fieldset>' +
+  '<label for="w">Why Acme, and why now?</label><textarea id="w"></textarea>' +
+  '<button type="submit">Submit Application</button></form>'; }, 2500);</script>
+</body></html>

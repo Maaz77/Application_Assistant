@@ -27,7 +27,7 @@ Pick 3–5 real application pages: one LinkedIn Easy Apply modal (open it yourse
 .venv/bin/python -m assistant capture "https://boards.greenhouse.io/<company>/jobs/<id>"
 ```
 
-This saves the element table, page text and a screenshot to `tests/captured/<host>-<ts>/`, and never clicks or types. Then run the classifier over them:
+This waits up to 10 s for the page to draw its content, then saves the element table, page text and a screenshot to `tests/captured/<host>-<ts>/`. It never clicks or types, and the captured tab stays open in your Chrome afterwards. Then run the classifier over them:
 
 ```bash
 .venv/bin/pytest -q tests/test_pages_unit.py -k captured

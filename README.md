@@ -15,10 +15,17 @@ Build spec (v2): [application_assistant_build_spec.md](application_assistant_bui
    ```bash
    cd Tools/Application_Assistant
    /opt/homebrew/bin/python3 -m venv .venv
-   .venv/bin/pip install "jev-ultrafast-mcp==0.1.5" httpx "pydantic>=2" pypdf python-dotenv numbers-parser pytest
+   .venv/bin/pip install vendor/jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl httpx "pydantic>=2" pypdf python-dotenv numbers-parser pytest
    ```
 
-   Once Poetry works again, `poetry install` does the same from `pyproject.toml`.
+   The browser package is a **patched 0.1.5** kept in `vendor/`, with fixes found on the live sites:
+   - content inside `display: contents` wrappers becomes visible (LinkedIn's job card);
+   - only the topmost modal dialog is read (Easy Apply, and its "Save this application?" prompt);
+   - custom-styled `opacity: 0` radios, checkboxes and file inputs are listed;
+   - ARIA radios and checkboxes report their state;
+   - the resume can be uploaded through a file-chooser button (LinkedIn has no file input).
+
+   The changes are in `vendor/jev_ultrafast_mcp-0.1.5+aa6.patch`, and preflight refuses to run on the stock package. Once Poetry works again, `poetry install` does the same from `pyproject.toml`.
 
 2. **OpenRouter key.** Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY=`. This is the only secret, and `.env` is git-ignored. Keep some credit on the account: each form page costs one answer-engine call plus the page-filling model's decisions.
 
@@ -104,10 +111,12 @@ Each run writes `runs/<YYYYMMDD-HHMMSS>/`:
 
 `python -m assistant tripwire` proves this on local fixture pages. `--live` also runs the model tripwire, which costs a few OpenRouter calls.
 
-## Known limits (jev-ultrafast-mcp 0.1.5)
+## Known limits (jev-ultrafast-mcp 0.1.5+aa6)
 
 See [DISCOVERY.md](DISCOVERY.md):
 - Inputs without a `type` attribute are invisible to the server, so such a required field ends in Needs-Attention.
+- Chrome asks you to **allow** each new remote-debugging connection in `chrome://inspect` mode. If nobody clicks Allow within 60 s, the run stops with exit 3.
+- Workday and similar sites need an account. The program tries your Google one-click sign-in; if the site then asks to register or accept terms, the job goes to Needs-Attention.
 - Read-only date pickers can't be set.
 - Script results are capped at 200 characters, so probes return counts plus the first items.
 

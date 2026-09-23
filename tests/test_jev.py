@@ -75,10 +75,12 @@ def test_a_hung_call_writes_the_report_and_exits_3(tmp_path):
             open({str(marker)!r}, "w").write(msg)
         j = jev.Jev(config.load(), "", server=Stub(), on_timeout=write_report, timeouts=(0.5, 0.5),
                     calls_log=__import__("pathlib").Path({str(tmp_path / "calls.jsonl")!r}))
+        print("before the hang")                 # must survive os._exit when stdout is a pipe/file
         j.call("browser_doctor")
         print("not reached")
     """)
     assert r.returncode == 3 and "not reached" not in r.stdout
+    assert "before the hang" in r.stdout
     assert marker.read_text().startswith("browser_doctor did not return within")
     assert not hook.exists()                                     # os._exit skipped the exit hooks (the tab stays)
     assert '"timeout: ' in (tmp_path / "calls.jsonl").read_text()
@@ -119,3 +121,22 @@ def test_contract_check_reports_a_changed_signature():
         pass
     sigs = dict(jev.server_signatures(), browser_goal=inspect.signature(browser_goal))
     assert differences(sigs) and "browser_goal" in differences(sigs)[0]
+
+
+def test_the_patched_package_is_installed():
+    assert jev.package_version() == jev.EXPECTED_PACKAGE_VERSION == "0.1.5+aa6"
+    wheel = ROOT / "vendor" / "jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl"
+    assert wheel.exists() and (ROOT / "vendor" / "jev_ultrafast_mcp-0.1.5+aa6.patch").exists()
+
+
+def test_load_refuses_an_unpatched_package():
+    r = child("""
+        from assistant import config, jev
+        jev.package_version = lambda: "0.1.5"
+        jev.apply_env(config.load(), "k")
+        try:
+            jev.load()
+        except RuntimeError as e:
+            print("refused:", e)
+    """)
+    assert r.returncode == 0 and "refused: jev-ultrafast-mcp 0.1.5 is installed" in r.stdout, r.stderr

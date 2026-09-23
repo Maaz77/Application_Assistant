@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Callable
 
 from assistant import pages, tabs
@@ -89,7 +90,7 @@ AnswerFn = Callable[[Page], PageAnswers]
 class JobCtx:
     browser: Jev
     session: str
-    cdp_url: str
+    book: tabs.TabBook
     resume_pdf: Path
     answer_fn: AnswerFn
     baseline: set[str]
@@ -111,7 +112,8 @@ class JobCtx:
     sleep: Callable[[float], None] = time.sleep
 
     def read(self) -> Page:
-        self.last = pages.read_page(self.browser, self.session)
+        """The current page, after it has drawn its content (pages.settle)."""
+        self.last = pages.settle(lambda: pages.read_page(self.browser, self.session), self.sleep)
         return self.last
 
 
@@ -137,8 +139,11 @@ def resume_input(p: Page, resume_step: bool) -> str | None:
     """C25: the file input labelled resume/CV; a lone file input on a resume step; several unlabelled → blocker."""
     files = [e for e in p.elements if e.role == "file"]
     if not files:
-        return None
-    named = [e for e in files if pages.RESUME_RE.search(e.name) or pages.RESUME_RE.search(e.context)]
+        # No file input: an "Upload resume" button that opens the file chooser (LinkedIn Easy Apply, aa6).
+        triggers = [e for e in p.elements if e.role == "button" and pages.UPLOAD_TRIGGER_RE.search(e.name)
+                    and not is_transmit(e.name)]
+        return triggers[0].ref if resume_step and len(triggers) == 1 else None
+    named = [e for e in files if any(pages.RESUME_RE.search(x) for x in (e.name, e.label, e.context))]
     if named:
         return named[0].ref
     if len(files) == 1 and resume_step:
@@ -152,17 +157,39 @@ def _required_file_labels(p: Page) -> list[str]:
     return [i[0] for i in p.required_empty.get("items", []) if len(i) > 1 and i[1] == "file"]
 
 
-def upload_resume(ctx: JobCtx, p: Page) -> None:
+def upload_resume(ctx: JobCtx, p: Page) -> bool:
+    """Upload the tailored resume on this page if it has a resume input. True if the resume is now in place."""
     ref = resume_input(p, bool(pages.RESUME_RE.search(p.text)))
     if ref is None:
-        return
+        return False
     el = next(e for e in p.elements if e.ref == ref)
-    if ctx.resume_pdf.name[:30] in (el.value or ""):
-        return
+    stem = ctx.resume_pdf.name[:30]
+    if stem in (el.value or "") or (el.role != "file" and stem in p.text):
+        select_resume_card(ctx, p)
+        return True
     out = ctx.browser.act([{"op": "upload", "ref": ref, "path": str(ctx.resume_pdf)}], ctx.session, p.table)
     if "1/1 ops ok" not in out:
         raise NeedsAttention("broken_form", f"resume upload failed: {out.splitlines()[1:2]}")
     ctx.filled_count += 1
+    select_resume_card(ctx, ctx.read())
+    return True
+
+
+def is_resume_question(q: Question) -> bool:
+    """A question the resume upload answers: about the resume/CV, or choosing among resume files (LinkedIn's
+    "Resume*" cards, live 2026-09-23)."""
+    return bool(pages.RESUME_RE.search(q.question)) and not re.search(r"cover", q.question, re.I) \
+        or any(pages.RESUME_FILE_RE.search(o or "") for o in (q.options or []))
+
+
+def select_resume_card(ctx: JobCtx, p: Page) -> None:
+    """LinkedIn lists earlier resumes as radio cards named by file name: make sure the tailored one is the
+    selected card (never an older one)."""
+    cards = [e for e in p.elements if e.role == "radio" and pages.RESUME_FILE_RE.search(e.name)]
+    ours = [e for e in cards if e.name.startswith(ctx.resume_pdf.name[:30])]
+    if ours and not ours[0].checked:
+        ctx.browser.act([{"op": "toggle", "ref": ours[0].ref, "state": True}], ctx.session, p.table,
+                        stop_on_error=False)
 
 
 def type_long(ctx: JobCtx, p: Page, q: Question) -> None:
@@ -186,7 +213,8 @@ def type_long(ctx: JobCtx, p: Page, q: Question) -> None:
 
 
 def _goal_items(pa: PageAnswers, p: Page) -> list[Question]:
-    """Answers for the one goal: non-null, not wrapper-typed, differing from the current value."""
+    """Answers still to set: non-null, not wrapper-typed long text, differing from the current value. Most are then
+    set directly (direct_op); the rest go to the one page goal."""
     by_ref = {e.ref: e for e in p.elements}
     items = []
     for q in pa.questions:
@@ -202,9 +230,14 @@ def _goal_items(pa: PageAnswers, p: Page) -> list[Question]:
     return items
 
 
+TYPEABLE = {"textbox", "searchbox", "spinbutton"}
+
+
 def direct_op(q: Question, p: Page) -> dict | None:
-    """User decision 2026-09-23: controls with a known ref are set by the wrapper, no model —
-    `toggle` for a radio/checkbox option_ref, `select` for a native <select> (a combobox with options)."""
+    """User decisions 2026-09-23: controls with a known ref are set by the wrapper, no model —
+    `toggle` for a radio/checkbox option_ref, `select` for a native <select> (a combobox with options), and
+    `type` for a text answer into a plain field the observer marks editable (textbox, searchbox, number input;
+    not read-only, not a custom combobox). The page goal is left for custom widgets."""
     by_ref = {e.ref: e for e in p.elements}
     opt = by_ref.get(q.option_ref or "")
     if opt is not None and opt.role in {"radio", "checkbox", "switch"}:
@@ -213,6 +246,8 @@ def direct_op(q: Question, p: Page) -> dict | None:
     if el is not None and el.role in {"combobox", "listbox"} and el.options:
         if any(pages.norm_label(o.label) == pages.norm_label(q.answer) for o in el.options):
             return {"op": "select", "ref": el.ref, "value": q.answer}
+    if el is not None and el.role in TYPEABLE and el.editable and q.kind != "file" and q.answer is not None:
+        return {"op": "type", "ref": el.ref, "text": q.answer, "clear": True, "submit": False}
     return None
 
 
@@ -220,6 +255,14 @@ def set_direct(ctx: JobCtx, p: Page, qs: list[Question]) -> None:
     ops = [direct_op(q, p) for q in qs]
     if ops:
         ctx.browser.act(ops, ctx.session, p.table, stop_on_error=False)
+
+
+def _other_resume_card(q: Question, p: Page, ctx: JobCtx) -> bool:
+    """An answer that would select an older resume card instead of the tailored resume."""
+    by_ref = {e.ref: e for e in p.elements}
+    opt = by_ref.get(q.option_ref or "")
+    name = opt.name if opt is not None else (q.answer or "")
+    return bool(pages.RESUME_FILE_RE.search(name)) and not name.startswith(ctx.resume_pdf.name[:30])
 
 
 def _wrapper_types(q: Question) -> bool:
@@ -289,7 +332,7 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
     for label in _required_file_labels(p):
         if re.search(r"cover", label, re.I) and not pages.RESUME_RE.search(label):
             raise NeedsAttention("broken_form", f"required cover-letter file: {label!r}")
-    upload_resume(ctx, p)                                                  # 1
+    resume_in_place = upload_resume(ctx, p)                                # 1
     for q in pa.questions:                                                       # 2
         if q.answer is not None and _wrapper_types(q):
             type_long(ctx, p, q)
@@ -298,7 +341,7 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
     for q in pa.questions:
         if q.source == "linkedin-prefill" and q.answer is not None:
             ctx.prefills.append((q.question, q.answer))
-    items = _goal_items(pa, p)
+    items = [q for q in _goal_items(pa, p) if not _other_resume_card(q, p, ctx)]
     direct = [q for q in items if direct_op(q, p)]
     goal_items = [q for q in items if q not in direct]
     set_direct(ctx, p, direct)                                             # 3a: no model
@@ -311,16 +354,20 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
             ctx.attempts.fail("broken_form", "the page goal moved off the page before it was filled")
             raise _Refill(p.url)
     ctx.optional_empty += [_open_q(q) for q in uncovered_optional(pa)]
-    if missing := uncovered_required(pa):                                        # D2
+    missing = [q for q in uncovered_required(pa) if not (resume_in_place and is_resume_question(q))]
+    if missing:                                                                  # D2
         raise NeedsAttention("unanswered", f"{len(missing)} required question(s) have no answer in the files",
                              questions=[_open_q(q) for q in missing])
     if items:                                                                    # read-back
         q = ctx.read()
         bad = mismatches(items, q, p.text)
-        if bad:                                   # one retry: direct ops again, then one goal per field
-            set_direct(ctx, q, [b for b in bad if direct_op(b, q)])
+        if bad:
+            # One retry: a toggle or select again (idempotent); everything else — including a directly typed
+            # value the page rewrote or refused (masks, date widgets) — gets one goal for that field alone.
+            again = [b for b in bad if (direct_op(b, q) or {}).get("op") in ("toggle", "select")]
+            set_direct(ctx, q, again)
             for b in bad:
-                if not direct_op(b, q):
+                if b not in again:
                     run_goal(ctx, [b], q)
                     q = ctx.read()
             q = ctx.read()
@@ -349,22 +396,66 @@ def log_answers(ctx: JobCtx, p: Page, pa: PageAnswers) -> None:
     ctx.answers_log.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
+# ------------------------------------------------------------------ new tabs after a click
+
+ENTRY_TAB_WAIT = 8          # s: LinkedIn may open the company site a few seconds after the Apply click
+CLICK_TAB_WAIT = 3          # s: after an advance click (an interstitial "Continue" can open the site too)
+
+
+def page_shape(p: Page) -> tuple:
+    """What a click is expected to change: the page, its real fields and its advance buttons."""
+    return (urlparse(p.url)._replace(query="", fragment="").geturl(),
+            tuple(sorted((e.role, e.name) for e in pages.real_fields(p))),
+            tuple(sorted(e.name for e in pages.advance_buttons(p))))
+
+
+def follow_new_tab(ctx: JobCtx, known: set[str], seconds: int, before: Page | None = None) -> bool:
+    """After a click: if a new tab appears within `seconds`, hand the job off to it (and close the tab we
+    were on, unless it is the user's). Stops waiting as soon as this tab has visibly changed from `before`
+    (the page at the click) and shows a real form field or an advance button, or shows confirmation text.
+    LinkedIn opens its Easy Apply dialog a moment after the click, over a page that already has a switch
+    (live 2026-09-23), so "any field" is not enough. Returns True if the job moved to a new tab."""
+    shape = page_shape(before) if before is not None else None
+    for i in range(seconds + 1):
+        if ctx.book.handles() - known - ctx.baseline:
+            ctx.book.hand_off(ctx.session, ctx.baseline, known)
+            return True
+        if i == seconds:
+            break
+        p = pages.read_page(ctx.browser, ctx.session)
+        if pages.is_alarm(p):
+            return False
+        if (pages.real_fields(p) or pages.has_advance(p)) and (shape is None or page_shape(p) != shape):
+            return False
+        ctx.sleep(1.0)
+    return False
+
+
 # ------------------------------------------------------------------ advance and final (§4.3, §4.4)
 
 def advance(ctx: JobCtx, p: Page) -> str:
     """'moved' | 'final' | 'stuck'."""
     ctx.stage = "advance"
     before = _field_fingerprint(p)
+    known = ctx.book.handles()
     btns = pages.advance_buttons(p)
     if len(btns) == 1:
-        ctx.browser.act([{"op": "click", "ref": btns[0].ref}, {"op": "wait_for_load", "timeout_ms": 20000}],
-                          ctx.session, p.table, stop_on_error=False)
+        out = ctx.browser.act([{"op": "click", "ref": btns[0].ref}, {"op": "wait_for_load", "timeout_ms": 20000}],
+                              ctx.session, p.table, stop_on_error=False)
+        if STALE.search(out.split("\n", 2)[1] if "\n" in out else out):     # re-rendered: re-map by name, once
+            fresh = ctx.read()
+            again = [b for b in pages.advance_buttons(fresh) if b.name == btns[0].name]
+            if len(again) == 1:
+                ctx.browser.act([{"op": "click", "ref": again[0].ref}, {"op": "wait_for_load", "timeout_ms": 20000}],
+                                ctx.session, fresh.table, stop_on_error=False)
     else:
         g = parse_goal(ctx.browser.goal(NEXT_STEP_GOAL, ctx.session, max_steps=4))
         check_goal_alarm(g, p.table)
         blocked = blocked_transmit(g, p.table)
         if blocked and is_strong_transmit(blocked):
             return "final"
+    if follow_new_tab(ctx, known, CLICK_TAB_WAIT, p):  # e.g. LinkedIn's "Continue" to the company site
+        return "moved"
     q = ctx.read()
     if pages.is_alarm(q):
         raise StopRun(f"ALARM: confirmation text after advance on {q.url}")
@@ -395,16 +486,19 @@ def run_pages(ctx: JobCtx) -> Parked:
             if v.kind in ("google", "google_wall"):
                 from assistant.google_signin import sign_in
                 ctx.stage = "google sign-in"
-                sign_in(ctx.browser, ctx.session, ctx.cdp_url, ctx.google_email, ctx.baseline)
+                sign_in(ctx.browser, ctx.session, ctx.book, ctx.google_email, ctx.baseline)
                 continue
             if v.kind == "cookie":
                 ctx.browser.act([{"op": "click", "ref": v.ref}], ctx.session, p.table, stop_on_error=False)
                 continue
             if v.kind == "ats_entry":
                 ctx.stage = "entry"
-                known = tabs.tab_ids(ctx.cdp_url)
-                entry_click(ctx.browser, ctx.session, p.table)
-                tabs.hand_off(ctx.browser, ctx.session, ctx.cdp_url, ctx.baseline, known)
+                known = ctx.book.handles()
+                try:
+                    entry_click(ctx.browser, ctx.session, p.table, reread=lambda: ctx.read().table)
+                except EntryRefused as exc:
+                    raise NeedsAttention("load_failure", f"company-site Apply: {exc}") from exc
+                follow_new_tab(ctx, known, ENTRY_TAB_WAIT, p)
                 continue
             if v.kind == "iframe":
                 iframe_hops += 1

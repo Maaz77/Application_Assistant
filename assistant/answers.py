@@ -70,6 +70,8 @@ FORBIDDEN_GENERATED = re.compile(
     r"salary|compensation|\bpay\b|notice period|start date|availability|visa|sponsor|right to work|authori[sz]ed|"
     r"years of experience|gender|ethnic|race|veteran|disabilit", re.I)
 LONG_TEXT = 300
+TOTAL_YEARS_RE = re.compile(r"\byears?\b.{0,40}\bexperience\b|\bexperience\b.{0,20}\byears?\b", re.I)
+TOOL_YEARS_RE = re.compile(r"\bexperience\b.{0,30}\b(with|in|using|on|of)\s+(?!(the\s+)?(industry|field|workforce)\b)\S", re.I)
 RATE_LIMIT_WAIT = 15.0
 MAX_TOKENS = 8192          # one page of answers; OpenRouter otherwise reserves the model maximum (HTTP 402)
 
@@ -228,12 +230,32 @@ def _limit(q: Question, p: Page, policy: Policy) -> int:
     return policy.free_text_max_chars
 
 
+PLACEHOLDER_RE = re.compile(r"^\s*(select|choose|pick|please select|--|—)\b.*$|^\s*(select|choose)\s*\.{0,3}\s*$", re.I)
+
+
+def _held(e) -> str:
+    """The value a field already holds: a native select's chosen option (not a blank or placeholder option),
+    a custom combobox's shown value (enrich), or a text field's value."""
+    if e is None:
+        return ""
+    if e.options:                                             # native <select>: its value must be non-empty
+        return (e.current or "") if (e.value or "").strip() and not PLACEHOLDER_RE.match(e.current or "") else ""
+    held = (e.current or e.value or "").strip()
+    return "" if PLACEHOLDER_RE.match(held) else held
+
+
 def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today: date) -> list[Question]:
     """Apply §7 checks in place (a failed check sets answer=None with a note).
-    Returns the generated questions whose relies_on/length failed — the caller regenerates them once."""
+    Returns the generated questions whose relies_on/length failed — the caller regenerates them once.
+
+    Live lessons (qwen3.7-flash on LinkedIn, 2026-09-23): a model mislabels which file a quote came from, echoes
+    option lists with typos, and may pick a wrong option ("Austria (+43)" over a prefilled "Italy (+39)"). So:
+    a quote counts if it is in any of the three files (the source is corrected); a choice is judged by what it
+    would set — the field's own options or current value, the targeted radio's own label — not by the echoed list;
+    and a required field that already holds a value keeps it when no valid answer is left."""
     labels = norm(p.text).lower() + " " + " ".join(
-        [norm(e.name).lower() for e in p.elements] + [norm(o.label).lower() for e in p.elements for o in e.options
-                                                       if o.label])
+        [norm(e.name).lower() for e in p.elements] + [norm(e.label).lower() for e in p.elements if e.label]
+        + [norm(o.label).lower() for e in p.elements for o in e.options if o.label])
     by_ref = {e.ref: e for e in p.elements}
     regenerate = []
     for q in pa.questions:
@@ -243,18 +265,37 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
         if q.answer is None:
             continue
         if q.source in ("profile", "job", "resume"):
-            if not q.quote or norm(q.quote) not in norm(src.by_name(q.source)):
-                _drop(q, f"quote not found in {q.source}")
+            if not q.quote:
+                _drop(q, "no quote")
                 continue
-        if q.kind == "choice" and q.options:
-            if not all(norm(o).lower() in labels for o in q.options):
-                _drop(q, "options not on the page")
+            if norm(q.quote) not in norm(src.by_name(q.source)):
+                found = next((n for n in ("profile", "job", "resume") if norm(q.quote) in norm(src.by_name(n))), None)
+                if found is None:
+                    _drop(q, "quote not found in the sources")
+                    continue
+                q.note, q.source = f"quote is from {found}, not {q.source}", found
+        el = by_ref.get(q.ref or "")
+        opt = by_ref.get(q.option_ref or "")
+        if opt is not None and opt.role in {"radio", "checkbox", "switch"}:
+            # the targeted option must be the answer (its label, e.g. "Yes", or its own name)
+            if norm(q.answer).lower() not in {norm(opt.name).lower(), norm(opt.label).lower()}:
+                _drop(q, f"answer {q.answer!r} does not match the option it targets")
                 continue
-            match = [o for o in q.options if norm(o).lower() == norm(q.answer).lower()]
+        elif el is not None and el.options:
+            # a native select: its real options (the table lists the first 40) or its current value decide
+            real = [o.label for o in el.options if o.label] + ([el.current] if el.current else [])
+            match = [o for o in real if norm(o).lower() == norm(q.answer).lower()]
             if not match:
-                _drop(q, "answer is not one of the options")
+                _drop(q, "answer is not one of the field's options")
                 continue
             q.answer = match[0]
+        elif q.kind == "choice" and q.options:
+            # a custom widget: the answer itself must be on the page
+            if norm(q.answer).lower() not in labels:
+                _drop(q, "answer not on the page")
+                continue
+            match = [o for o in q.options if norm(o).lower() == norm(q.answer).lower()]
+            q.answer = match[0] if match else q.answer
         if q.source == "generated":
             if q.kind not in ("text", "longtext") or FORBIDDEN_GENERATED.search(q.question):
                 _drop(q, "generated text not allowed for this question")
@@ -264,6 +305,11 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
                 regenerate.append(q)
                 continue
         elif q.source == "computed":
+            if TOOL_YEARS_RE.search(q.question) or not TOTAL_YEARS_RE.search(q.question):
+                # §7: computed only for *total* years of experience; years with a tool are never guessed
+                # (live 2026-09-23: "years of work experience … with C++?" was offered total years)
+                _drop(q, "computed is only for total years of experience")
+                continue
             if not q.relies_on or not all(src.any_contains(s) for s in q.relies_on):
                 _drop(q, "computed from lines not in the sources")
                 continue
@@ -272,13 +318,19 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
                 _drop(q, f"computed years mismatch (recomputed {years})")
                 continue
         elif q.source == "linkedin-prefill":
-            e = by_ref.get(q.ref or "")
-            current = (e.current or e.value) if e else ""
-            if policy.prefill == "strict" or not current or norm(current) != norm(q.answer):
+            held = _held(el)
+            if policy.prefill == "strict" or not held or norm(held) != norm(q.answer):
                 _drop(q, "pre-fill not kept")
                 continue
         elif q.source is None:
             _drop(q, "no source")
+    if policy.prefill != "strict":
+        for q in pa.questions:
+            # §7: "a pre-filled value the sources do not address → keep it" — also when the model's answer failed
+            held = _held(by_ref.get(q.ref or "")) if q.kind != "file" and q.answer is None else ""
+            if held:
+                q.answer, q.source = held, "linkedin-prefill"
+                q.note = (q.note + "; " if q.note else "") + "kept the value the page already holds"
     return regenerate
 
 

@@ -1,0 +1,20 @@
+[obs#24] https://www.linkedin.com/jobs/view/4460337345/  "Junior C++ Software Engineer | Solas IT Recruitment | LinkedIn"  scroll=0/860  reachable=4/14  (offscreen 10, » = will scroll on act)
+  ! 8 cross-origin frame(s) not readable (https://cs.ns1p.net/u.html?a=1516sqc, https://li.protechts.net/index.html?ts=1790165503182&r_id=AAZcJWLVIloRLOGSeIH4jw%3D%3D&app_id=PXdOjV695v&uc=scraping&d_id=fe637eed44ec769a45d005148ebe9748fa1aa3c47096fe21cac4e1dbeb7fe816)
+e14  btn    You are on the messaging overlay. Press enter to open the list of conversations.
+e15  btn    Open messenger dropdown menu
+e16  btn    Compose message
+e17  btn    You are on the messaging overlay. Press enter to open the list of conversations.
+e6   lnk»   LinkedIn
+e7   cmb*»  Search ▸ ""
+e18  lnk»   new feed updates notifications Home
+e19  lnk»   Network
+e20  lnk»   Jobs
+e21  lnk»   Messaging
+e22  lnk»   Notifications
+e23  btn»   Amin Abbaszadeh Me
+e24  btn»   For Business
+e25  lnk»   Post a job
+text:
+0 notifications
+
+json: {"url": "https://www.linkedin.com/jobs/view/4460337345/", "title": "Junior C++ Software Engineer | Solas IT Recruitment | LinkedIn", "elements": [{"ref": "e14", "role": "button", "name": "You are on the messaging overlay. Press enter to open the list of conversations.", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": "Status is online Messaging You are on the messaging overlay. Press enter to open the list of conver…"}, {"ref": "e15", "role": "button", "name": "Open messenger dropdown menu", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e16", "role": "button", "name": "Compose message", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e17", "role": "button", "name": "You are on the messaging overlay. Press enter to open the list of conversations.", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": "Compose message You are on the messaging overlay. Press enter to open the list of conversations."}, {"ref": "e6", "role": "link", "name": "LinkedIn", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e7", "role": "combobox", "name": "Search", "value": "", "editable": true, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e18", "role": "link", "name": "new feed updates notifications Home", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e19", "role": "link", "name": "Network", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e20", "role": "link", "name": "Jobs", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e21", "role": "link", "name": "Messaging", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e22", "role": "link", "name": "Notifications", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e23", "role": "button", "name": "Amin Abbaszadeh Me", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e24", "role": "button", "name": "For Business", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e25", "role": "link", "name": "Post a job", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}]}

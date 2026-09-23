@@ -17,5 +17,6 @@ Rules:
 8. A pre-filled value that the sources do not address: keep it, `answer` = the current value, `source: "linkedin-prefill"`, `quote: null`. A pre-filled value the sources contradict: correct it.
 9. File inputs: `kind: "file"`, `answer: null`, `source: null`.
 10. For choice questions, `answer` must be one of `options`, copied exactly.
+11. When the form has a separate country-code field, the phone-number field gets the local number only (no "+39"). A field that already holds a value the sources do not contradict keeps that value (`source: "linkedin-prefill"`).
 
 Output only the JSON object.

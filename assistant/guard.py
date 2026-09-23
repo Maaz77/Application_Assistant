@@ -93,6 +93,13 @@ def check(op: dict, table, token: object = None) -> None:
         raise GuardError("tab ops go through browser_tabs (tabs.py), not browser_act")
     if kind in {"nav", "back", "forward"}:
         raise GuardError(f"'{kind}' is not a wrapper op; navigation goes through browser_open")
+    if kind == "upload":
+        # The package clicks a non-input upload target to open its file chooser (aa6): same label rule as a click.
+        label = label_of(op.get("ref", ""), table)
+        if label is None:
+            raise GuardError(f"upload target {op.get('ref')!r} is not in the latest element table")
+        if is_transmit(label):
+            raise GuardError(f"upload on a transmit label: {label!r}")
     if kind == "click":
         label = label_of(op.get("ref", ""), table)
         if label is None:

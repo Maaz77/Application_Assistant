@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from assistant import guard
 from assistant.guard import is_advance, is_entry, is_transmit
+from assistant import probes as probes_mod
 from assistant.jev import Jev, Element, Table, split_json
 
 FORM_ROLES = {"textbox", "searchbox", "combobox", "listbox", "checkbox", "radio", "spinbutton", "switch", "file"}
@@ -30,6 +32,9 @@ LOAD_FAIL_RE = re.compile(r"^\s*(404|500|502|503)\b|page not found|this site can
 COOKIE_RE = re.compile(r"cookie", re.I)
 COOKIE_CHOICES = [r"^\s*reject all\b", r"^\s*only (the )?necessary\b", r"^\s*accept all\b"]  # C24, in order
 RESUME_RE = re.compile(r"resume|résumé|\bcv\b|curriculum", re.I)
+# A button that opens the file chooser for the resume (LinkedIn Easy Apply: no file input until clicked).
+UPLOAD_TRIGGER_RE = re.compile(r"^\s*(upload|attach|add)\b.{0,20}\b(resume|résumé|cv|file|document)\b", re.I)
+RESUME_FILE_RE = re.compile(r"\.(pdf|docx?|rtf|txt)\b", re.I)
 
 
 @dataclass
@@ -58,12 +63,97 @@ def view_text(view: str) -> str:
     return tail.strip() if sep else ""
 
 
+PAGE_PROBES = ("REQUIRED_EMPTY", "MAXLENGTHS", "IFRAME_SRCS", "FILE_LABELS", *sorted(probes_mod.COMBO_VALUES),
+               *sorted(probes_mod.RADIO_OPTIONS))
+
+
 def read_page(browser: Jev, session: str) -> Page:
     view, table = split_json(browser.observe(session))
-    probes = browser.probe(session, "REQUIRED_EMPTY", "MAXLENGTHS", "IFRAME_SRCS")
+    pr = browser.probe(session, *PAGE_PROBES)
+    enrich(table, pr)
     return Page(url=table.url, title=table.title, text=view_text(view), table=table,
-                required_empty=probes["REQUIRED_EMPTY"], maxlengths=probes["MAXLENGTHS"],
-                iframe_srcs=probes["IFRAME_SRCS"], captcha=browser.captcha_present(session))
+                required_empty=pr["REQUIRED_EMPTY"], maxlengths=pr["MAXLENGTHS"],
+                iframe_srcs=pr["IFRAME_SRCS"], captcha=browser.captcha_present(session))
+
+
+def enrich(table: Table, pr: dict) -> None:
+    """Add what the element table cannot show, from the read-only probes (live ATS findings, 2026-09-23):
+
+    - file inputs get their group label in `label` (Greenhouse names both inputs "Attach"; the group says
+      "Resume/CV" / "Cover Letter");
+    - custom comboboxes (no <option> list, empty input value, e.g. react-select) get the value they show in
+      `current`, so read-back and prefill checks can see a choice.
+
+    Both are matched to the table by DOM order and applied only when the counts agree (else left as is)."""
+    files = [e for e in table.elements if e.role == "file"]
+    fl = pr.get("FILE_LABELS") or {}
+    if files and fl.get("n") == len(files) and not fl.get("more"):
+        for e, (label, ident) in zip(files, fl["items"]):
+            e.label = label + (f" ({ident})" if ident else "")
+    radios = [e for e in table.elements if e.role == "radio"]
+    rchunks = sorted((pr[k] for k in probes_mod.RADIO_OPTIONS if pr.get(k)), key=lambda c: c.get("o", 0))
+    if radios and rchunks and rchunks[0].get("total") == len(radios):
+        opt: dict[int, str] = {}
+        for c in rchunks:
+            if not c.get("more"):
+                opt.update({c["o"] + i: v for i, v in enumerate(c["items"])})
+        for i, e in enumerate(radios):
+            if opt.get(i) and norm_label(opt[i]) != norm_label(e.name) and not e.label:
+                e.label = opt[i]                          # the option ("Yes") when the name is the question
+    combos = [e for e in table.elements if e.role == "combobox"]
+    chunks = sorted((pr[k] for k in probes_mod.COMBO_VALUES if pr.get(k)), key=lambda c: c.get("o", 0))
+    if not combos or not chunks or chunks[0].get("total") != len(combos):
+        return
+    shown: dict[int, str] = {}
+    for c in chunks:
+        if c.get("more"):
+            continue                                       # a trimmed chunk: its indexes stay unknown
+        shown.update({c["o"] + i: v for i, v in enumerate(c["items"])})
+    for i, e in enumerate(combos):
+        if i in shown and not e.options and not (e.value or "").strip() and shown[i]:
+            e.current = shown[i]
+
+
+SETTLE_SECONDS = 10.0
+# Site chrome, not application questions: a site-wide search box (LinkedIn's nav bar), a site language picker
+# (LinkedIn's footer "Select language", which always holds a value) and LinkedIn's "Set alert for similar jobs"
+# switch on the job page (live 2026-09-23; toggling it would create a job alert). Kept narrow on purpose.
+SITE_CHROME_RE = re.compile(r"^\s*(search\b|select language\s*$|set alert for similar jobs\b)", re.I)
+SETTLE_TEXT = 200          # chars: a rendered job or form page has far more text than a bare navigation bar
+
+
+def real_fields(p: Page) -> list[Element]:
+    """Form fields other than a site-wide search box."""
+    return [e for e in fields(p) if not (e.role == "searchbox" or SITE_CHROME_RE.match(e.name))]
+
+
+LOADING_RE = re.compile(r"\b(fetching|loading)\b[^.\n]{0,40}\b(form|application|questions|job|content)\b"
+                        r"|\bplease wait\b|\bloading\s*(\.\.\.|…)", re.I)
+
+
+def unsettled(p: Page) -> bool:
+    """A snapshot taken before a client-rendered page drew its content: no fields, no button we act on, no captcha
+    or alarm text, and almost no page text (LinkedIn job pages, for a second after loading) — or no fields and a
+    loading message (Ashby: "Fetching application form", live 2026-09-23)."""
+    if real_fields(p) or p.captcha or is_alarm(p):
+        return False
+    if LOADING_RE.search(p.text):
+        return True
+    if len(p.text.strip()) >= SETTLE_TEXT:
+        return False
+    return not any(is_entry(e.name) or is_advance(e.name) or is_transmit(e.name) or GOOGLE_BUTTON_RE.search(e.name)
+                   or GUEST_RE.search(e.name) for e in buttons(p))
+
+
+def settle(read, sleep=time.sleep, seconds: float = SETTLE_SECONDS) -> Page:
+    """Re-read until the page is no longer `unsettled`, at most `seconds` (one read per second)."""
+    p = read()
+    waited = 0.0
+    while unsettled(p) and waited < seconds:
+        sleep(1.0)
+        waited += 1.0
+        p = read()
+    return p
 
 
 def page_from_capture(observe_text: str) -> Page:
@@ -98,13 +188,19 @@ def find_button(p: Page, pattern: str | re.Pattern) -> Element | None:
 # ------------------------------------------------------------------ §6.5 flags
 
 def has_fields(p: Page) -> bool:
-    return bool(fields(p))
+    """§6.5, minus site chrome (a search box or language picker is not an application form)."""
+    return bool(real_fields(p))
+
+
+TRANSMIT_LINK_MAX = 40   # a link whose long label merely mentions "Easy Apply" (a job card) is not a submit
 
 
 def has_transmit(p: Page) -> bool:
+    """§6.5, with one live-page refinement: links count only with a short label (LinkedIn's "similar jobs" cards
+    are links whose long text ends in "Easy Apply", live 2026-09-23). The guard still blocks clicking them."""
     no_fields = not has_fields(p)
     return any(is_transmit(e.name) and not (no_fields and is_entry(e.name)) for e in buttons(p)
-               if e.role in {"button", "link"})
+               if e.role == "button" or (e.role == "link" and len(e.name) <= TRANSMIT_LINK_MAX))
 
 
 def advance_buttons(p: Page) -> list[Element]:
@@ -210,18 +306,39 @@ def cookie_choice(p: Page) -> Element | None:
 
 
 def ats_entry_button(p: Page) -> Element | None:
-    """An Apply button on a page without form fields (an ATS job page)."""
+    """An Apply button on a page without form fields (an ATS job page). A button covered by a dialog
+    (occluded) is not offered: the dialog in front is the next step, not a second Apply."""
     if has_fields(p):
         return None
-    hits = [e for e in buttons(p) if e.role in {"button", "link"} and is_entry(e.name)]
-    return hits[0] if len(hits) == 1 else None
+    return single_entry([e for e in buttons(p) if not e.occluded])
+
+
+def single_entry(elements: list[Element]) -> Element | None:
+    """The one Apply control among `elements`. A link and a button with the same label count as one control
+    (a <button> nested in an <a>: Greeting ATS, Ashby, live 2026-09-23); the button is returned. Differently
+    labelled Apply controls stay ambiguous → None."""
+    hits = [e for e in elements if e.role in {"button", "link"} and is_entry(e.name)]
+    if len({norm_label(e.name) for e in hits}) != 1:
+        return None
+    if len(hits) > 2 or (len(hits) == 2 and {e.role for e in hits} != {"button", "link"}):
+        return None
+    return next((e for e in hits if e.role == "button"), hits[0])
+
+
+FORM_IFRAME_RE = re.compile(r"greenhouse|lever\.co|workday|myworkdayjobs|ashbyhq|smartrecruiters|icims|jobvite|"
+                            r"personio|teamtailor|recruitee|workable|bamboohr|breezy|successfactors|taleo|"
+                            r"apply|application|candidate|career|recruit|/jobs?/|(?<![a-z])forms?(?![a-z])", re.I)
+NON_FORM_IFRAME_RE = re.compile(r"google\.[a-z.]+/maps|maps\.google|youtube|vimeo|wistia|recaptcha|hcaptcha|"
+                                r"doubleclick|googletagmanager|facebook|twitter|instagram|linkedin\.com/(px|li/track)|"
+                                r"analytics|hotjar|intercom|drift|zendesk|onetrust|cookiebot|consent", re.I)
 
 
 def iframe_form_src(p: Page) -> str | None:
     """A form-looking iframe src to navigate to when the page itself has no fields."""
     if has_fields(p) or not p.iframe_srcs.get("items"):
         return None
-    return p.iframe_srcs["items"][0]
+    return next((u for u in p.iframe_srcs["items"] if FORM_IFRAME_RE.search(u) and not NON_FORM_IFRAME_RE.search(u)),
+                None)
 
 
 def is_alarm(p: Page) -> bool:

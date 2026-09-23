@@ -47,26 +47,30 @@ def run(*qs, policy=Policy()):
     return pa.questions, bad
 
 
-def test_quote_must_be_in_the_named_source():
+def test_quote_must_be_in_one_of_the_sources_and_the_source_is_corrected():
     (good, wrong_src, invented), _ = run(
         q(question="Notice period", ref="e2", answer="3 months", source="profile",
           quote="- What is your notice period?   3 months"),
         q(question="Notice period", ref="e2", answer="3 months", source="job", quote="What is your notice period? 3 months"),
         q(question="Phone", ref="e6", answer="+39 111", source="resume", quote="+39 111"))
     assert good.answer == "3 months"
-    assert wrong_src.answer is None and invented.answer is None
+    assert wrong_src.answer == "3 months" and wrong_src.source == "profile" and "not job" in wrong_src.note
+    assert invented.answer == "+39 000" and invented.source == "linkedin-prefill"   # the invented value is dropped;
+    assert "quote not found" in invented.note                                         # the page keeps its own
 
 
 def test_choice_answer_must_be_an_option_on_the_page():
-    (ok, not_option, off_page), _ = run(
+    fact = "I built a real-time computer vision pipeline reaching 200 FPS on an NPU."
+    (ok, not_option, typo_in_echo), _ = run(
         q(question="Work model", kind="choice", ref="e4", options=["Remote", "Hybrid"], answer="hybrid",
-          source="profile", quote="I built a real-time computer vision pipeline reaching 200 FPS on an NPU."),
+          source="profile", quote=fact),
         q(question="Work model", kind="choice", ref="e4", options=["Remote", "Hybrid"], answer="Anywhere",
-          source="profile", quote="I built a real-time computer vision pipeline reaching 200 FPS on an NPU."),
-        q(question="Work model", kind="choice", ref="e4", options=["Remote", "Mars"], answer="Remote",
-          source="profile", quote="I built a real-time computer vision pipeline reaching 200 FPS on an NPU."))
-    assert ok.answer == "Hybrid"                      # normalised to the option's spelling
-    assert not_option.answer is None and off_page.answer is None
+          source="profile", quote=fact),
+        q(question="Work model", kind="choice", ref="e4", options=["Re mote", "Hybrid"], answer="Remote",
+          source="profile", quote=fact))
+    assert ok.answer == "Hybrid"                      # normalised to the field's own option
+    assert not_option.answer is None
+    assert typo_in_echo.answer == "Remote"            # judged by the field's options, not the echoed list
 
 
 def test_generated_rules():
@@ -110,7 +114,8 @@ def test_linkedin_prefill():
     (kept, differs), _ = run(
         q(question="Phone", ref="e6", answer="+39 000", source="linkedin-prefill"),
         q(question="Email", ref="e1", answer="other@example.com", source="linkedin-prefill"))
-    assert kept.answer == "+39 000" and differs.answer is None
+    assert kept.answer == "+39 000"
+    assert differs.answer == "amin@example.com" and "pre-fill not kept" in differs.note   # never the claimed value
     (strict,), _ = run(q(question="Phone", ref="e6", answer="+39 000", source="linkedin-prefill"),
                        policy=Policy(prefill="strict"))
     assert strict.answer is None
@@ -187,3 +192,74 @@ def test_fenced_json_is_accepted_and_bad_generated_regenerated_once():
 def test_schema_is_strict_mode_shaped():
     item = A.SCHEMA["properties"]["questions"]["items"]
     assert set(item["required"]) == set(item["properties"]) and item["additionalProperties"] is False
+
+
+
+# ------------------------------------------------------------------ live lessons (qwen3.7-flash, LinkedIn, 2026-09-23)
+
+LI = Page(url="https://www.linkedin.com/jobs/view/1/", title="Apply", text="Contact info Email address* Phone country code*",
+          table=Table(url="u", elements=[
+              Element(ref="e78", role="combobox", name="Email address*", value="amin@example.com",
+                      current="amin@example.com", options=[Option(label="amin@example.com"), Option(label="x@y.z")]),
+              Element(ref="e79", role="combobox", name="Phone country code*", value="it", current="Italy (+39)",
+                      options=[Option(label="Andorra (+376)"), Option(label="Austria (+43)")]),   # first 40 only
+              Element(ref="e80", role="textbox", name="Mobile phone number*"),
+              Element(ref="e81", role="radio", name="Bachelor's Degree?", label="Yes"),
+              Element(ref="e82", role="radio", name="Bachelor's Degree?", label="No")]))
+
+
+def run_li(*qs, policy=Policy()):
+    pa = PageAnswers.model_validate({"questions": list(qs)})
+    check_answers(pa, LI, SRC, policy, TODAY)
+    return pa.questions
+
+
+def test_a_wrong_option_over_a_prefill_is_dropped_and_the_prefill_kept():
+    (code,) = run_li(q(question="Phone country code*", kind="choice", ref="e79", option_ref="e79:12",
+                       options=["Andorra (+376)", "Austria (+43)"], answer="Austria (+43)", source="computed"))
+    assert code.answer == "Italy (+39)" and code.source == "linkedin-prefill" and "kept" in code.note
+
+
+def test_the_current_value_is_a_valid_option_even_beyond_the_first_40():
+    (code,) = run_li(q(question="Phone country code*", kind="choice", ref="e79", answer="italy (+39)",
+                       source="linkedin-prefill"))
+    assert code.answer == "Italy (+39)"
+
+
+def test_an_echo_typo_in_the_options_does_not_drop_a_correct_prefill():
+    (email,) = run_li(q(question="Email address*", kind="choice", ref="e78", options=["a min@example.com", "x@y.z"],
+                        answer="amin@example.com", source="linkedin-prefill"))
+    assert email.answer == "amin@example.com"
+
+
+def test_a_radio_answer_must_match_the_radio_it_targets():
+    fact = "I built a real-time computer vision pipeline reaching 200 FPS on an NPU."
+    ok, crossed = run_li(
+        q(question="Bachelor's Degree?", kind="choice", option_ref="e81", options=["Yes", "No"], answer="Yes",
+          source="profile", quote=fact),
+        q(question="Bachelor's Degree?", kind="choice", option_ref="e82", options=["Yes", "No"], answer="Yes",
+          source="profile", quote=fact))
+    assert ok.answer == "Yes" and crossed.answer is None                  # "Yes" aimed at the "No" radio
+
+
+def test_empty_or_placeholder_fields_are_not_kept_and_strict_keeps_nothing():
+    (phone,) = run_li(q(question="Mobile phone number*", ref="e80", answer=None, source=None))
+    assert phone.answer is None                                           # nothing held → still unanswered
+    (code,) = run_li(q(question="Phone country code*", kind="choice", ref="e79", answer=None, source=None),
+                     policy=Policy(prefill="strict"))
+    assert code.answer is None
+
+
+
+def test_computed_is_only_for_total_years_never_for_a_tool():
+    lines = ["**Full Stack Software Engineer** · Feb 2026 – Present",
+             "**Deep Learning Engineer & Researcher** · Dec 2024 – Dec 2025",
+             "**Computer Vision Research Assistant** · Sep 2024 – Dec 2024"]
+    total, tool, other = [x for x in run(
+        q(question="Total years of professional experience", ref="e5", answer="2", source="computed", relies_on=lines),
+        q(question="How many years of work experience do you have with C++?", ref="e5", answer="2",
+          source="computed", relies_on=lines),
+        q(question="Notice period", ref="e2", answer="2", source="computed", relies_on=lines))[0]]
+    assert total.answer == "2"
+    assert tool.answer is None and "only for total years" in tool.note              # live LinkedIn case
+    assert other.answer is None

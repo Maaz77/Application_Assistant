@@ -13,13 +13,15 @@ def main(url: str, value: str, mode: str) -> None:
     cfg = config.load()
     jev.apply_env(cfg, "", cdp_url=CDP_URL)
     b = jev.Jev(cfg, "")
+    book = tabs.TabBook(b)
     b.open(url, "child")
     _, table = b.table("child")
     note = next(e.ref for e in table.elements if e.name == "Cover note")
     b.act([{"op": "type", "ref": note, "text": value, "clear": True, "submit": False}], "child", table)
-    print(tabs.current_tab(b, "child", CDP_URL), flush=True)
+    print(book.current("child"), flush=True)
     if mode == "release":
-        tabs.release(b, "child", CDP_URL)
+        book.release("child")
+    book.close()
 
 
 if __name__ == "__main__":

@@ -100,6 +100,10 @@ class ThrowawayChrome:
                 self.proc.kill()
         shutil.rmtree(self.profile, ignore_errors=True)
 
+    def close_tab(self, target_id: str) -> None:
+        """Test cleanup only (the throwaway Chrome serves the HTTP endpoints; the user's Chrome may not)."""
+        urllib.request.urlopen(f"http://127.0.0.1:{self.port}/json/close/{target_id}", timeout=2).read()
+
     def tabs(self) -> list[dict]:
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/json/list", timeout=2) as r:
             return [t for t in json.load(r) if t.get("type") == "page"]

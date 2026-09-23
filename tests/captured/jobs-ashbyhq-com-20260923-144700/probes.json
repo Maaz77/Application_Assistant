@@ -1,0 +1,20 @@
+{
+ "required_empty": {
+  "n": 0,
+  "more": false,
+  "items": []
+ },
+ "maxlengths": {
+  "n": 0,
+  "more": false,
+  "items": [],
+  "min": null
+ },
+ "iframe_srcs": {
+  "n": 0,
+  "more": false,
+  "items": [],
+  "long": 0
+ },
+ "captcha": false
+}

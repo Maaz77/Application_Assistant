@@ -27,6 +27,8 @@ class El:
     options: list[str] = field(default_factory=list)
     checked: bool | None = None
     context: str = ""
+    refuse_typing: bool = False      # a masked/rewriting input: direct typing does not stick, a goal must set it
+    readonly: bool = False           # like the observer: a read-only field is not `editable`
 
 
 @dataclass
@@ -66,7 +68,7 @@ class FakeMCP(Jev):
         els = []
         for ref, e in self.refs():
             d = {"ref": ref, "role": e.role, "name": e.name, "value": e.value if e.role != "combobox" else "",
-                 "editable": e.role == "textbox", "occluded": False, "checked": e.checked, "current": None,
+                 "editable": e.role in ("textbox", "searchbox", "spinbutton") and not e.readonly, "occluded": False, "checked": e.checked, "current": None,
                  "options": [], "context": e.context}
             if e.role == "combobox":
                 d["current"] = e.value or "Select"
@@ -104,7 +106,7 @@ class FakeMCP(Jev):
         return None
 
     # ------------------------------------------------------------------ tools
-    def call(self, name: str, **args) -> str:
+    def call(self, name: str, *, _timeout: float | None = None, **args) -> str:
         self.log.append((name, args))
         fn = getattr(self, "_" + name)
         return fn(**{k: v for k, v in args.items() if k != "session"})
@@ -161,7 +163,8 @@ class FakeMCP(Jev):
             elif kind == "click":
                 err = self._click(e, bool(op.get("confirm")))
             elif kind == "type":
-                e.value = op["text"][: e.maxlength or None]
+                if not e.refuse_typing:
+                    e.value = op["text"][: e.maxlength or None]
             elif kind == "upload":
                 e.value = Path(op["path"]).name
             elif kind == "toggle":
@@ -228,3 +231,19 @@ class FakeMCP(Jev):
         if c["type"] == "checked":
             return bool(e.checked) == c.get("state", True)
         return e.value == c.get("value")
+
+
+class FakeBook:
+    """TabBook stand-in for FakeMCP tests: one tab, no pop-ups, nothing to hand off."""
+
+    def handles(self):
+        return {"AAAAAAAA"}
+
+    def current_handle(self, session):
+        return "AAAAAAAA"
+
+    def switch(self, session, h):
+        pass
+
+    def hand_off(self, session, baseline, known):
+        return None

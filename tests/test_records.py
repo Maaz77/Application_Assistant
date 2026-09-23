@@ -175,3 +175,11 @@ def test_report_and_exit_codes(tmp_path):
               "## Questions for your Scratch Pad", "## Timings"):
         assert h in md
     assert Report(WHEN, stopped="alarm").exit_code() == 3 and Report(WHEN).exit_code() == 0
+
+
+
+def test_report_lists_warnings_when_there_are_any(tmp_path):
+    r = Report(WHEN, warnings=["Acme – DE: its tab could not be released (gone); the tab may close when the run ends"])
+    md = r.write(tmp_path).read_text()
+    assert "## Warnings" in md and "could not be released" in md
+    assert "## Warnings" not in Report(WHEN).markdown()

@@ -1,0 +1,13 @@
+[obs#2] https://www.linkedin.com/jobs/view/4460337345/  "Junior C++ Software Engineer | Solas IT Recruitment | LinkedIn"  scroll=0/860  reachable=0/8  (offscreen 8, » = will scroll on act)
+e6   lnk»   LinkedIn
+e7   cmb*»  Search ▸ ""
+e8   lnk»   new feed updates notifications Home
+e9   lnk»   Network
+e10  lnk»   Jobs
+e11  lnk»   Messaging
+e12  lnk»   Notifications
+e13  btn»   {:memberName} Me
+text:
+0 notifications
+
+json: {"url": "https://www.linkedin.com/jobs/view/4460337345/", "title": "Junior C++ Software Engineer | Solas IT Recruitment | LinkedIn", "elements": [{"ref": "e6", "role": "link", "name": "LinkedIn", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e7", "role": "combobox", "name": "Search", "value": "", "editable": true, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e8", "role": "link", "name": "new feed updates notifications Home", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e9", "role": "link", "name": "Network", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e10", "role": "link", "name": "Jobs", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e11", "role": "link", "name": "Messaging", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e12", "role": "link", "name": "Notifications", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e13", "role": "button", "name": "{:memberName} Me", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}]}

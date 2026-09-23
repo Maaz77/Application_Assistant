@@ -2,7 +2,6 @@ import pytest
 
 from assistant import tabs
 from assistant.entry import entry_click
-from tests.support import CDP_URL
 
 pytestmark = pytest.mark.browser
 
@@ -42,7 +41,7 @@ def test_release_keeps_tab_and_values_after_process_exit(new_browser, fixture_se
         _, table = browser.table("check")
         assert next(e for e in table.elements if e.name == "Cover note").value == "kept after release"
         browser.tabs("check", "close", target_id=tab)
-        tabs.release(browser, "check", CDP_URL)
+        browser.close("check")
     assert fixture_server.posts() == []
 
 
@@ -58,19 +57,52 @@ def test_without_release_the_exit_hook_closes_the_tab(fixture_server, chrome):
 
 
 def test_hand_off_to_new_tab_leaves_baseline_alone(new_browser, fixture_server, chrome):
-    baseline = {t["id"] for t in chrome.tabs()}
+    baseline_ids = {t["id"] for t in chrome.tabs()}
     with new_browser() as browser:
+        book = tabs.TabBook(browser)
+        baseline = book.handles()
         browser.open(fixture_server.url("f10.html"), "job2")
-        known = tabs.tab_ids(CDP_URL)
+        known = book.handles()
         _, table = browser.table("job2")
         entry_click(browser, "job2", table)
-        new = tabs.hand_off(browser, "job2", CDP_URL, baseline, known)
+        new = book.hand_off("job2", baseline, known)
         assert new is not None
         _, table = browser.table("job2")
         assert table.title == "Apply — Acme"
-        tabs.release(browser, "job2", CDP_URL)
+        app = book.current("job2")
+        book.release("job2")
+        book.close()
     after = {t["id"] for t in chrome.tabs()}
-    assert baseline <= after                       # user's tabs untouched
-    assert new in after                            # application tab parked
+    assert baseline_ids <= after                   # user's tabs untouched
+    assert app in after                            # application tab parked
     assert not any("f10.html" in t["url"] for t in chrome.tabs())   # job page tab closed
     assert fixture_server.posts() == []
+
+
+def test_tabs_py_never_uses_the_http_endpoint():
+    """chrome://inspect remote debugging serves no /json/list (404): tab work must use browser_* only."""
+    import ast
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "assistant" / "tabs.py").read_text()
+    mods = {n.module if isinstance(n, ast.ImportFrom) else a.name
+            for n in ast.walk(ast.parse(src)) if isinstance(n, (ast.Import, ast.ImportFrom))
+            for a in (n.names if isinstance(n, ast.Import) else [n])}
+    assert not {"httpx", "urllib", "urllib.request", "requests"} & mods
+
+
+def test_release_survives_the_helper_tab_being_closed_from_outside(new_browser, fixture_server, chrome):
+    """Live 2026-09-23: the helper's about:blank tab vanished mid-run and release crashed the whole run."""
+    with new_browser() as browser:
+        book = tabs.TabBook(browser)
+        browser.open(fixture_server.url("discovery.html"), "job3")
+        job_tab = book.current("job3")
+        helper = next(t["id"] for t in chrome.tabs() if t["id"].upper().startswith(book.helper_tab))
+        chrome.close_tab(helper)                           # someone closes the stray blank tab
+        import time
+        time.sleep(0.5)
+        book.release("job3")                               # revives the helper, switches by verified position
+        book.close()
+    ids = {t["id"] for t in chrome.tabs()}
+    assert job_tab in ids                                  # the job's tab is still open
+    assert helper not in ids
+    chrome.close_tab(job_tab)

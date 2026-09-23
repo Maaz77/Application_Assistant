@@ -90,3 +90,23 @@ def test_guest_link_click_on_real_signup_page(new_browser, fixture_server):
         browser.close("g")
     assert "needs_confirmation" not in out and after.title == "f01 single page"
     assert fixture_server.posts() == []
+
+
+def test_late_rendered_linkedin_page_is_waited_for(new_browser, fixture_server):
+    with new_browser() as browser:
+        browser.open(fixture_server.url("jobs/view/4012345606-late.html"), "late")
+        early = read_page(browser, "late")                              # control: read at once, too early
+        settled = pages.settle(lambda: read_page(browser, "late"))
+        browser.close("late")
+    assert classify_entry(early) == "none"
+    assert classify_entry(settled) == "entry"
+
+
+def test_display_contents_wrapper_is_seen(new_browser, fixture_server):
+    """Stock 0.1.5 dropped everything under a display:contents wrapper (LinkedIn's job card); 0.1.5+aa1 fixes it."""
+    with new_browser() as browser:
+        browser.open(fixture_server.url("probe_lab/display_contents.html"), "dc")
+        p = read_page(browser, "dc")
+        browser.close("dc")
+    assert "Easy Apply" in [e.name for e in p.elements]
+    assert "real-time systems in modern C++" in p.text

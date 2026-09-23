@@ -1,22 +1,16 @@
 """T8 rule tests: entry click (§4.2), Google one-click (§6.2), blockers and attempt 2 (§6.3)."""
 import pytest
 
-from assistant import tabs
 from assistant.blockers import Attempts, NeedsAttention
 from assistant.entry import EntryRefused, entry_allowed, entry_click
 from assistant.fill import run_pages
 from assistant.google_signin import sign_in
 from assistant.jev import Element, Table
-from tests.fake_mcp import El, FakeMCP, FakePage
+from tests.fake_mcp import El, FakeBook, FakeMCP, FakePage
 from tests.test_fill_loop import SINGLE_ANSWERS, ctx_for, single_page
 
 pytestmark = pytest.mark.unit
 LI = "https://www.linkedin.com/jobs/view/4012345678/"
-
-
-@pytest.fixture(autouse=True)
-def one_tab(monkeypatch):
-    monkeypatch.setattr(tabs, "tab_ids", lambda cdp_url: {"AAAAAAAA0000"})
 
 
 def T(url, *els):
@@ -55,7 +49,7 @@ def google_site(chooser_email="maaz1377.aa@gmail.com", google_text="Choose an ac
 
 def test_google_one_click_returns_to_the_site():
     fake = FakeMCP(google_site(), "wall")
-    sign_in(fake, "s", "http://x", "maaz1377.aa@gmail.com", set())
+    sign_in(fake, "s", FakeBook(), "maaz1377.aa@gmail.com", set())
     assert fake.cur == "p1"
     clicks = [op for n, a in fake.log if n == "browser_act" for op in a["ops"] if op["op"] == "click"]
     assert len(clicks) == 2                                            # the Google button, then the account, once
@@ -71,7 +65,7 @@ def test_google_one_click_returns_to_the_site():
 def test_google_blockers(site_kw, email, match):
     fake = FakeMCP(google_site(**site_kw), "wall")
     with pytest.raises(NeedsAttention, match=match):
-        sign_in(fake, "s", "http://x", email, set())
+        sign_in(fake, "s", FakeBook(), email, set())
 
 
 def test_google_wall_inside_the_loop_then_park(tmp_path):
@@ -150,3 +144,47 @@ def test_ats_job_page_entry_then_form(tmp_path):
     assert parked.pages == 1
     confirms = [op for n, a in fake.log if n == "browser_act" for op in a["ops"] if op.get("confirm")]
     assert len(confirms) == 1 and confirms[0]["op"] == "click"
+
+
+def test_entry_rules_ignore_site_chrome():
+    """LinkedIn (2026-09-23): nav Search box + footer 'Select language' (always holds en_US) are not form fields."""
+    li = T(LI, Element(ref="e1", role="combobox", name="Search"),
+           Element(ref="e2", role="button", name="Easy Apply to this job"),
+           Element(ref="e3", role="combobox", name="Select language", value="en_US", current="English (English)"))
+    assert entry_allowed(li) is None
+    li.elements.append(Element(ref="e4", role="textbox", name="Phone", value="+39 333"))
+    assert "already holds a value" in entry_allowed(li)                  # a real typed value still blocks it
+    other = T(LI, Element(ref="e1", role="combobox", name="Preferred language", value="Italian"),
+              Element(ref="e2", role="button", name="Easy Apply"))
+    assert "already holds a value" in entry_allowed(other)               # only the exact site picker is ignored
+
+
+def test_entry_click_retries_once_when_the_page_re_rendered_the_button():
+    """LinkedIn, live 2026-09-23: `x click e16  detached` — React replaced the button between snapshot and click."""
+    site = {"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply to this job")])}
+    fake = FakeMCP(site, "j")
+    clicks = {"n": 0}
+    orig = fake._browser_act
+
+    def act(ops, **kw):
+        if ops and ops[0].get("op") == "click":
+            clicks["n"] += 1
+            if clicks["n"] == 1:
+                return "0/1 ops ok  (stopped early)\n  x click e1  detached: detached"
+        return orig(ops, **kw)
+    fake._browser_act = act
+    table = T(LI, Element(ref="e1", role="button", name="Easy Apply to this job"))
+    out = entry_click(fake, "s", table, reread=lambda: T(LI, Element(ref="e1", role="button", name="Easy Apply to this job")))
+    assert out.startswith("1/1 ops ok") and clicks["n"] == 2
+    clicks["n"] = 0
+    with pytest.raises(EntryRefused, match="did not go through"):
+        entry_click(fake, "s", table)                                    # no reread: reported, never ignored
+
+
+def test_long_job_card_links_do_not_make_a_final_step():
+    from assistant.pages import Page, has_transmit, is_final
+    card = Element(ref="e1", role="link", name="More options Acme Kildare (Hybrid) 50K EUR/yr Promoted · Easy Apply")
+    p = Page(url=LI, title="Job", text="", table=T(LI, card))
+    assert not has_transmit(p) and not is_final(p)
+    p2 = Page(url=LI, title="Apply", text="", table=T(LI, Element(ref="e2", role="link", name="Submit application")))
+    assert has_transmit(p2)
