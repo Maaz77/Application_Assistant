@@ -1,0 +1,28 @@
+{
+  "version": "0.1.5",
+  "mode": "attach",
+  "headless": true,
+  "connected": true,
+  "sessions": [
+    "disc"
+  ],
+  "typesafe_turbo": false,
+  "text_model": false,
+  "js_eval": true,
+  "uploads": true,
+  "allow_domains": [],
+  "deny_domains": [],
+  "chrome": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "browser": "Chrome/153.0.8010.53",
+  "protocol": "1.3",
+  "config": {
+    "max_actions": 2000,
+    "window": [
+      1280,
+      860
+    ],
+    "profile": "/Users/maaz/.jev-ultrafast-mcp/chrome-profile",
+    "macros_dir": "/Users/maaz/.jev-ultrafast-mcp/macros"
+  },
+  "hints": []
+}

@@ -1,0 +1,15 @@
+opened http://127.0.0.1:64334/discovery.html — 10 elements, 9 reachable, obs#1
+
+[obs#1] http://127.0.0.1:64334/discovery.html  "Discovery form"  scroll=0/860  reachable=9/10  (offscreen 1, » = will scroll on act)
+e1   inp*   Email ▸ "pre@fill.io"
+e2   cmb    Country ▸ Choose opts{Choose | Italy | Iran}
+e3   rad·   Yes
+e4   rad·   No
+e5   chk·   I agree
+e6   inp*   Cover note ▸ ""
+e7   file»   Resume accept=.pdf
+e8   file    Cover letter accept=*
+e9   btn    Next
+e10  btn    Submit application
+text:
+Discovery form First name Email Country Need sponsorship? Yes No I agree Cover note Upload resume Cover letter Next Submit application

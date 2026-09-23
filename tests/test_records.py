@@ -1,0 +1,177 @@
+"""Records on temp copies (§9): tracker adapter, journal kill-recovery, job.md heading rules, folder-move invariant."""
+import json
+import os
+import shutil
+from datetime import datetime
+from pathlib import Path
+
+import pytest
+
+from assistant import records
+from assistant.blockers import NeedsAttention, OpenQuestion, Parked, StopRun
+from assistant.records import Job, Journal, Recorder, append_note, build_queue, recover
+from assistant.report import JobResult, Report
+from assistant.tracker import NEEDS_ATTENTION, PENDING_REVIEW, RESUME_BUILT, Tracker
+
+pytestmark = pytest.mark.unit
+REAL_TRACKER = Path(__file__).resolve().parents[3] / "Job_Tracker.numbers"
+WHEN = datetime(2026, 9, 23, 14, 3)
+
+
+def make_job(apps: Path, jid: str, company="Acme", title="Data Engineer", bold=False) -> Path:
+    d = apps / f"{jid}_{company}_{title.replace(' ', '-')}"
+    d.mkdir(parents=True)
+    url = f"https://www.linkedin.com/jobs/view/{jid}"
+    overview = (f"**LinkedIn URL:** {url}\n**Company:** {company}\n**Job Title:** {title}\n" if bold else
+                f"- Job Title: {title}\n- Company: {company}\n- LinkedIn URL: {url}\n")
+    (d / "job.md").write_text(f"# Job Discovery & Scoring\n\n## 1. Overview\n{overview}\n## 2. Job Description\nText.\n")
+    (d / f"Amin_{company}_{title.replace(' ', '-')}.pdf").write_bytes(b"%PDF")
+    return d
+
+
+@pytest.fixture
+def ws(tmp_path):
+    """A temp workspace with a copy of the real tracker plus three rows of our own."""
+    if not REAL_TRACKER.exists():
+        pytest.skip("no Job_Tracker.numbers to copy")
+    base = tmp_path / "base"
+    (base / "Applications").mkdir(parents=True)
+    shutil.copy2(REAL_TRACKER, base / "Job_Tracker.numbers")
+    t = Tracker(base / "Job_Tracker.numbers").load()
+    for jid, status in (("4100000001", RESUME_BUILT), ("4100000002", "Submitted"), ("4100000003", RESUME_BUILT)):
+        t.add({"Job URL": f"https://www.linkedin.com/jobs/view/{jid}/", "Status": status, "Company": "Row Co"})
+    t.save()
+    make_job(base / "Applications", "4100000001")                    # row Resume Built → queued
+    make_job(base / "Applications", "4100000002", "Beta")            # row Submitted → anomaly
+    make_job(base / "Applications", "4100000009", "Gamma", bold=True)  # no row → queued, row added later
+    return base                                                      # 4100000003: row without folder → anomaly
+
+
+def test_real_tracker_copy_loads_through_reconcile(ws):
+    t = Tracker(ws / "Job_Tracker.numbers").load()
+    assert {"Status", "Job URL", "Notes"} <= set(t.header)
+    assert t.find("4100000001")[1]["Status"] == RESUME_BUILT
+
+
+def test_queue_joins_by_job_id_and_reports_anomalies(ws):
+    q = build_queue(ws / "Applications", Tracker(ws / "Job_Tracker.numbers").load())
+    assert [j.key for j in q.jobs] == ["4100000001", "4100000009"] and q.new_rows == {"4100000009"}
+    text = "\n".join(q.anomalies)
+    assert "tracker status is 'Submitted'" in text and "4100000003" in text
+
+
+def test_job_md_both_overview_formats():
+    for bold in (False, True):
+        import tempfile
+        d = make_job(Path(tempfile.mkdtemp()), "4100000042", "Acme", "ML Engineer", bold=bold)
+        j = Job.from_dir(d)
+        assert (j.key, j.company, j.title) == ("4100000042", "Acme", "ML Engineer")
+
+
+def test_record_moves_folder_and_updates_row_together(ws):
+    t = Tracker(ws / "Job_Tracker.numbers").load()
+    q = build_queue(ws / "Applications", t)
+    rec = Recorder(t, Journal(ws / "runs/1/journal.jsonl"), ws, ws / "Pending-Review", ws / "Needs-Attention",
+                   new_rows=set(q.new_rows))
+    job, new = q.jobs
+    dst = rec.record(job, PENDING_REVIEW, "## note", None)
+    assert dst == ws / "Pending-Review" / job.folder and dst.exists() and not job.dir.exists()
+    rec.record(new, NEEDS_ATTENTION, "## note", "Needs Attention: captcha")
+    t2 = Tracker(ws / "Job_Tracker.numbers").load()
+    assert t2.find("4100000001")[1]["Status"] == PENDING_REVIEW
+    row = t2.find("4100000009")[1]
+    assert row["Status"] == NEEDS_ATTENTION and row["Notes"] == "Needs Attention: captcha" and row["Company"] == "Gamma"
+    events = [json.loads(l)["event"] for l in (ws / "runs/1/journal.jsonl").read_text().splitlines()]
+    assert events == ["record_start", "tracker_saved", "folder_moved", "record_done"] * 2
+
+
+def test_existing_destination_stops_before_any_write(ws):
+    t = Tracker(ws / "Job_Tracker.numbers").load()
+    job = build_queue(ws / "Applications", t).jobs[0]
+    (ws / "Pending-Review" / job.folder).mkdir(parents=True)
+    before = (ws / "Job_Tracker.numbers").read_bytes()
+    rec = Recorder(t, Journal(ws / "runs/1/journal.jsonl"), ws, ws / "Pending-Review", ws / "Needs-Attention")
+    with pytest.raises(StopRun):
+        rec.record(job, PENDING_REVIEW, "## n", None)
+    assert (ws / "Job_Tracker.numbers").read_bytes() == before and job.dir.exists()
+    assert "Application Assistant" not in job.job_md.read_text()
+
+
+def test_tracker_changed_on_disk_stops_the_run(ws):
+    t = Tracker(ws / "Job_Tracker.numbers").load()
+    other = Tracker(ws / "Job_Tracker.numbers").load()
+    other.set("4100000001", "Submitted")
+    other.save()                                                       # somebody else saved meanwhile
+    t.set("4100000001", PENDING_REVIEW)
+    with pytest.raises(StopRun, match="changed on disk"):
+        t.save()
+
+
+@pytest.mark.parametrize("killed_after", ["record_start", "tracker_saved", "folder_moved"])
+def test_journal_recovery_after_a_kill(ws, killed_after):
+    t = Tracker(ws / "Job_Tracker.numbers").load()
+    job = build_queue(ws / "Applications", t).jobs[0]
+    dst = ws / "Pending-Review" / job.folder
+    j = Journal(ws / "runs/20260923-140000/journal.jsonl")
+    j.event(job.key, "record_start", PENDING_REVIEW, str(job.dir), str(dst))
+    if killed_after in ("tracker_saved", "folder_moved"):
+        t.set(job.key, PENDING_REVIEW)
+        t.save()
+        j.event(job.key, "tracker_saved", PENDING_REVIEW, str(job.dir), str(dst))
+    if killed_after == "folder_moved":
+        dst.parent.mkdir(parents=True)
+        os.rename(job.dir, dst)
+        j.event(job.key, "folder_moved", PENDING_REVIEW, str(job.dir), str(dst))
+    t = Tracker(ws / "Job_Tracker.numbers").load()                   # the next run
+    assert recover(ws / "runs", t) == [f"recovered {job.key} → {PENDING_REVIEW}"]
+    assert dst.exists() and not job.dir.exists()
+    assert Tracker(ws / "Job_Tracker.numbers").load().find(job.key)[1]["Status"] == PENDING_REVIEW
+    assert recover(ws / "runs", Tracker(ws / "Job_Tracker.numbers").load()) == []       # idempotent
+
+
+def test_job_md_note_heading_rules(tmp_path):
+    md = tmp_path / "job.md"
+    md.write_text("# Job Discovery & Scoring\n\n## 1. Overview\n- x\n")
+    append_note(md, "## A\n- one")
+    append_note(md, "## B\n- two")
+    text = md.read_text()
+    assert text.count("# Application Assistant\n") == 1
+    assert text.index("## A") < text.index("## B") and text.endswith("- two\n")
+    md.write_text("# Top\n\n# Application Assistant\n\n## old\n- x\n\n# Later Section\nkeep\n")
+    append_note(md, "## new\n- y")
+    text = md.read_text()
+    assert text.index("## old") < text.index("## new") < text.index("# Later Section")      # end of that section
+    assert "## Application Assistant" not in text
+
+
+def test_needs_attention_note_format():
+    na = NeedsAttention("unanswered", "2 required question(s) have no answer in the files",
+                        questions=[OpenQuestion("Salary?", "text"), OpenQuestion("Visa?", "choice", ["Yes", "No"])])
+    na.url, na.title, na.page, na.stage, na.filled = "https://acme.io/a", "Apply", 2, "fill", 5
+    note = records.needs_attention_note(na, WHEN)
+    assert note.splitlines() == [
+        "## 2026-09-23 14:03 — Needs Attention: unanswered",
+        "- What: 2 required question(s) have no answer in the files",
+        '- Where: https://acme.io/a · "Apply" · page 2 · fill',
+        "- Filled before stopping: 5 fields",
+        "- Open questions:",
+        '  - "Salary?" — text',
+        '  - "Visa?" — choice; options: Yes | No']
+
+
+def test_report_and_exit_codes(tmp_path):
+    na = NeedsAttention("unanswered", "1 required", questions=[OpenQuestion("Notice period?", "text")])
+    r = Report(WHEN, results=[
+        JobResult("Acme", "DE", "u1", "f1", 42, parked=Parked("u", "t", 3, generated=[("Why?", "Because.")]),
+                  date="2026-09-23"),
+        JobResult("Beta", "ML", "u2", "f2", 7, attention=na, date="2026-09-23"),
+        JobResult("Gamma", "ML", "u3", "f3", 7, attention=NeedsAttention("x", "y", questions=[
+            OpenQuestion("notice  period?", "text")]), date="2026-09-23")])
+    assert r.exit_code() == 2 and r.results[0].terminal_line() == "✓ parked  Acme – DE"
+    assert r.results[1].terminal_line() == "⚠ needs attention  Beta – ML: 1 required"
+    md = r.write(tmp_path).read_text()
+    assert md.count("**Q:** Notice period?") == 1 and "(asked by Beta – ML, 2026-09-23)" in md
+    for h in ("## Summary", "## Parked", "## Needs Attention", "## Queue anomalies",
+              "## Questions for your Scratch Pad", "## Timings"):
+        assert h in md
+    assert Report(WHEN, stopped="alarm").exit_code() == 3 and Report(WHEN).exit_code() == 0

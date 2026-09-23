@@ -1,0 +1,4 @@
+FAIL  (http://127.0.0.1:64334/discovery.html)
+  ok text_contains: 'Discovery' found in page text
+  X  text_absent: 'Discovery' found in page text
+  ok js: document.querySelectorAll('input').length > 2 -> true

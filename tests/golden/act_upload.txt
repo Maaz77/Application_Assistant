@@ -1,0 +1,7 @@
+2/2 ops ok
+  + upload e7 → sample.pdf  40ms
+  + eval → 1  0ms
+
+[delta#5] http://127.0.0.1:64334/discovery.html  "Discovery form"  scroll=0/860  reachable=9/10  (offscreen 1, » = will scroll on act)
+~ e7   file»   Resume accept=.pdf
+  1 changed, 0 new, 0 gone

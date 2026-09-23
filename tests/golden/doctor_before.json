@@ -1,0 +1,26 @@
+{
+  "version": "0.1.5",
+  "mode": "attach",
+  "headless": true,
+  "connected": false,
+  "sessions": [],
+  "typesafe_turbo": false,
+  "text_model": false,
+  "js_eval": true,
+  "uploads": true,
+  "allow_domains": [],
+  "deny_domains": [],
+  "chrome": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "config": {
+    "max_actions": 2000,
+    "window": [
+      1280,
+      860
+    ],
+    "profile": "/Users/maaz/.jev-ultrafast-mcp/chrome-profile",
+    "macros_dir": "/Users/maaz/.jev-ultrafast-mcp/macros"
+  },
+  "hints": [
+    "Attach mode: nothing is started for you. Point JEVMCP_CDP_URL at a browser already exposing CDP (now http://127.0.0.1:9223) — e.g. the chrome://inspect/#remote-debugging toggle. Shutdown detaches, never quits it."
+  ]
+}

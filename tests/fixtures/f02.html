@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"><title>f02 modal steps</title>
+<style>.step{display:none}.step.on{display:block}.modal{border:1px solid #333;padding:12px}</style></head>
+<body><div class="modal" role="dialog" aria-label="Apply to Acme">
+<form action="/submit" method="post" id="f">
+<div class="step on" id="s1"><label>Phone <input type="tel" name="phone" required></label>
+<button type="button" onclick="go('s2')">Next</button></div>
+<div class="step" id="s2"><label>Years of experience <input type="number" name="yoe"></label>
+<button type="button" onclick="go('s1')">Back</button><button type="button" onclick="go('s3')">Review</button></div>
+<div class="step" id="s3"><p>Review your application</p>
+<label>Resume <input type="file" name="cv" required></label>
+<button type="button" onclick="go('s2')">Back</button><button type="submit">Submit application</button></div>
+</form></div>
+<script>function go(id){document.querySelectorAll('.step').forEach(s=>s.classList.toggle('on', s.id===id))}</script>
+</body></html>

@@ -1,0 +1,8 @@
+[obs#6] http://127.0.0.1:64334/discovery.html  "Discovery form"  scroll=0/860  reachable=9/10  (offscreen 1, » = will scroll on act)
+  ! NEW TAB opened: about:blank → switch with {'op':'tab','action':'switch','target_id':'5F521ED21BCFA398ABCA063A693BBB59'}
+e1   inp*   Email ▸ "pre@fill.io"
+e2   cmb    Country ▸ Choose opts{Choose | Italy | Iran}
+e3   rad·   Yes
+e4   rad·   No
+e5   chk·   I agree
+e

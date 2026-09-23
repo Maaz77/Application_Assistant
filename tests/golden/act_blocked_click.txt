@@ -1,0 +1,5 @@
+0/1 ops ok  (stopped early)
+  x click e1  detached: detached
+
+[delta#2] about:blank  ""  scroll=0/860  reachable=0/0
+  = no change (0 elements)

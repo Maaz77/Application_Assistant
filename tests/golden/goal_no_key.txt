@@ -1,0 +1,3 @@
+turbo_unavailable: no decision-model key is set.
+Set TYPESAFE_API_KEY, or OPENROUTER_API_KEY with TYPESAFE_BASE_URL=https://openrouter.ai/api/alpha/decisions.
+Drive the same loop yourself: browser_observe → pick a ref → browser_act.

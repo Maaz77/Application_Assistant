@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>f09 resume upload</title>
+<style>.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.btn{display:inline-block;padding:6px 10px;border:1px solid #444;cursor:pointer}
+.step{display:none}.step.on{display:block}</style></head>
+<body><form action="/submit" method="post" onsubmit="return false">
+<div class="step on" id="s1"><h2>Resume</h2>
+<label class="btn" for="resume">Upload resume</label><input class="vh" type="file" id="resume" name="resume" accept=".pdf,.doc,.docx" required>
+<span id="rn"></span>
+<button type="button" onclick="go('s2')">Next</button></div>
+<div class="step" id="s2"><h2>Documents</h2>
+<label>Resume/CV <input type="file" name="cv2" required></label>
+<label>Cover letter <input type="file" name="cl"></label>
+<button type="button" onclick="go('s3')">Review</button></div>
+<div class="step" id="s3"><button type="submit">Submit application</button></div>
+</form>
+<script>function go(id){document.querySelectorAll('.step').forEach(s=>s.classList.toggle('on',s.id===id))}
+document.getElementById('resume').addEventListener('change',e=>document.getElementById('rn').textContent=e.target.files[0].name)</script>
+</body></html>

@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><title>f06 cookie banner</title>
+<style>#cb{position:fixed;bottom:0;left:0;right:0;background:#eee;padding:10px}</style></head><body>
+<form action="/submit" method="post"><label>Name <input type="text" name="n"></label>
+<button type="submit">Submit</button></form>
+<div id="cb" role="dialog" aria-label="Cookies">We use cookies.
+<button type="button" onclick="fetch('/submit?cookie-confirm',{method:'POST'})">Confirm my choices</button>
+<button type="button" onclick="document.getElementById('cb').remove()">Reject all</button></div>
+</body></html>

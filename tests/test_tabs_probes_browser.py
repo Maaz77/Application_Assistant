@@ -1,0 +1,76 @@
+import pytest
+
+from assistant import tabs
+from assistant.entry import entry_click
+from tests.support import CDP_URL
+
+pytestmark = pytest.mark.browser
+
+
+def test_probes_fit_the_200_char_cap(new_browser, fixture_server):
+    with new_browser() as browser:
+        browser.open(fixture_server.url("probes.html"), "p")
+        r = browser.probe("p", "REQUIRED_EMPTY", "MAXLENGTHS", "IFRAME_SRCS")
+        captcha = browser.captcha_present("p")
+    req = r["REQUIRED_EMPTY"]
+    # Given name, Città, Relocate radio group, Resume file, Country select + 30 extras; Family name is filled
+    assert req["n"] == 35 and req["more"] is True and req["items"][0] == ["Given name", "text"]
+    assert ["Citt? di residenza", "text"] in req["items"]
+    assert r["MAXLENGTHS"]["min"] == 20 and r["MAXLENGTHS"]["items"][0] == ["Phone", 20]
+    assert r["IFRAME_SRCS"] == {"n": 0, "more": False, "items": [], "long": 0}
+    assert captcha is False
+
+
+def _child(url: str, value: str, mode: str) -> str:
+    """Run tests/release_child.py; returns the target ID of the tab it typed into."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([sys.executable, "-m", "tests.release_child", url, value, mode], cwd=root,
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip().splitlines()[-1]
+
+
+def test_release_keeps_tab_and_values_after_process_exit(new_browser, fixture_server, chrome):
+    """B3: the package's exit hook closes each session's current tab; release moves the session off it first."""
+    tab = _child(fixture_server.url("discovery.html"), "kept after release", "release")
+    assert tab in {t["id"] for t in chrome.tabs()}                     # the child exited; the tab survived
+    with new_browser() as browser:
+        browser.tabs("check", "switch", target_id=tab)
+        _, table = browser.table("check")
+        assert next(e for e in table.elements if e.name == "Cover note").value == "kept after release"
+        browser.tabs("check", "close", target_id=tab)
+        tabs.release(browser, "check", CDP_URL)
+    assert fixture_server.posts() == []
+
+
+def test_without_release_the_exit_hook_closes_the_tab(fixture_server, chrome):
+    """Control: the same child without release — its tab is gone after it exits."""
+    import time
+    tab = _child(fixture_server.url("discovery.html"), "lost", "keep")
+    for _ in range(20):
+        if tab not in {t["id"] for t in chrome.tabs()}:
+            break
+        time.sleep(0.1)
+    assert tab not in {t["id"] for t in chrome.tabs()}
+
+
+def test_hand_off_to_new_tab_leaves_baseline_alone(new_browser, fixture_server, chrome):
+    baseline = {t["id"] for t in chrome.tabs()}
+    with new_browser() as browser:
+        browser.open(fixture_server.url("f10.html"), "job2")
+        known = tabs.tab_ids(CDP_URL)
+        _, table = browser.table("job2")
+        entry_click(browser, "job2", table)
+        new = tabs.hand_off(browser, "job2", CDP_URL, baseline, known)
+        assert new is not None
+        _, table = browser.table("job2")
+        assert table.title == "Apply — Acme"
+        tabs.release(browser, "job2", CDP_URL)
+    after = {t["id"] for t in chrome.tabs()}
+    assert baseline <= after                       # user's tabs untouched
+    assert new in after                            # application tab parked
+    assert not any("f10.html" in t["url"] for t in chrome.tabs())   # job page tab closed
+    assert fixture_server.posts() == []

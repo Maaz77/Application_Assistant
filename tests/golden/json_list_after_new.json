@@ -1,0 +1,29 @@
+[
+  {
+    "description": "",
+    "devtoolsFrontendUrl": "https://chrome-devtools-frontend.appspot.com/serve_rev/@792bf6722e73a45aa9e47c163b9901bdc17f3230/inspector.html?ws=127.0.0.1:9223/devtools/page/5F521ED21BCFA398ABCA063A693BBB59",
+    "id": "5F521ED21BCFA398ABCA063A693BBB59",
+    "title": "about:blank",
+    "type": "page",
+    "url": "about:blank",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:9223/devtools/page/5F521ED21BCFA398ABCA063A693BBB59"
+  },
+  {
+    "description": "",
+    "devtoolsFrontendUrl": "https://chrome-devtools-frontend.appspot.com/serve_rev/@792bf6722e73a45aa9e47c163b9901bdc17f3230/inspector.html?ws=127.0.0.1:9223/devtools/page/F0FD74D491001E32DD47227A5DED2958",
+    "id": "F0FD74D491001E32DD47227A5DED2958",
+    "title": "Discovery form",
+    "type": "page",
+    "url": "http://127.0.0.1:64334/discovery.html",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:9223/devtools/page/F0FD74D491001E32DD47227A5DED2958"
+  },
+  {
+    "description": "",
+    "devtoolsFrontendUrl": "https://chrome-devtools-frontend.appspot.com/serve_rev/@792bf6722e73a45aa9e47c163b9901bdc17f3230/inspector.html?ws=127.0.0.1:9223/devtools/page/85DB1B43FBAC0F06AC5F792DE35A1AEC",
+    "id": "85DB1B43FBAC0F06AC5F792DE35A1AEC",
+    "title": "about:blank",
+    "type": "page",
+    "url": "about:blank",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:9223/devtools/page/85DB1B43FBAC0F06AC5F792DE35A1AEC"
+  }
+]

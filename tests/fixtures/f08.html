@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><title>f08 widgets</title>
+<style>.dd{position:relative;display:inline-block}.dd ul{display:none;position:absolute;background:#fff;border:1px solid #999;margin:0;padding:0;list-style:none}
+.dd.open ul{display:block}.dd li{padding:4px 8px;cursor:pointer}#cal{display:none;border:1px solid #999;padding:6px}#cal.open{display:block}</style></head>
+<body><h1>Additional questions</h1><form action="/submit" method="post" onsubmit="return false"><div id="q1">
+<label for="city">City</label> <input type="text" id="city" name="city" required>
+<p>Preferred work model</p>
+<div class="dd" id="wm"><button type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="Preferred work model"
+ onclick="this.parentNode.classList.toggle('open');this.setAttribute('aria-expanded',this.parentNode.classList.contains('open'))">Select an option</button>
+<ul role="listbox" aria-label="Preferred work model options">
+<li role="option" onclick="pick(this)">Remote</li><li role="option" onclick="pick(this)">Hybrid</li><li role="option" onclick="pick(this)">On-site</li></ul></div>
+<input type="hidden" name="work_model" id="wmv">
+<fieldset><legend>Do you require visa sponsorship?</legend>
+<label><input type="radio" name="visa" value="yes" required> Yes</label>
+<label><input type="radio" name="visa" value="no"> No</label></fieldset>
+<label for="start">Earliest start date</label> <input type="text" id="start" name="start" readonly placeholder="Pick a date" onclick="document.getElementById('cal').classList.add('open')">
+<div id="cal" role="dialog" aria-label="Choose date"><button type="button" onclick="day(1)">1</button><button type="button" onclick="day(15)">15</button>
+<button type="button" onclick="document.getElementById('cal').classList.remove('open')">Done</button></div>
+<section id="exp"><h2>Experience</h2><div class="row"><label>Employer 1 <input type="text" name="emp1"></label></div>
+<button type="button" onclick="addRow()">Add another</button></section>
+<button type="button" onclick="document.getElementById('q1').style.display='none';document.getElementById('q2').style.display='block'">Next</button>
+</div><div id="q2" style="display:none"><h2>Resume</h2><label>Resume <input type="file" name="cv" required></label>
+<button type="submit">Submit application</button></div>
+</form>
+<script>
+function pick(li){const b=document.querySelector('#wm button');b.textContent=li.textContent;document.getElementById('wmv').value=li.textContent;
+ b.parentNode.classList.remove('open');b.setAttribute('aria-expanded','false')}
+function day(d){document.getElementById('start').value='2026-11-'+String(d).padStart(2,'0')}
+let n=1;function addRow(){n++;const d=document.createElement('div');d.className='row';d.innerHTML='<label>Employer '+n+' <input type="text" name="emp'+n+'"></label>';
+ document.getElementById('exp').insertBefore(d,document.querySelector('#exp button'))}
+</script></body></html>

@@ -1,0 +1,15 @@
+[obs#2] http://127.0.0.1:64334/discovery.html  "Discovery form"  scroll=0/860  reachable=9/10  (offscreen 1, » = will scroll on act)
+e1   inp*   Email ▸ "pre@fill.io"
+e2   cmb    Country ▸ Choose opts{Choose | Italy | Iran}
+e3   rad·   Yes
+e4   rad·   No
+e5   chk·   I agree
+e6   inp*   Cover note ▸ ""
+e7   file»   Resume accept=.pdf
+e8   file    Cover letter accept=*
+e9   btn    Next
+e10  btn    Submit application
+text:
+Discovery form First name Email Country Need sponsorship? Yes No I agree Cover note Upload resume Cover letter Next Submit application
+
+json: {"url": "http://127.0.0.1:64334/discovery.html", "title": "Discovery form", "elements": [{"ref": "e1", "role": "textbox", "name": "Email", "value": "pre@fill.io", "editable": true, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e2", "role": "combobox", "name": "Country", "value": "", "editable": false, "occluded": false, "checked": null, "current": "Choose", "options": [{"ref": "e2:1", "label": "Choose", "value": "", "selected": true}, {"ref": "e2:2", "label": "Italy", "value": "Italy", "selected": false}, {"ref": "e2:3", "label": "Iran", "value": "Iran", "selected": false}], "context": ""}, {"ref": "e3", "role": "radio", "name": "Yes", "value": "", "editable": false, "occluded": false, "checked": false, "current": null, "options": [], "context": ""}, {"ref": "e4", "role": "radio", "name": "No", "value": "", "editable": false, "occluded": false, "checked": false, "current": null, "options": [], "context": ""}, {"ref": "e5", "role": "checkbox", "name": "I agree", "value": "", "editable": false, "occluded": false, "checked": false, "current": null, "options": [], "context": ""}, {"ref": "e6", "role": "textbox", "name": "Cover note", "value": "", "editable": true, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e7", "role": "file", "name": "Resume", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e8", "role": "file", "name": "Cover letter", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e9", "role": "button", "name": "Next", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}, {"ref": "e10", "role": "button", "name": "Submit application", "value": "", "editable": false, "occluded": false, "checked": null, "current": null, "options": [], "context": ""}]}
