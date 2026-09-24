@@ -51,7 +51,9 @@ def test_stray_typesafe_key_and_package_vars_are_removed():
         import json, os
         from assistant import config, jev
         jev.apply_env(config.load(), "k-123")
-        assert "TYPESAFE_API_KEY" not in os.environ and "JEVMCP_ALLOW_DOMAINS" not in os.environ
+        # the stray value is gone; on the Vercel route the gateway key from .env takes its place
+        assert os.environ.get("TYPESAFE_API_KEY") in (None, config.gateway_key()) != "stray"
+        assert "JEVMCP_ALLOW_DOMAINS" not in os.environ
         assert "TEXT_MODEL_EXTRA" not in os.environ
         assert os.environ["OPENROUTER_API_KEY"] == os.environ["TEXT_MODEL_API_KEY"] == "k-123"
         d = jev.Jev(config.load(), "k-123").doctor()

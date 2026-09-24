@@ -94,6 +94,13 @@ class Tracker:
             old = r.get("Notes") or ""
             self.table.write(i, self.col("Notes"), old + ("\n" if old else "") + notes)
 
+    def set_notes(self, key: str, notes: str) -> None:
+        """Replace the whole Notes cell (requeue removes the line a run added)."""
+        hit = self.find(key)
+        if hit is None:
+            raise TrackerError(f"no tracker row for job {key}")
+        self.table.write(hit[0], self.col("Notes"), notes)
+
     def add(self, fields: dict) -> None:
         i = self.table.num_rows
         for name, value in fields.items():

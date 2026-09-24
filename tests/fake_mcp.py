@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from assistant import config, probes
-from assistant.guard import is_transmit
+from assistant.guard import is_entry, is_transmit
+from assistant.fill import NOT_THE_FORM
 from assistant.jev import Jev
 
 
@@ -29,6 +30,10 @@ class El:
     context: str = ""
     refuse_typing: bool = False      # a masked/rewriting input: direct typing does not stick, a goal must set it
     readonly: bool = False           # like the observer: a read-only field is not `editable`
+    submits: bool = False            # a button that submits a form with fields (the ENTRY_SUBMITS probe lists it)
+    occluded: bool = False           # covered by a pop-up
+    ref: str | None = None           # a fixed ref (a redrawn element gets a new one); default: its position
+    label: str = ""                  # a radio's own option text when its name is the question (LinkedIn)
 
 
 @dataclass
@@ -39,6 +44,12 @@ class FakePage:
     els: list[El]
     captcha: bool = False
     iframes: list[str] = field(default_factory=list)
+    form_here: bool | None = None    # the navigate agent's verdict; None: "yes" when the page shows any field
+    modal: str | None = None         # an open modal dialog's name (the view reports it)
+
+
+FIELD_ROLES = {"textbox", "searchbox", "combobox", "radio", "checkbox", "file", "spinbutton", "switch"}
+DECLINE = re.compile(r"^\s*(reject all|i do not accept|decline)\b", re.I)
 
 
 class FakeMCP(Jev):
@@ -59,7 +70,7 @@ class FakeMCP(Jev):
         return self.site[self.cur]
 
     def refs(self) -> list[tuple[str, El]]:
-        return [(f"e{i + 1}", e) for i, e in enumerate(self.page.els)]
+        return [(e.ref or f"e{i + 1}", e) for i, e in enumerate(self.page.els)]
 
     def by_ref(self, ref: str) -> El | None:
         return dict(self.refs()).get(ref)
@@ -68,8 +79,8 @@ class FakeMCP(Jev):
         els = []
         for ref, e in self.refs():
             d = {"ref": ref, "role": e.role, "name": e.name, "value": e.value if e.role != "combobox" else "",
-                 "editable": e.role in ("textbox", "searchbox", "spinbutton") and not e.readonly, "occluded": False, "checked": e.checked, "current": None,
-                 "options": [], "context": e.context}
+                 "editable": e.role in ("textbox", "searchbox", "spinbutton") and not e.readonly, "occluded": e.occluded, "checked": e.checked, "current": None,
+                 "options": [], "context": e.context, "label": e.label}
             if e.role == "combobox":
                 d["current"] = e.value or "Select"
                 d["options"] = [{"ref": f"{ref}:{j + 1}", "label": o, "value": o, "selected": o == e.value}
@@ -80,6 +91,8 @@ class FakeMCP(Jev):
     def view(self) -> str:
         self.obs += 1
         lines = [f"[obs#{self.obs}] {self.page.url}  \"{self.page.title}\""]
+        if self.page.modal:
+            lines.append(f"  ! dialog open: {self.page.modal} [modal]")
         lines += [f"{ref:<4} {e.role[:3]}  {e.name} ▸ \"{e.value}\"" for ref, e in self.refs()]
         return "\n".join(lines) + "\ntext:\n" + self.page.text + " " + " ".join(
             e.value for e in self.page.els if e.role == "file" and e.value)
@@ -101,6 +114,9 @@ class FakeMCP(Jev):
         if js == probes.MAXLENGTHS:
             ml = [[e.name, e.maxlength] for e in self.page.els if e.maxlength]
             return {"n": len(ml), "more": False, "items": ml, "min": min((m for _, m in ml), default=None)}
+        if js == probes.ENTRY_SUBMITS:
+            subs = [e.name for e in self.page.els if e.submits]
+            return {"n": len(subs), "more": False, "items": subs}
         if js == probes.IFRAME_SRCS:
             return {"n": len(self.page.iframes), "more": False, "items": self.page.iframes, "long": 0}
         return None
@@ -140,6 +156,8 @@ class FakeMCP(Jev):
     def _click(self, e: El, confirm: bool = False) -> str | None:
         if is_transmit(e.name) and not confirm:
             return "needs_confirmation"                         # the server rule (B1)
+        if e.submits:
+            self.sent.append(e.name)                            # a form went out: must never happen
         if e.role == "radio":
             for x in self.page.els:
                 if x.group == e.group:
@@ -209,7 +227,9 @@ class FakeMCP(Jev):
                 sub = next((r, e) for r, e in self.refs() if is_transmit(e.name))
                 self.sent.append(sub[1].name)
                 trace.append(f"  {step + 1}. CLICK {sub[0]} {sub[1].name} → ok (1ms model / 1ms browser)")
-        else:                                                   # "Go to the next step of this application."
+        elif goal.startswith("Bring this job application"):     # the navigate goal (prompts/navigate_goal.md)
+            status, step = self._navigate(trace, goal)
+        else:                                                   # the next-step goal: the first button
             for ref, e in self.refs():
                 if e.role == "button":
                     step += 1
@@ -223,6 +243,35 @@ class FakeMCP(Jev):
             passed = all(self._check(c) for c in verify)
             out.append(f"verified: {'PASS' if passed else 'FAIL'}")
         return "\n".join(out) + "\n\n" + self.view()
+
+    def _navigate(self, trace: list[str], goal: str) -> tuple[str, int]:
+        """A stand-in for the agent: decline a cookie banner, continue past a pop-up, then say "done" when the
+        form is here, or click the page's Apply (the server refuses it: needs_confirmation). Told that the page's
+        fields are not the form (fill.NOT_THE_FORM), it looks for the Apply instead."""
+        step = 0
+        for pattern in (DECLINE, re.compile(r"^\s*continue applying\b", re.I)):
+            hit = next(((r, e) for r, e in self.refs() if e.role in {"button", "link"} and pattern.search(e.name)),
+                       None)
+            if hit:
+                step += 1
+                err = self._click(hit[1])
+                trace.append(f"  {step}. CLICK {hit[0]} {hit[1].name} → {err or 'ok'} (1ms model / 1ms browser)")
+        here = self.page.form_here
+        if here is None:
+            here = any(e.role in FIELD_ROLES for e in self.page.els)
+        if NOT_THE_FORM in goal:
+            here = False
+        if here:
+            trace.append(f"  {step + 1}. DONE (conf 0.95)")
+            return "done", step
+        entry = next(((r, e) for r, e in self.refs() if e.role in {"button", "link"} and is_entry(e.name)), None)
+        if entry:
+            step += 1
+            err = self._click(entry[1])
+            trace.append(f"  {step}. CLICK {entry[0]} {entry[1].name} → {err or 'ok'} (1ms model / 1ms browser)")
+            return (f"failed:{err}" if err else "done"), step
+        trace.append(f"  {step + 1}. BLOCKED (conf 0.6)")
+        return "blocked", step
 
     def _check(self, c: dict) -> bool:
         e = self.by_ref(c.get("ref", ""))

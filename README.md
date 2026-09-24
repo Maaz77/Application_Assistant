@@ -8,6 +8,132 @@ For every job at Status **Resume Built**, this fills the application in your own
 
 Build spec (v2): [application_assistant_build_spec.md](application_assistant_build_spec.md). Server findings and decisions: [DISCOVERY.md](DISCOVERY.md).
 
+## How it works
+
+Three pictures: what happens to one job, what happens on one form page, and which file does what. The names on the right are the files in `assistant/` that do each step.
+
+**Jev** (TypeSafe's decision model, reached through Vercel AI Gateway or OpenRouter: `models.jev_route`) makes the decisions, in two places:
+- **The browser agent** is the jev package's goal agent (`browser_goal`). Jev looks at the page and picks each click, one action at a time.
+- **The page decisions** are typed questions the code asks Jev in `decide.py`, all of them for a page in one call (about 0.3 s, $0.0003). What is this page? Is a pop-up in the way? Which fields belong to the application? Which upload takes the resume? Is there an error message? The code branches on the answers, with thresholds set in `decide.THRESHOLDS`.
+
+Jev decides and the code keeps the rules that must not be left to a model: the answers come only from your files, the resume is uploaded by the code, and no click on Submit, Send or Apply ever goes out except the Apply that starts an application. That list of labels in `guard.py` stays a fixed rule; Jev can only add checks to it.
+
+### One job, start to finish
+
+```text
+ preflight: key, Jev answers, Chrome, LinkedIn signed in ............ cli.py
+  │  (a failure stops the run here: exit 1, nothing written)
+  ▼
+ the queue .......................................................... records.py
+     Applications/<job>/   job.md (with the LinkedIn URL) + resume Amin_*.pdf
+     Job_Tracker.numbers   the job's row says "Resume Built"
+  │
+  ▼  for each job, one at a time
+ open the job's LinkedIn posting in its own tab ..................... cli.py
+  │  (a company site that opens in a new tab is followed) ........... tabs.py
+  ▼
+  ┌─ the page loop ────────────────────────────────────────────────── fill.py
+  │  read the page; Jev judges it in one call ....................... pages.py
+  │    "application submitted" ───────► ALARM: stop the whole run (exit 3)
+  │    captcha / sign-up / password ──► one retry where possible, else ✗
+  │    "Sign in with Google" ─────────► pick your account ........... google_signin.py
+  │  is the application form on screen, with nothing over it? (Jev)
+  │    no: the browser agent takes ONE action, then the page is read again
+  │      cookie banner ───────────────► decline optional cookies
+  │      pop-up ──────────────────────► continue the application
+  │      job page ────────────────────► Apply: the code clicks it ... entry.py
+  │    yes: fill the page (next picture); the agent clicks Next
+  └─ repeat until the last step: Submit, which the agent may not click
+  │
+  ▼
+ final check: nothing required is empty, the resume is on the page,
+ no error message and a Submit button (Jev) ......................... pages.py
+  │
+  ▼
+ ✓ PARKED            the tab stays open on the Submit page for you to review
+ ✗ NEEDS ATTENTION   at any step where it cannot go on; that tab stays open too
+  │
+  ▼
+ record the result .................................................. records.py
+     tracker   Status: Pending Review, or Needs Attention
+     folder    moved to Pending-Review/ or Needs-Attention/
+     job.md    a note: what happened, and any open questions
+     (--no-record skips all three)
+ write runs/<date-time>/report.md ................................... report.py
+```
+
+- **"The form is on screen"** is Jev's answer: the page is an application step (or its last step) and nothing covers it. If the agent says it has reached the form where Jev does not see one, such as a job-alert box, the agent is asked once more.
+- **A pop-up over the form**, as Jev judges it (a cookie or consent dialog, or a covered field), sends the page back to the agent, even halfway through the form.
+- **The agent's Apply** is refused by the server and comes back to `entry.py`, which clicks it only when Jev judges that it starts the application, no field holds a value, and the button would not submit a form on the page.
+- **A decision that cannot be made** (Jev unreachable, out of credits) sends the job to Needs Attention with class `decision`. It is never guessed.
+
+### One form page
+
+```text
+ the page's questions + Profile.md + job.md + the resume's text
+  │
+  ▼
+ the answer engine: one model call, reasoning off ................... answers.py
+ for each question: an answer, its source, and a quote that proves it
+  │
+  ▼
+ check every answer against the files (check_answers) ............... answers.py
+     is the quote really in the source file?
+     is the chosen option really on the page?
+     does a computed total, like years of experience, add up?
+     Jev: may this question get a written answer? total or tool years?
+          is the value on the page a placeholder like "Select…"?
+     an answer that fails a check is dropped
+  │
+  ▼
+ fill the page ...................................................... fill.py
+     1  upload the resume
+     2  type the long answers, and the ones written for you
+     3  tick, select and type the rest directly, without a model
+     4  anything left, like a custom dropdown: a page goal (a model clicks)
+     5  a required question with no answer → ✗ NEEDS ATTENTION; the question
+        goes into the report and job.md, for your Profile.md Scratch Pad
+     6  read the page back (an option the page redrew is found by its label);
+        a value that did not stick gets one retry, else ✗
+```
+
+### The code
+
+```text
+ python -m assistant   run · preflight · capture · tripwire · requeue
+  │
+ cli.py ................... the commands and preflight; runs the jobs one by one
+  ├─ config.py ............ config.toml, and the two keys from .env
+  ├─ records.py ........... the queue before the jobs, the record after each one
+  │   └─ tracker.py ....... reads and writes Job_Tracker.numbers
+  ├─ report.py ............ runs/<date-time>/report.md, and the exit code
+  ├─ blockers.py .......... how a job can end, and the one-retry rule
+  └─ fill.py .............. the page loop: the agent's steps, and filling a page
+      ├─ pages.py ......... reads a page, and Jev's judgment of it; the gate
+      ├─ answers.py ....... asks the model, checks its answers ──► OpenRouter
+      ├─ decide.py ........ asks Jev typed questions ──► Vercel AI Gateway (Jev)
+      ├─ entry.py ......... the Apply the agent asks for: the only confirm
+      ├─ google_signin.py . Google one-click sign-in
+      └─ tabs.py .......... which tab is whose; leaves each job's tab open
+  │
+  ▼  every browser call goes through
+ jev.py ................... the only file that imports the browser package
+  ├─ guard.py ............. checks every action first: no Submit, Send or Apply
+  │                         click, no Enter key, no script except a probe
+  └─ probes.py ............ small read-only scripts that measure the page
+  │
+  ▼
+ jev-ultrafast-mcp 0.1.5+aa6, patched, in vendor/ ──► your Chrome, port 9222
+ (its goal agent picks each click with Jev, on the same route)
+```
+
+Also in this folder:
+- `prompts/`: what the models are told. `answer_engine.md` is used by `answers.py`; `navigate_goal.md`, `next_step_goal.md` and `page_goal.md` are the browser agent's goals.
+- `vendor/`: the patched browser package, and the patch itself.
+- `tests/`: see [Tests](#tests).
+- `runs/`: one folder per run, see [Running](#running).
+- `assistant/contract_check.py`: checks that the package's functions still match what `jev.py` calls.
+
 ## Setup (once)
 
 1. **Python environment.** The sibling tools use Poetry, but on this Mac Poetry's pyenv shim is broken, so a plain venv is used:
@@ -27,17 +153,25 @@ Build spec (v2): [application_assistant_build_spec.md](application_assistant_bui
 
    The changes are in `vendor/jev_ultrafast_mcp-0.1.5+aa6.patch`, and preflight refuses to run on the stock package. Once Poetry works again, `poetry install` does the same from `pyproject.toml`.
 
-2. **OpenRouter key.** Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY=`. This is the only secret, and `.env` is git-ignored. Keep some credit on the account: each form page costs one answer-engine call plus the page-filling model's decisions.
+2. **Keys.** Create `.env` in this folder with two lines. It is git-ignored.
+   - `OPENROUTER_API_KEY=<key>`: the answer engine and the text helper when `models.chat_route = "openrouter"`.
+   - `AI_GATEWAY_API_KEY=<key>`: Jev through Vercel AI Gateway (`models.jev_route = "vercel"`), and the chat models when `models.chat_route = "vercel"`. Vercel serves requests only once a card is on file for the team, which also unlocks its free credits. With `jev_route = "openrouter"` the OpenRouter key pays for Jev instead.
+ Keep some credit on the account: each form page costs one answer-engine call (about $0.001), plus the browser agent's decisions (about $0.00002 each) and the text helper's typed values. `tests/test_model_access.py` shows the key, the account's credit and whether a model answers. An account that has never bought credits gets 50 free-model requests a day across all free models, and rotation cannot get past that: HTTP 429 "free-models-per-day" from every model. $10 of credit raises it to 1,000 a day.
 
 3. **Config.** `config.toml` is already filled in:
 
    | Key | Value |
    |---|---|
    | `paths.base` | the repo root |
-   | `models.answer_engine` | `qwen/qwen3.8-27b:free` |
+   | `models.chat_route` | who serves the answer engine and the text helper: `openrouter` (the free models below) or `vercel` (Vercel AI Gateway, paid from its credit, for when OpenRouter's free quota is out). Both take the same chat/completions request |
+   | `models.openrouter.answer_engine` | five free OpenRouter models, tried in turn (`rotation.py`): answers each form page from your files (sent with reasoning off). A call starts at the model that answered last; one that is out (rate-limited, overloaded, timed out, wrong output) hands over to the next at once. A 429 with a short `Retry-After` (30 s or less) is waited out once. When none answers, the job goes to Needs Attention with every model's reason. A single ID also works |
+   | `models.openrouter.text_helper` | four free OpenRouter models, rotated the same way: types the values the browser agent enters |
+   | `models.vercel.answer_engine`, `models.vercel.text_helper` | `mistral/mistral-nemo` (about $0.00004 a page). Vercel limits a new team to 5 requests a minute per model |
+   | `models.jev` | `typesafe-ai/jev`: TypeSafe's decision model, for the browser agent and every page decision (`decide.py`). Each route names it its own way: `typesafe-ai/jev` on Vercel, `typesafe/jev-1.13` on OpenRouter |
+   | `models.jev_route` | `vercel` (Vercel AI Gateway's TypeSafe-compatible API) or `openrouter` |
    | `google.account_email` | `maaz1377.aa@gmail.com` |
 
-   Unknown keys are an error. If the free model keeps answering HTTP 429 (rate-limited upstream, as it did on 2026-09-23), switch to the paid `qwen/qwen3.8-27b`.
+   Unknown keys are an error.
 
 4. **Chrome with remote debugging on port 9222**, signed in to LinkedIn (and Google, for the one-click rule). Either:
    - open `chrome://inspect/#remote-debugging` in your normal Chrome and turn remote debugging on, or
@@ -70,6 +204,14 @@ Build spec (v2): [application_assistant_build_spec.md](application_assistant_bui
 ```
 
 Or double-click `run_application_assistant.command`; arguments pass through.
+
+To try jobs again after a run, put the Needs-Attention ones back in the queue: their folders move back to `Applications/`, their Status returns to Resume Built, and the "Needs Attention: …" line the run added to Notes is removed. `job.md` keeps its notes as the job's history.
+
+```bash
+.venv/bin/python -m assistant requeue
+```
+
+`--job URL` requeues only that job. The tracker is backed up to `runs/<time>-requeue/` first.
 
 | Flag | Effect |
 |---|---|
@@ -105,9 +247,11 @@ Each run writes `runs/<YYYYMMDD-HHMMSS>/`:
    - Enter or Return in any key op;
    - typing with `submit`;
    - any script that isn't a read-only constant in `probes.py`;
-   - `confirm`, which only `entry.py` may send. It sends it only for the first Easy Apply / Apply click, and for a sign-up wall's "Apply without an account" / "Continue as guest" link while no field holds a value.
-2. **The server's confirmation rule** refuses the same labels for the page-filling model (`needs_confirmation`).
-3. **Alarms stop the run** (exit 3) if a model ever clicks such a label successfully, or confirmation text appears on the page.
+   - `confirm`, which only `entry.py` may send. It sends it only for an Apply the browser agent asked for (Easy Apply, Apply now, Apply manually, never a button that submits a form on the page) and for a sign-up wall's "Apply without an account" / "Continue as guest" link, and only while no field holds a value.
+2. **The server's confirmation rule** refuses the same labels for the browser agent (`needs_confirmation`). A refused click comes back to the program: an Apply that starts the application is clicked by `entry.py` (when Jev agrees it starts the application, no field holds a value, and it submits no form), and a refused Submit means the form's last step.
+
+These label lists are fixed rules on purpose. Every other decision is Jev's; a model's judgment must never be the only thing between the program and a sent application.
+3. **Alarms stop the run** (exit 3) if a model ever clicks such a label successfully, or confirmation text appears on the page (Jev's answer, or the fixed tripwire pattern).
 
 `python -m assistant tripwire` proves this on local fixture pages. `--live` also runs the model tripwire, which costs a few OpenRouter calls.
 
@@ -115,9 +259,11 @@ Each run writes `runs/<YYYYMMDD-HHMMSS>/`:
 
 See [DISCOVERY.md](DISCOVERY.md):
 - Inputs without a `type` attribute are invisible to the server, so such a required field ends in Needs-Attention.
-- Chrome asks you to **allow** each new remote-debugging connection in `chrome://inspect` mode. If nobody clicks Allow within 60 s, the run stops with exit 3.
+- Chrome asks you to **allow** each new remote-debugging connection in `chrome://inspect` mode. Preflight waits up to 180 s for you to click Allow; after that the run stops with exit 3.
 - Workday and similar sites need an account. The program tries your Google one-click sign-in; if the site then asks to register or accept terms, the job goes to Needs-Attention.
 - Read-only date pickers can't be set.
+- A custom dropdown shows its options only once opened, so an answer for it can't be checked against the page and is dropped ("answer not on the page").
+- Jev reads text only, and is trained mainly on English; pages in other languages are judged less accurately.
 - Script results are capped at 200 characters, so probes return counts plus the first items.
 
 ## Tests
@@ -135,7 +281,8 @@ See [DISCOVERY.md](DISCOVERY.md):
 ```
 
 - `-m unit`: no browser, no network.
-- Plain `pytest`: adds `browser` tests, run against a throwaway headless Chrome on port 9223 and local fixture pages only.
-- `--live`: adds `live_model` tests. They call OpenRouter, still against local fixtures only, and need `.env`.
+- Plain `pytest`: adds `browser` tests, run against a throwaway headless Chrome on port 9223 and local fixture pages only. `tests/test_model_access.py` also runs here and calls OpenRouter.
+- `--live`: adds `live_model` tests. They call OpenRouter, still against local fixtures and saved pages only, and need `.env`. They include the end-to-end `process()` runs and `tests/test_decisions_live.py`, where Jev judges the fixture pages, pages saved from real sites, and the six pages of the run that went wrong on 2026-09-23.
+- Offline, Jev's questions are answered by `tests/rule_decider.py`, a stand-in built from the rules the program used before Jev. The program itself never uses those rules.
 
 Real pages for the classifier tests come from `capture` (see [LIVE_TEST.md](LIVE_TEST.md)).

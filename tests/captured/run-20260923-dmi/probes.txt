@@ -1,0 +1,14 @@
+13/13 ops ok
+  + eval → {"n": 0, "more": false, "items": []}  1ms
+  + eval → {"n": 0, "more": false, "items": [], "min": null}  0ms
+  + eval → {"n": 2, "more": false, "items": ["https://www.linkedin.com/preload/?_bprMode=vanilla", "https://lnkd.demdex.net/dest5.html?d_nsid=0#https%3A%2F%2Fwww.linkedin.com"], "long": 3}  0ms
+  + eval → {"n": 0, "more": false, "items": []}  0ms
+  + eval → {"n": 0, "more": false, "items": [], "o": 0, "total": 0}  0ms
+  + eval → {"n": 0, "more": false, "items": [], "o": 7, "total": 0}  0ms
+  + eval → {"n": 0, "more": false, "items": [], "o": 14, "total": 0}  0ms
+  + eval → {"n": 0, "more": false, "items": [], "o": 21, "total": 0}  0ms
+  + eval → {"n": 4, "more": false, "items": ["Yes", "No", "Yes", "No"], "o": 0, "total": 4}  1ms
+  + eval → {"n": 0, "more": false, "items": [], "o": 8, "total": 4}  0ms
+  + eval → {"n": 0, "more": false, "items": [], "o": 16, "total": 4}  0ms
+  + eval → {"n": 0, "more": false, "items": [], "o": 24, "total": 4}  0ms
+  + eval → {"n": 0, "more": false, "items": [], "o": 32, "total": 4}  1ms

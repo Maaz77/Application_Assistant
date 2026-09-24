@@ -65,6 +65,15 @@ def test_run_without_key_fails_preflight_with_exit_1(workspace, monkeypatch, cap
     assert "OPENROUTER_API_KEY is missing" in capsys.readouterr().out
 
 
+def test_a_key_both_routes_use_is_reported_once(workspace, monkeypatch, capsys):
+    base, cfg = workspace
+    cfg.write_text(cfg.read_text().replace('chat_route = "openrouter"', 'chat_route = "vercel"'))
+    monkeypatch.setattr(cli.config_mod, "gateway_key", lambda *a: "")
+    assert cli.main(["--config", str(cfg), "run"]) == 1
+    out = capsys.readouterr().out
+    assert out.count("AI_GATEWAY_API_KEY is missing") == 1 and "the answer engine and text helper and Jev" in out
+
+
 def test_bad_config_is_exit_1(tmp_path, capsys):
     bad = tmp_path / "c.toml"
     bad.write_text('[paths]\nbase = "x"\nnope = 1\n')

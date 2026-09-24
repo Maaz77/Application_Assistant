@@ -1,4 +1,7 @@
-"""T9 end-to-end in the throwaway Chrome: process() from a LinkedIn-like job page to a parked, released tab."""
+"""T9 end-to-end in the throwaway Chrome: process() from a LinkedIn-like job page to a parked, released tab.
+
+The browser agent (browser_goal's decision model on OpenRouter) finds the way from the posting to the form and from
+step to step, so these run with --live: a few decisions per job page, about $0.0001 in all."""
 from contextlib import nullcontext
 from datetime import date
 
@@ -10,7 +13,7 @@ from assistant.jev import Jev
 from assistant.records import Job
 from tests.support import CDP_URL
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.live_model]
 
 
 def canned(p, src, **kw):
@@ -54,7 +57,7 @@ def test_process_parks_and_releases(fixture_server, chrome, tmp_path, monkeypatc
         w.write(fh)
     baseline = {t["id"] for t in chrome.tabs()}
     forms_before = {t["id"] for t in chrome.tabs() if "f10_form.html" in t["url"]}
-    with nullcontext(Jev(cfg, "")) as browser:
+    with nullcontext(Jev(cfg, "", calls_log=tmp_path / "calls.jsonl")) as browser:
         book = tabs.TabBook(browser)
         parked = cli.process(Job.from_dir(d), browser=browser, book=book, cfg=cfg, key="", profile="", run_dir=tmp_path / "run",
                                    today=date(2026, 9, 23))

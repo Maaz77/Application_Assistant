@@ -7,7 +7,7 @@ from pypdf import PdfWriter
 
 from assistant.answers import Policy, Sources, answer_page
 from assistant.blockers import NeedsAttention
-from assistant import tabs
+from assistant import config, tabs
 from assistant.fill import JobCtx, run_pages
 from tests.support import CDP_URL
 
@@ -36,14 +36,15 @@ def resume(tmp_path):
 
 
 @pytest.mark.parametrize("page", ["f02.html", "f08.html"])
-def test_parked_live(new_browser, fixture_server, api_key, cfg, resume, tmp_path, chrome, page):
+def test_parked_live(new_browser, fixture_server, chat_key, cfg, resume, tmp_path, chrome, page):
     model = os.environ.get("AA_ANSWER_MODEL") or cfg.models.answer_engine
     src = Sources(PROFILE, "Acme, Milan. Data Engineer.", "Amin Abbaszadeh\nMilan, Italy")
 
     def engine(p):
-        return answer_page(p, src, key=api_key, model=model, policy=Policy(), today=date(2026, 9, 23))
+        return answer_page(p, src, key=chat_key, models=model, policy=Policy(), today=date(2026, 9, 23),
+                           url=config.chat_url(cfg))
 
-    with new_browser(api_key) as browser:
+    with new_browser(chat_key) as browser:
         browser.open(fixture_server.url(page), "live")
         ctx = JobCtx(browser=browser, session="live", book=tabs.TabBook(browser), resume_pdf=resume, answer_fn=engine,
                      baseline={t["id"] for t in chrome.tabs()}, answers_log=tmp_path / "answers.json",

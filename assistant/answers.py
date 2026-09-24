@@ -1,20 +1,25 @@
-"""Answer engine (§7): one OpenRouter call per form page, then deterministic checks in code."""
+"""Answer engine (§7): one chat call per form page (OpenRouter or Vercel AI Gateway), then deterministic checks
+in code."""
 from __future__ import annotations
 
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Callable, Literal
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from assistant import decide
+from assistant.decide import THRESHOLDS as T
 from assistant.pages import Page
+from assistant.rotation import NoModelAvailable, Rotation
 
-OPENROUTER_CHAT = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_CHAT = "https://openrouter.ai/api/v1/chat/completions"   # the default route (config.chat_url)
 PROMPT = Path(__file__).resolve().parent.parent / "prompts" / "answer_engine.md"
 PAGE_TEXT_MAX = 12_000
 
@@ -36,11 +41,14 @@ class Question(BaseModel):
     quote: str | None
     relies_on: list[str] | None
     note: str | None = None      # set by the checks (why an answer was dropped); not part of the model schema
+    resume_upload: bool = False  # Jev (judge_questions): the resume upload answers this question
+    cover_letter: bool = False   # Jev (judge_questions): an upload that asks for a cover letter
 
 
 class PageAnswers(BaseModel):
     model_config = ConfigDict(extra="forbid")
     questions: list[Question]
+    model: str | None = None     # set by call_engine: the model that answered; not part of the model schema
 
 
 def _nullable(t: dict) -> dict:
@@ -66,22 +74,44 @@ QUESTION_SCHEMA = {
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["questions"],
           "properties": {"questions": {"type": "array", "items": QUESTION_SCHEMA}}}
 
-FORBIDDEN_GENERATED = re.compile(
-    r"salary|compensation|\bpay\b|notice period|start date|availability|visa|sponsor|right to work|authori[sz]ed|"
-    r"years of experience|gender|ethnic|race|veteran|disabilit", re.I)
 LONG_TEXT = 300
-TOTAL_YEARS_RE = re.compile(r"\byears?\b.{0,40}\bexperience\b|\bexperience\b.{0,20}\byears?\b", re.I)
-TOOL_YEARS_RE = re.compile(r"\bexperience\b.{0,30}\b(with|in|using|on|of)\s+(?!(the\s+)?(industry|field|workforce)\b)\S", re.I)
-RATE_LIMIT_WAIT = 15.0
+# Vercel AI Gateway caps a new team at 5 requests a minute per model and says when to come back (HTTP 429 with
+# `Retry-After: 22`, mistral-nemo, live 2026-09-24). A wait that short beats failing the page; longer ones rotate on.
+RETRY_AFTER_MAX = 30.0
 MAX_TOKENS = 8192          # one page of answers; OpenRouter otherwise reserves the model maximum (HTTP 402)
+# Extraction with quotes needs no hidden reasoning, and a reasoning model spends MAX_TOKENS on it: qwen3.7-flash
+# returned an empty and then a cut-off answer on The Flex's 43-field form (live 2026-09-23, finish_reason=length).
+# With reasoning off the same page answered in 21 s with 2,473 tokens. `effort: low` still used all 8,192.
+REASONING = {"enabled": False}
 
 
 class AnswerEngineError(RuntimeError):
     """Blocker 'answer engine output invalid' (or unreachable)."""
 
 
+class ModelUnavailable(AnswerEngineError):
+    """This model cannot answer right now (rate-limited, overloaded, timed out, or wrong output); the next one may."""
+
+
 def norm(s: str | None) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
+
+
+LOOSE_MIN = 12      # a formatting-free match needs this many letters and digits, so a stray "Yes" proves nothing
+
+
+def _loose(s: str | None) -> str:
+    return re.sub(r"[^0-9a-z]+", "", (s or "").lower())
+
+
+def quoted_in(quote: str | None, text: str) -> bool:
+    """`quote` is in `text`, ignoring whitespace — or, for a quote of LOOSE_MIN letters and digits or more, ignoring
+    case, spacing and punctuation too: the model writes a resume's "+393519358813" as "+39 351 935 8813"
+    (Mastercard, live 2026-09-23), which is the same fact."""
+    q = norm(quote)
+    if not q:
+        return False
+    return q in norm(text) or (len(_loose(q)) >= LOOSE_MIN and _loose(q) in _loose(text))
 
 
 @dataclass
@@ -94,8 +124,7 @@ class Sources:
         return {"profile": self.profile, "job": self.job, "resume": self.resume}.get(name, "")
 
     def any_contains(self, snippet: str) -> bool:
-        s = norm(snippet)
-        return bool(s) and any(s in norm(t) for t in (self.profile, self.job, self.resume))
+        return any(quoted_in(snippet, t) for t in (self.profile, self.job, self.resume))
 
 
 def resume_text(pdf: Path) -> str:
@@ -115,42 +144,80 @@ def system_prompt(free_text_max_chars: int) -> str:
     return PROMPT.read_text().replace("{free_text_max_chars}", str(free_text_max_chars))
 
 
-def call_engine(*, key: str, model: str, system: str, user: dict, post: Callable | None = None,
-                timeout: float = 60.0, sleep: Callable[[float], None] | None = None) -> PageAnswers:
-    """POST chat/completions; json_schema strict, json_object fallback on HTTP 400; one retry on timeout/5xx
-    and one on invalid output. `post(url, json, headers, timeout) -> (status, body)` is injectable for tests."""
-    post = post or _httpx_post
+def call_engine(*, key: str, models: Rotation | str | list[str], system: str, user: dict,
+                url: str = OPENROUTER_CHAT, post: Callable | None = None, timeout: float = 60.0,
+                sleep: Callable[[float], None] = time.sleep) -> PageAnswers:
+    """Ask the models in turn (rotation.py) until one gives a valid answer; AnswerEngineError when none does.
+    `url` is the route's chat/completions (config.chat_url): OpenRouter and Vercel AI Gateway take the same request.
+    `post(url, json, headers, timeout) -> (status, body)` is injectable for tests."""
+    rotation = models if isinstance(models, Rotation) else Rotation(models)
+    try:
+        pa = rotation.call(lambda m: _ask_model(m, key=key, system=system, user=user, url=url,
+                                                post=post or _httpx_post, timeout=timeout, sleep=sleep),
+                           ModelUnavailable)
+    except NoModelAvailable as exc:
+        raise AnswerEngineError(f"answer engine: {exc}") from None
+    pa.model = rotation.last
+    return pa
+
+
+def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post: Callable, timeout: float,
+               sleep: Callable[[float], None]) -> PageAnswers:
+    """One model: POST chat/completions, json_schema strict with a json_object fallback on HTTP 400. A rejected
+    key is AnswerEngineError (no other model would do better); anything else that fails is ModelUnavailable. A 429
+    that names a short Retry-After is waited out once."""
     fmt: dict = {"type": "json_schema", "json_schema": {"name": "page_answers", "strict": True, "schema": SCHEMA}}
-    body = {"model": model, "temperature": 0, "max_tokens": MAX_TOKENS,
+    body = {"model": model, "temperature": 0, "max_tokens": MAX_TOKENS, "reasoning": REASONING,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]}
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    transient = invalid = 0
-    fell_back = False
+    waited = False
     while True:
         try:
-            status, data = post(OPENROUTER_CHAT, {**body, "response_format": fmt}, headers, timeout)
+            status, data = post(url, {**body, "response_format": fmt}, headers, timeout)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
-            status, data = 599, {"error": str(exc)}
-        if status == 400 and fmt["type"] == "json_schema" and not fell_back:
-            fmt, fell_back = {"type": "json_object"}, True
+            raise ModelUnavailable(f"unreachable ({type(exc).__name__})") from None
+        if status == 400 and fmt["type"] == "json_schema":
+            fmt = {"type": "json_object"}
             continue
-        if status >= 500 or status == 429:        # 429: free models are rate-limited upstream; wait, then retry
-            transient += 1
-            if transient > 1:
-                raise AnswerEngineError(f"answer engine unreachable (HTTP {status})")
-            if status == 429:
-                (sleep or time.sleep)(RATE_LIMIT_WAIT)
+        if status == 401:
+            raise AnswerEngineError(f"{urlparse(url).hostname} rejected the key (HTTP 401)")
+        # OpenRouter passes an overloaded upstream through as HTTP 200 with an error body and an empty choice
+        # (nemotron-3-super:free, live 2026-09-24), so an error body fails the model whatever the status.
+        err = data.get("error") if isinstance(data, dict) else None
+        wait = _retry_after(data) if status == 429 and not waited else None
+        if wait is not None and wait <= RETRY_AFTER_MAX:
+            sleep(wait)
+            waited = True
             continue
-        if status != 200:
-            raise AnswerEngineError(f"answer engine HTTP {status}: {str(data)[:200]}")
+        if status != 200 or err:
+            raise ModelUnavailable(f"HTTP {_code(status, err)} {_message(err)}".rstrip())
         try:
             content = data["choices"][0]["message"]["content"]
             return PageAnswers.model_validate_json(_strip_fences(content))
         except (KeyError, IndexError, TypeError, ValidationError, ValueError):
-            invalid += 1
-            if invalid > 1:
-                raise AnswerEngineError("answer engine output invalid")
+            raise ModelUnavailable("output invalid") from None
+
+
+def _retry_after(data) -> float | None:
+    """Seconds from the Retry-After header, which _httpx_post keeps under "_retry_after"."""
+    try:
+        return float(data.get("_retry_after")) if isinstance(data, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _code(status: int, err) -> int:
+    return err.get("code", status) if isinstance(err, dict) and isinstance(err.get("code"), int) else status
+
+
+def _message(err) -> str:
+    """Errors: {"message", "code" or "type", "metadata": {"raw"}} (metadata on OpenRouter only); the upstream's
+    raw text says more."""
+    if not isinstance(err, dict):
+        return str(err or "")[:120]
+    raw = (err.get("metadata") or {}).get("raw")
+    return str(raw or err.get("message") or "")[:120]
 
 
 def _strip_fences(s: str) -> str:
@@ -162,9 +229,12 @@ def _strip_fences(s: str) -> str:
 def _httpx_post(url, payload, headers, timeout):
     r = httpx.post(url, json=payload, headers=headers, timeout=timeout)
     try:
-        return r.status_code, r.json()
+        body = r.json()
     except ValueError:
-        return r.status_code, {"raw": r.text[:500]}
+        body = {"raw": r.text[:500]}
+    if isinstance(body, dict) and r.headers.get("retry-after"):
+        body["_retry_after"] = r.headers["retry-after"]
+    return r.status_code, body
 
 
 # ------------------------------------------------------------------ computed years
@@ -230,21 +300,91 @@ def _limit(q: Question, p: Page, policy: Policy) -> int:
     return policy.free_text_max_chars
 
 
-PLACEHOLDER_RE = re.compile(r"^\s*(select|choose|pick|please select|--|—)\b.*$|^\s*(select|choose)\s*\.{0,3}\s*$", re.I)
+# ------------------------------------------------------------------ Jev's verdicts on the questions
+
+MUST_NOT_GENERATE = {
+    "true": "It asks for a fact only the candidate can state: salary or pay, notice period, start date, availability, "
+            "visa, sponsorship, work authorization, years of experience, gender, ethnicity, veteran or disability "
+            "status, or another personal fact.",
+    "false": "It asks for a text to write, such as a motivation, why this company, or a description of experience.",
+}
+YEARS_KINDS = {
+    "total": "Total years of professional work experience, in any field or role.",
+    "specific": "Years of experience with a particular skill, tool, programming language, technology, industry "
+                "or role.",
+    "other": "Something else.",
+}
 
 
-def _held(e) -> str:
+@dataclass
+class Verdicts:
+    """Jev's verdicts for check_answers, keyed by the normalised question text or shown value."""
+    must_not_generate: set[str] = field(default_factory=set)
+    total_years: set[str] = field(default_factory=set)
+    placeholders: set[str] = field(default_factory=set)
+
+
+def _shown(e) -> str:
+    return "" if e is None else ((e.current or "") if e.options else (e.current or e.value or "")).strip()
+
+
+def judge_answers(pa: "PageAnswers", p: Page) -> Verdicts:
+    """One Jev call for the page's answers: which generated answers ask for a fact that must not be written, which
+    computed answers ask for total years of experience, and which shown values are placeholder prompts."""
+    by_ref = {e.ref: e for e in p.elements}
+    qs: dict[str, dict] = {}
+    for i, q in enumerate(pa.questions):
+        if q.source == "generated":
+            qs[f"gen_{i}"] = decide.noul({"form_question": q.question, "question": "Does `form_question` ask for "
+                                          "a fact only the candidate can state, rather than a text to write?"},
+                                         **MUST_NOT_GENERATE)
+        elif q.source == "computed":
+            qs[f"years_{i}"] = decide.choice({"form_question": q.question,
+                                              "question": "What does `form_question` ask for?"}, YEARS_KINDS)
+    values = sorted({v for q in pa.questions if (v := _shown(by_ref.get(q.ref or "")))})
+    for j, v in enumerate(values):
+        qs[f"shown_{j}"] = decide.noul({"value": v, "question": "Is `value` a placeholder prompt, such as 'Select "
+                                        "an option', 'Choose…' or '--', rather than a real answer?"})
+    a = decide.current().ask("answers", {"page": p.title, "url": p.url}, qs)
+    v = Verdicts()
+    for i, q in enumerate(pa.questions):
+        if f"gen_{i}" in a and a[f"gen_{i}"].yes(T["must_not_generate"]):
+            v.must_not_generate.add(norm(q.question))
+        if f"years_{i}" in a and a[f"years_{i}"].choice == "total":
+            v.total_years.add(norm(q.question))
+    v.placeholders = {norm(val) for j, val in enumerate(values) if a[f"shown_{j}"].yes(T["placeholder"])}
+    return v
+
+
+def judge_questions(pa: "PageAnswers", p: Page) -> None:
+    """One Jev call: flag the questions the resume upload answers, and the uploads that ask for a cover letter."""
+    qs: dict[str, dict] = {}
+    for i, q in enumerate(pa.questions):
+        qs[f"resume_{i}"] = decide.noul(
+            {"form_question": q.question, "options": q.options or [],
+             "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing "
+                         "among uploaded resume files?"})
+        if q.kind == "file":
+            qs[f"cover_{i}"] = decide.noul({"upload": q.question, "question": "Does `upload` ask for a cover letter?"})
+    a = decide.current().ask("questions", {"page": p.title, "url": p.url}, qs)
+    for i, q in enumerate(pa.questions):
+        q.resume_upload = a[f"resume_{i}"].yes(T["resume_upload"])
+        q.cover_letter = f"cover_{i}" in a and a[f"cover_{i}"].yes(T["cover_letter"])
+
+
+def _held(e, v: Verdicts) -> str:
     """The value a field already holds: a native select's chosen option (not a blank or placeholder option),
-    a custom combobox's shown value (enrich), or a text field's value."""
+    a custom combobox's shown value (enrich), or a text field's value. Placeholders are Jev's verdict."""
     if e is None:
         return ""
-    if e.options:                                             # native <select>: its value must be non-empty
-        return (e.current or "") if (e.value or "").strip() and not PLACEHOLDER_RE.match(e.current or "") else ""
-    held = (e.current or e.value or "").strip()
-    return "" if PLACEHOLDER_RE.match(held) else held
+    if e.options and not (e.value or "").strip():             # native <select>: its value must be non-empty
+        return ""
+    held = _shown(e)
+    return "" if norm(held) in v.placeholders else held
 
 
-def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today: date) -> list[Question]:
+def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today: date,
+                  verdicts: Verdicts | None = None) -> list[Question]:
     """Apply §7 checks in place (a failed check sets answer=None with a note).
     Returns the generated questions whose relies_on/length failed — the caller regenerates them once.
 
@@ -253,6 +393,7 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
     a quote counts if it is in any of the three files (the source is corrected); a choice is judged by what it
     would set — the field's own options or current value, the targeted radio's own label — not by the echoed list;
     and a required field that already holds a value keeps it when no valid answer is left."""
+    v = verdicts if verdicts is not None else judge_answers(pa, p)
     labels = norm(p.text).lower() + " " + " ".join(
         [norm(e.name).lower() for e in p.elements] + [norm(e.label).lower() for e in p.elements if e.label]
         + [norm(o.label).lower() for e in p.elements for o in e.options if o.label])
@@ -268,8 +409,8 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
             if not q.quote:
                 _drop(q, "no quote")
                 continue
-            if norm(q.quote) not in norm(src.by_name(q.source)):
-                found = next((n for n in ("profile", "job", "resume") if norm(q.quote) in norm(src.by_name(n))), None)
+            if not quoted_in(q.quote, src.by_name(q.source)):
+                found = next((n for n in ("profile", "job", "resume") if quoted_in(q.quote, src.by_name(n))), None)
                 if found is None:
                     _drop(q, "quote not found in the sources")
                     continue
@@ -297,7 +438,7 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
             match = [o for o in q.options if norm(o).lower() == norm(q.answer).lower()]
             q.answer = match[0] if match else q.answer
         if q.source == "generated":
-            if q.kind not in ("text", "longtext") or FORBIDDEN_GENERATED.search(q.question):
+            if q.kind not in ("text", "longtext") or norm(q.question) in v.must_not_generate:
                 _drop(q, "generated text not allowed for this question")
                 continue
             if not q.relies_on or not all(src.any_contains(s) for s in q.relies_on) \
@@ -305,7 +446,7 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
                 regenerate.append(q)
                 continue
         elif q.source == "computed":
-            if TOOL_YEARS_RE.search(q.question) or not TOTAL_YEARS_RE.search(q.question):
+            if norm(q.question) not in v.total_years:
                 # §7: computed only for *total* years of experience; years with a tool are never guessed
                 # (live 2026-09-23: "years of work experience … with C++?" was offered total years)
                 _drop(q, "computed is only for total years of experience")
@@ -318,7 +459,7 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
                 _drop(q, f"computed years mismatch (recomputed {years})")
                 continue
         elif q.source == "linkedin-prefill":
-            held = _held(el)
+            held = _held(el, v)
             if policy.prefill == "strict" or not held or norm(held) != norm(q.answer):
                 _drop(q, "pre-fill not kept")
                 continue
@@ -327,34 +468,37 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
     if policy.prefill != "strict":
         for q in pa.questions:
             # §7: "a pre-filled value the sources do not address → keep it" — also when the model's answer failed
-            held = _held(by_ref.get(q.ref or "")) if q.kind != "file" and q.answer is None else ""
+            held = _held(by_ref.get(q.ref or ""), v) if q.kind != "file" and q.answer is None else ""
             if held:
                 q.answer, q.source = held, "linkedin-prefill"
                 q.note = (q.note + "; " if q.note else "") + "kept the value the page already holds"
     return regenerate
 
 
-def answer_page(p: Page, src: Sources, *, key: str, model: str, policy: Policy, today: date | None = None,
-                post: Callable | None = None) -> PageAnswers:
-    """Call the engine, run the checks, regenerate bad generated texts once, check again."""
+def answer_page(p: Page, src: Sources, *, key: str, models: Rotation | str | list[str], policy: Policy,
+                today: date | None = None, url: str = OPENROUTER_CHAT, post: Callable | None = None) -> PageAnswers:
+    """Call the engine, run the checks, regenerate bad generated texts once, check again. `models` rotate
+    (rotation.py): pass one Rotation for a whole run so each page starts at the model that answered last."""
     today = today or date.today()
     system = system_prompt(policy.free_text_max_chars)
     user = {"page": page_payload(p), "sources": {"profile": src.profile, "job": src.job, "resume": src.resume}}
-    pa = call_engine(key=key, model=model, system=system, user=user, post=post)
-    bad = check_answers(pa, p, src, policy, today)
+    models = models if isinstance(models, Rotation) else Rotation(models)
+    pa = call_engine(key=key, models=models, system=system, user=user, url=url, post=post)
+    verdicts = judge_answers(pa, p)
+    bad = check_answers(pa, p, src, policy, today, verdicts)
     if bad:
         user["regenerate"] = {"questions": [q.question for q in bad],
                               "reason": "relies_on must be exact sentences from the sources and the text must fit "
                                         "its length limit; answer these again"}
-        again = {norm(q.question): q for q in call_engine(key=key, model=model, system=system, user=user,
-                                                          post=post).questions}
+        again = {norm(q.question): q for q in call_engine(key=key, models=models, system=system, user=user,
+                                                          url=url, post=post).questions}
         for q in bad:
             new = again.get(norm(q.question))
             if new and new.source == "generated":
                 q.answer, q.relies_on = new.answer, new.relies_on
             else:
                 q.answer = None
-        still = check_answers(PageAnswers(questions=bad), p, src, policy, today)
+        still = check_answers(PageAnswers(questions=bad), p, src, policy, today, verdicts)
         for q in still:
             _drop(q, "generated text failed its checks twice")
     return pa

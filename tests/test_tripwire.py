@@ -7,7 +7,8 @@ import re
 
 import pytest
 
-from assistant.guard import GuardError, is_advance, is_transmit
+from assistant.guard import GuardError, is_transmit
+from tests.rule_decider import is_advance
 from assistant.jev import Jev
 
 TRIPWIRE = [f"f0{i}.html" for i in range(1, 8)]

@@ -9,7 +9,6 @@ from assistant import probes
 TRANSMIT_STRONG = [r"\bsubmit", r"\bsend\b", r"\bapply\b"]
 TRANSMIT_WEAK = [r"\bconfirm\b", r"\bdone\b", r"\bfinish", r"\bcomplete\b"]
 TRANSMIT = TRANSMIT_STRONG + TRANSMIT_WEAK  # re.I, re.search on the element label
-ADVANCE_RE = r"^\s*(next|continue|review|save and continue|save & continue)\b"  # and not TRANSMIT
 ENTRY_RE = r"^\s*(easy apply|apply)\b"
 GUEST_RE = r"apply without an account|continue as guest"   # §6.3 signup attempt 2 (user decision 2026-09-23)
 
@@ -32,10 +31,6 @@ def is_transmit(label: str) -> bool:
 
 def is_strong_transmit(label: str) -> bool:
     return any(re.search(p, label or "", re.I) for p in TRANSMIT_STRONG)
-
-
-def is_advance(label: str) -> bool:
-    return bool(re.search(ADVANCE_RE, label or "", re.I)) and not is_transmit(label)
 
 
 def is_entry(label: str) -> bool:

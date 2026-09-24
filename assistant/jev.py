@@ -1,11 +1,14 @@
 """jev-ultrafast-mcp 0.1.5, called directly in Python (spec v2 §3). The only module that imports the package.
 
 Order matters: the package reads its config and builds its browser manager when `server` is imported
-(server.py l.61–63), so apply_env() must run first. Only the public `server.browser_*` functions are called.
+(server.py l.61–63), so apply_env() must run first. Only the public `server.browser_*` functions are called; the
+one change to the package's inside is the text helper's model rotation (rotate_text_helper).
 """
 from __future__ import annotations
 
+import dataclasses
 import json
+import logging
 import os
 import sys
 import threading
@@ -18,8 +21,10 @@ from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict
 
 from assistant import guard, probes
-from assistant.config import Config
+from assistant import config
+from assistant.config import CHAT_BASES, Config
 from assistant.guard import TRANSMIT
+from assistant.rotation import NoModelAvailable, Rotation
 
 STRIPPED_PREFIXES = ("JEVMCP_", "TYPESAFE_", "TEXT_MODEL_", "OPENROUTER_")
 # 0.1.5 plus three vendored observer fixes (vendor/*.patch): display:contents wrappers hide nothing; while a
@@ -86,7 +91,8 @@ def split_json(text: str) -> tuple[str, Table]:
 # ------------------------------------------------------------------ environment and import
 
 def env_values(cfg: Config, key: str, cdp_url: str | None = None) -> dict[str, str]:
-    """The §3 table. Importing jev_ultrafast_mcp.config is safe: it does not load the server."""
+    """The §3 table. `key` is the chat route's key (config.chat_key): the text helper goes where the answer engine
+    goes. Importing jev_ultrafast_mcp.config is safe: it does not load the server."""
     from jev_ultrafast_mcp.config import DEFAULT_DENY_PATTERNS
 
     patterns = list(DEFAULT_DENY_PATTERNS) + TRANSMIT
@@ -100,28 +106,64 @@ def env_values(cfg: Config, key: str, cdp_url: str | None = None) -> dict[str, s
         "JEVMCP_ALLOW_UPLOADS": "1",
         "JEVMCP_ALLOW_JS": "1",
         "JEVMCP_CONFIRM_PATTERNS": ",".join(patterns),
-        "TYPESAFE_BASE_URL": "https://openrouter.ai/api/alpha/decisions",
+        **agent_route(cfg, key),
         "TYPESAFE_MODEL": cfg.models.jev,
-        "OPENROUTER_API_KEY": key,
+        # the package's OpenRouter key pays for Jev on jev_route = "openrouter"
+        "OPENROUTER_API_KEY": key if cfg.models.chat_route == "openrouter" else config.api_key(),
         "TEXT_MODEL_API_KEY": key,
-        "TEXT_MODEL_BASE_URL": "https://openrouter.ai/api/v1",
-        "TEXT_MODEL": cfg.models.text_helper,
+        "TEXT_MODEL_BASE_URL": CHAT_BASES[cfg.models.chat_route],
+        "TEXT_MODEL": cfg.models.text_helper[0],    # the rest rotate in through rotate_text_helper()
+        "TEXT_MODEL_REASONING": "none",      # the text helper copies a value: no hidden reasoning (free Qwen too)
     }
+
+
+def agent_route(cfg: Config, key: str) -> dict[str, str]:
+    """Where the goal agent's decision model (Jev) is reached. The package takes a non-OpenRouter TYPESAFE_BASE_URL
+    as the full System One endpoint, with TYPESAFE_API_KEY (its config._turbo_backend); OpenRouter's route is its
+    alpha decisions endpoint, paid with the OpenRouter key."""
+    from assistant import decide
+    if cfg.models.jev_route == "vercel":
+        return {"TYPESAFE_BASE_URL": decide.ENDPOINTS["vercel"], "TYPESAFE_API_KEY": config.gateway_key()}
+    return {"TYPESAFE_BASE_URL": "https://openrouter.ai/api/alpha/decisions"}
 
 
 _server = None
 _applied: dict[str, str] | None = None
+_text_helpers: tuple[str, ...] = ()
 
 
 def apply_env(cfg: Config, key: str, cdp_url: str | None = None) -> None:
     """Scrub stray package variables from os.environ, then set the §3 values. Must precede load()."""
-    global _applied
+    global _applied, _text_helpers
     if _server is not None:
         raise RuntimeError("apply_env() after the package was loaded has no effect (config is fixed per process)")
     for k in [k for k in os.environ if k.startswith(STRIPPED_PREFIXES)]:
         del os.environ[k]
     _applied = env_values(cfg, key, cdp_url)
+    _text_helpers = cfg.models.text_helper
     os.environ.update(_applied)
+
+
+def rotate_text_helper(policy, models: tuple[str, ...]) -> None:
+    """The package types a custom widget's value with ONE text model (TEXT_MODEL, read once at import). Wrap its
+    `policy.text_for(cfg, ...)` so each call tries the models in turn (rotation.py): a model that fails
+    (TurboUnavailable: rate-limited, overloaded, wrong shape) hands over to the next, and only when none answers does
+    the package see TurboUnavailable, naming every model's failure. server.py calls it as `policy.text_for(CONFIG, …)`
+    at call time, which is what makes the wrap take effect (checked by contract_check)."""
+    original = getattr(policy.text_for, "__wrapped__", policy.text_for)
+    rotation = Rotation(models)
+
+    def text_for(cfg, *args, **kwargs):
+        def attempt(model: str) -> str:
+            return original(dataclasses.replace(cfg, text_model=model), *args, **kwargs)
+        try:
+            return rotation.call(attempt, policy.TurboUnavailable)
+        except NoModelAvailable as exc:
+            raise policy.TurboUnavailable(f"Text helper: {exc}; nothing typed.") from None
+
+    text_for.__wrapped__ = original
+    text_for.rotation = rotation
+    policy.text_for = text_for
 
 
 def package_version() -> str:
@@ -140,6 +182,11 @@ def load():
                                f"{EXPECTED_PACKAGE_VERSION} from vendor/ (see README, Setup)")
         from jev_ultrafast_mcp import server
         _server = server
+        rotate_text_helper(server.policy, _text_helpers)
+        # Importing the server turns on INFO logging, and httpx then prints every request ("HTTP Request: POST
+        # https://openrouter.ai/…") into the run's output (live run 2026-09-23). Keep only its warnings.
+        for name in ("httpx", "httpcore"):
+            logging.getLogger(name).setLevel(logging.WARNING)
     return _server
 
 

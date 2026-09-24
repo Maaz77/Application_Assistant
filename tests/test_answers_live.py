@@ -4,6 +4,7 @@ from datetime import date
 
 import pytest
 
+from assistant import config
 from assistant.answers import Policy, Sources, answer_page, uncovered_required
 from assistant.pages import read_page
 
@@ -18,13 +19,14 @@ I live in Milan, Italy.
 """
 
 
-def test_engine_answers_f08(new_browser, fixture_server, api_key, cfg):
+def test_engine_answers_f08(new_browser, fixture_server, chat_key, cfg):
     with new_browser() as browser:
         browser.open(fixture_server.url("f08.html"), "a")
         p = read_page(browser, "a")
         browser.close("a")
     pa = answer_page(p, Sources(PROFILE, "Acme, Milan. Data Engineer.", "Amin Abbaszadeh\nMilan, Italy"),
-                     key=api_key, model=os.environ.get("AA_ANSWER_MODEL") or cfg.models.answer_engine, policy=Policy(), today=date(2026, 9, 23))
+                     key=chat_key, models=os.environ.get("AA_ANSWER_MODEL") or cfg.models.answer_engine, policy=Policy(),
+                     today=date(2026, 9, 23), url=config.chat_url(cfg))
     got = {q.question: q for q in pa.questions}
     print({k: (v.answer, v.source, v.note) for k, v in got.items()})
     city = next(v for k, v in got.items() if "city" in k.lower())

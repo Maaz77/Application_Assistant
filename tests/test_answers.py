@@ -150,32 +150,94 @@ GOOD = json.dumps({"questions": [q(question="Notice period", ref="e2", answer="3
 
 def test_schema_400_falls_back_to_json_object():
     post, calls = canned((400, {"error": "response_format"}), (200, GOOD))
-    pa = A.answer_page(PAGE, SRC, key="k", model="m", policy=Policy(), today=TODAY, post=post)
+    pa = A.answer_page(PAGE, SRC, key="k", models="m", policy=Policy(), today=TODAY, post=post)
     assert pa.questions[0].answer == "3 months"
     assert calls[0]["response_format"]["type"] == "json_schema" and calls[1]["response_format"] == {"type": "json_object"}
     assert calls[0]["temperature"] == 0
 
 
-def test_one_retry_on_5xx_then_error():
-    post, _ = canned((502, {}), (200, GOOD))
-    A.answer_page(PAGE, SRC, key="k", model="m", policy=Policy(), today=TODAY, post=post)
-    post, _ = canned((502, {}), (503, {}))
-    with pytest.raises(A.AnswerEngineError, match="unreachable"):
-        A.answer_page(PAGE, SRC, key="k", model="m", policy=Policy(), today=TODAY, post=post)
+def test_an_unavailable_model_hands_over_to_the_next():
+    """429 (rate-limited upstream), 5xx, a 200 that carries an error body (an overloaded provider, live 2026-09-24)
+    and invalid output each move on to the next model, with no waiting."""
+    for failure in [(429, {"error": {"code": 429, "message": "Provider returned error",
+                                     "metadata": {"raw": "a:free is temporarily rate-limited upstream"}}}),
+                    (502, {}),
+                    (200, {"error": {"code": 503, "message": "Upstream error: Service temporarily overloaded"},
+                           "choices": [{"message": {"content": ""}}]}),
+                    (200, "not json")]:
+        post, calls = canned(failure, (200, GOOD))
+        pa = A.answer_page(PAGE, SRC, key="k", models=["a:free", "b:free"], policy=Policy(), today=TODAY, post=post)
+        assert [c["model"] for c in calls] == ["a:free", "b:free"] and pa.model == "b:free"
 
 
-def test_429_waits_and_retries_once(monkeypatch):
-    waits = []
-    monkeypatch.setattr(A.time, "sleep", waits.append)
-    post, _ = canned((429, {"error": "rate"}), (200, GOOD))
-    A.answer_page(PAGE, SRC, key="k", model="m", policy=Policy(), today=TODAY, post=post)
-    assert waits == [A.RATE_LIMIT_WAIT]
+def test_when_no_model_answers_the_error_names_each_failure():
+    post, calls = canned((429, {"error": {"code": 429, "metadata": {"raw": "rate-limited upstream"}}}),
+                         (200, {"error": {"code": 503, "message": "Service temporarily overloaded"}}),
+                         (200, '{"questions": [{"id": 1}]}'))
+    with pytest.raises(A.AnswerEngineError) as ei:
+        A.answer_page(PAGE, SRC, key="k", models=["a", "b", "c"], policy=Policy(), today=TODAY, post=post)
+    msg = str(ei.value)
+    assert "none of 3 models answered" in msg and len(calls) == 3
+    assert "a: HTTP 429 rate-limited upstream" in msg and "b: HTTP 503 Service temporarily overloaded" in msg
+    assert "c: output invalid" in msg
 
 
-def test_invalid_output_after_one_retry_is_a_blocker():
-    post, _ = canned((200, "not json"), (200, '{"questions": [{"id": 1}]}'))
-    with pytest.raises(A.AnswerEngineError, match="output invalid"):
-        A.answer_page(PAGE, SRC, key="k", model="m", policy=Policy(), today=TODAY, post=post)
+def test_a_timeout_moves_on_but_a_rejected_key_stops_at_once():
+    import httpx
+
+    def timing_out(url, payload, headers, timeout):
+        if payload["model"] == "slow":
+            raise httpx.ReadTimeout("read timed out")
+        return 200, {"choices": [{"message": {"content": GOOD}}]}
+    assert A.answer_page(PAGE, SRC, key="k", models=["slow", "fast"], policy=Policy(), today=TODAY,
+                         post=timing_out).model == "fast"
+    post, calls = canned((401, {"error": {"code": 401, "message": "No auth credentials found"}}))
+    with pytest.raises(A.AnswerEngineError, match="rejected the key") as ei:
+        A.answer_page(PAGE, SRC, key="k", models=["a", "b"], policy=Policy(), today=TODAY, post=post)
+    assert len(calls) == 1 and not isinstance(ei.value, A.ModelUnavailable)
+
+
+def test_the_answer_engine_posts_to_the_routes_url():
+    """Vercel AI Gateway takes the same chat/completions request; its 401 names the host, not OpenRouter."""
+    seen = []
+
+    def post(url, payload, headers, timeout):
+        seen.append((url, headers["Authorization"]))
+        return 200, {"choices": [{"message": {"content": GOOD}}]}
+    vercel = "https://ai-gateway.vercel.sh/v1/chat/completions"
+    A.answer_page(PAGE, SRC, key="gw", models="mistral/mistral-nemo", policy=Policy(), today=TODAY, url=vercel,
+                  post=post)
+    assert seen == [(vercel, "Bearer gw")]
+    post401, _ = canned((401, {"error": {"message": "Authentication failed.", "type": "authentication_error"}}))
+    with pytest.raises(A.AnswerEngineError, match="ai-gateway.vercel.sh rejected the key"):
+        A.answer_page(PAGE, SRC, key="bad", models="m", policy=Policy(), today=TODAY, url=vercel, post=post401)
+
+
+def test_a_short_retry_after_is_waited_out_once_then_the_model_is_out():
+    """Vercel, live 2026-09-24: 429 "this team's limit of 5 requests per minute … Retry after 22s" with Retry-After."""
+    slept = []
+    limit = (429, {"error": {"message": "Rate limit exceeded: 5 requests per minute", "type": "rate_limit_exceeded"},
+                   "_retry_after": "22"})
+    post, calls = canned(limit, (200, GOOD))
+    pa = A.call_engine(key="k", models="m", system="s", user={}, post=post, sleep=slept.append)
+    assert slept == [22.0] and len(calls) == 2 and pa.model == "m"
+    post, calls = canned(limit, limit, (200, GOOD))
+    assert A.call_engine(key="k", models=["m", "n"], system="s", user={}, post=post, sleep=slept.append).model == "n"
+    long = (429, {"error": {"message": "daily quota"}, "_retry_after": "3600"})
+    post, calls = canned(long, (200, GOOD))
+    slept.clear()
+    assert A.call_engine(key="k", models=["m", "n"], system="s", user={}, post=post, sleep=slept.append).model == "n"
+    assert slept == []
+
+
+def test_the_run_keeps_asking_the_model_that_answered_last():
+    """One Rotation for the run: the next page starts at the model that answered, not at a rate-limited first."""
+    from assistant.rotation import Rotation
+    engines = Rotation(["a", "b"])
+    post, calls = canned((429, {"error": "rate"}), (200, GOOD), (200, GOOD))
+    A.answer_page(PAGE, SRC, key="k", models=engines, policy=Policy(), today=TODAY, post=post)
+    A.answer_page(PAGE, SRC, key="k", models=engines, policy=Policy(), today=TODAY, post=post)
+    assert [c["model"] for c in calls] == ["a", "b", "b"]
 
 
 def test_fenced_json_is_accepted_and_bad_generated_regenerated_once():
@@ -185,7 +247,7 @@ def test_fenced_json_is_accepted_and_bad_generated_regenerated_once():
     second = json.dumps({"questions": [q(question="Why Acme?", kind="longtext", ref="e3", answer="Real text.",
                                          source="generated", relies_on=[fact])]})
     post, calls = canned((200, "```json\n" + first + "\n```"), (200, second))
-    pa = A.answer_page(PAGE, SRC, key="k", model="m", policy=Policy(), today=TODAY, post=post)
+    pa = A.answer_page(PAGE, SRC, key="k", models="m", policy=Policy(), today=TODAY, post=post)
     assert pa.questions[0].answer == "Real text." and "regenerate" in json.loads(calls[1]["messages"][1]["content"])
 
 
@@ -263,3 +325,26 @@ def test_computed_is_only_for_total_years_never_for_a_tool():
     assert total.answer == "2"
     assert tool.answer is None and "only for total years" in tool.note              # live LinkedIn case
     assert other.answer is None
+
+
+def test_the_answer_engine_is_asked_for_no_hidden_reasoning():
+    """The Flex, live 2026-09-23: qwen3.7-flash spent all 8,192 tokens reasoning — an empty answer, then a cut-off
+    one ("answer engine output invalid"). With reasoning off the same 43-field page answered in 21 s."""
+    post, calls = canned((200, GOOD))
+    A.answer_page(PAGE, SRC, key="k", models="m", policy=Policy(), today=TODAY, post=post)
+    assert calls[0]["reasoning"] == {"enabled": False}
+
+
+def test_a_quote_that_differs_only_in_formatting_still_counts():
+    """Mastercard, live 2026-09-23: the model quoted the resume's "+393519358813" as "+39 351 935 8813" and the
+    email answer was dropped as "quote not found"."""
+    resume = ("abbaszadehmohammadamin@yahoo.com • github.com/Maaz77/ • linkedin.com/in/amin8abbaszadeh/ • "
+              "Phone: +393519358813")
+    quote = ("abbaszadehmohammadamin@yahoo.com • github.com/Maaz77/ • linkedin.com/in/amin8abbaszadeh/ • "
+             "Phone: +39 351 935 8813")
+    assert A.quoted_in(quote, resume)
+    assert not A.quoted_in("amin@example.org", resume)                 # a different fact is still not there
+    assert not A.quoted_in("Y-e-s", "yes, relocation")                 # too short to match without its punctuation
+    (email,), _ = run(q(question="Email", ref="e1", answer="amin@example.com", source="resume",
+                        quote="AMIN @ example . com"))
+    assert email.answer == "amin@example.com" and email.note is None

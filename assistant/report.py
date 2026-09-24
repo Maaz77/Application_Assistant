@@ -39,6 +39,7 @@ class Report:
     warnings: list[str] = field(default_factory=list)
     recovered: list[str] = field(default_factory=list)
     stopped: str | None = None
+    decisions: tuple[int, float] | None = None      # Jev: calls and cost in USD (decisions.jsonl has each one)
 
     def exit_code(self) -> int:
         if self.stopped:
@@ -69,6 +70,8 @@ class Report:
             L.append(f"- **Run stopped:** {self.stopped}")
         if self.recovered:
             L += ["- Journal recovery: " + "; ".join(self.recovered)]
+        if self.decisions:
+            L.append(f"- Decisions by Jev: {self.decisions[0]} calls, ${self.decisions[1]:.4f} (decisions.jsonl)")
         L += ["", "## Parked", ""]
         for r in parked:
             L.append(f"### {r.label}")

@@ -8,7 +8,7 @@ import pytest
 from assistant import config, jev
 from tests.support import CDP_URL, FixtureServer, ThrowawayChrome
 
-jev.apply_env(config.load(), config.api_key(), cdp_url=CDP_URL)
+jev.apply_env(config.load(), config.chat_key(config.load()), cdp_url=CDP_URL)
 
 
 def pytest_addoption(parser):
@@ -27,6 +27,20 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture(scope="session")
 def cfg():
     return config.load()
+
+
+@pytest.fixture(autouse=True)
+def decider(request):
+    """Every decision the program asks of Jev: the offline rule stand-in (tests/rule_decider.py), or — for a
+    live_model test with a key in .env — the real Jev on OpenRouter."""
+    from assistant import decide
+    from tests.rule_decider import RuleDecider
+    cfg = config.load()
+    live = "live_model" in request.keywords and config.jev_key(cfg)
+    d = decide.for_config(cfg) if live else RuleDecider()
+    decide.use(d)
+    yield d
+    decide.use(None)
 
 
 @pytest.fixture(scope="session")
@@ -60,6 +74,15 @@ class Secret(str):
     """A str whose repr never shows the value (pytest prints fixture values in failure reports)."""
     def __repr__(self):
         return "'***'"
+
+
+@pytest.fixture(scope="session")
+def chat_key(cfg):
+    """The key for models.chat_route: the answer engine and the text helper."""
+    key = config.chat_key(cfg)
+    if not key:
+        pytest.skip(f"no {config.KEY_NAMES[cfg.models.chat_route]} in .env")
+    return Secret(key)
 
 
 @pytest.fixture(scope="session")

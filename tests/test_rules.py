@@ -2,7 +2,8 @@
 import pytest
 
 from assistant.blockers import Attempts, NeedsAttention
-from assistant.entry import EntryRefused, entry_allowed, entry_click
+from assistant.entry import EntryRefused, confirm_click
+from assistant.pages import read_page
 from assistant.fill import run_pages
 from assistant.google_signin import sign_in
 from assistant.jev import Element, Table
@@ -17,24 +18,33 @@ def T(url, *els):
     return Table(url=url, elements=list(els))
 
 
-def test_entry_rules():
-    ea = Element(ref="e1", role="button", name="Easy Apply to Data Engineer at Acme")
-    assert entry_allowed(T(LI, ea)) is None
-    assert entry_allowed(T("https://acme.io/jobs/42", Element(ref="e1", role="link", name="Apply"))) is None
-    assert "already holds a value" in entry_allowed(T(LI, ea, Element(ref="e2", role="textbox", name="q", value="x")))
-    assert "not a /jobs/view/" in entry_allowed(T("https://acme.io/apply", ea, Element(ref="e2", role="textbox", name="q")))
-    assert "no single" in entry_allowed(T(LI, Element(ref="e1", role="button", name="Save")))
-    assert "no single" in entry_allowed(T(LI, ea, Element(ref="e3", role="link", name="Apply on company site")))
+def _confirm(fake, label):
+    return confirm_click(fake, "s", label, lambda: read_page(fake, "s"), lambda _: None)
 
 
-def test_entry_click_is_the_only_confirm():
-    site = {"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply")])}
-    fake = FakeMCP(site, "j")
-    entry_click(fake, "s", T(LI, Element(ref="e1", role="button", name="Easy Apply")))
-    (name, args), = [x for x in fake.log if x[0] == "browser_act"]
-    assert args["ops"] == [{"op": "click", "ref": "e1", "confirm": True}]
+def _confirms(fake):
+    return [op for n, a in fake.log if n == "browser_act" for op in a["ops"] if op.get("confirm")]
+
+
+def test_confirm_click_rules():
+    fake = FakeMCP({"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply to Data Engineer at Acme"),
+                                                               El("button", "Save")])}, "j")
+    _confirm(fake, "Easy Apply to Data Engineer at Acme")
+    assert _confirms(fake) == [{"op": "click", "ref": "e1", "confirm": True}]
+    with pytest.raises(EntryRefused, match="does not start"):
+        _confirm(fake, "Save")
+    fake.site["j"].els.insert(0, El("textbox", "q", value="x"))
+    with pytest.raises(EntryRefused, match="already holds a value"):
+        _confirm(fake, "Easy Apply to Data Engineer at Acme")
+
+
+def test_confirm_click_is_the_only_confirm_and_never_a_submit():
+    fake = FakeMCP({"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply"),
+                                                               El("button", "Submit application")])}, "j")
+    _confirm(fake, "Easy Apply")
     with pytest.raises(EntryRefused):
-        entry_click(fake, "s", T(LI, Element(ref="e1", role="button", name="Submit application")))
+        _confirm(fake, "Submit application")
+    assert len(_confirms(fake)) == 1 and fake.sent == []
 
 
 def google_site(chooser_email="maaz1377.aa@gmail.com", google_text="Choose an account", after_text="Apply. Resume"):
@@ -139,7 +149,9 @@ def test_ats_job_page_entry_then_form(tmp_path):
         El("link", "Apply", goto="p1")])
     fake = FakeMCP(site, "ats")
     orig = fake._click
-    fake._click = lambda e, confirm=False: (setattr(fake, "cur", e.goto) if e.name == "Apply" else orig(e, confirm))
+    # the server lets "Apply" through only with confirm (B1); the page opens the form on that click
+    fake._click = lambda e, confirm=False: (setattr(fake, "cur", e.goto) if e.name == "Apply" and confirm
+                                            else orig(e, confirm))
     parked = run_pages(ctx_for(fake, SINGLE_ANSWERS, tmp_path))
     assert parked.pages == 1
     confirms = [op for n, a in fake.log if n == "browser_act" for op in a["ops"] if op.get("confirm")]
@@ -148,43 +160,42 @@ def test_ats_job_page_entry_then_form(tmp_path):
 
 def test_entry_rules_ignore_site_chrome():
     """LinkedIn (2026-09-23): nav Search box + footer 'Select language' (always holds en_US) are not form fields."""
-    li = T(LI, Element(ref="e1", role="combobox", name="Search"),
-           Element(ref="e2", role="button", name="Easy Apply to this job"),
-           Element(ref="e3", role="combobox", name="Select language", value="en_US", current="English (English)"))
-    assert entry_allowed(li) is None
-    li.elements.append(Element(ref="e4", role="textbox", name="Phone", value="+39 333"))
-    assert "already holds a value" in entry_allowed(li)                  # a real typed value still blocks it
-    other = T(LI, Element(ref="e1", role="combobox", name="Preferred language", value="Italian"),
-              Element(ref="e2", role="button", name="Easy Apply"))
-    assert "already holds a value" in entry_allowed(other)               # only the exact site picker is ignored
+    els = [El("combobox", "Search"), El("button", "Easy Apply to this job"),
+           El("combobox", "Select language", value="en_US", options=["en_US"])]
+    fake = FakeMCP({"j": FakePage(LI, "Job", "Data Engineer", els)}, "j")
+    _confirm(fake, "Easy Apply to this job")
+    fake.site["j"].els.append(El("textbox", "Phone", value="+39 333"))
+    with pytest.raises(EntryRefused, match="already holds a value"):     # a real typed value still blocks it
+        _confirm(fake, "Easy Apply to this job")
+    other = FakeMCP({"j": FakePage(LI, "Job", "x", [El("textbox", "Preferred language", value="Italian"),
+                                                   El("button", "Easy Apply")])}, "j")
+    with pytest.raises(EntryRefused, match="already holds a value"):     # only the site's own picker is ignored
+        _confirm(other, "Easy Apply")
 
 
-def test_entry_click_retries_once_when_the_page_re_rendered_the_button():
+def test_confirm_click_retries_while_the_page_re_renders_the_button():
     """LinkedIn, live 2026-09-23: `x click e16  detached` — React replaced the button between snapshot and click."""
-    site = {"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply to this job")])}
-    fake = FakeMCP(site, "j")
-    clicks = {"n": 0}
+    fake = FakeMCP({"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply to this job")])}, "j")
+    clicks = {"n": 0, "error": "detached: detached"}
     orig = fake._browser_act
 
     def act(ops, **kw):
         if ops and ops[0].get("op") == "click":
             clicks["n"] += 1
             if clicks["n"] == 1:
-                return "0/1 ops ok  (stopped early)\n  x click e1  detached: detached"
+                return "0/1 ops ok  (stopped early)\n  x click e1  " + clicks["error"]
         return orig(ops, **kw)
     fake._browser_act = act
-    table = T(LI, Element(ref="e1", role="button", name="Easy Apply to this job"))
-    out = entry_click(fake, "s", table, reread=lambda: T(LI, Element(ref="e1", role="button", name="Easy Apply to this job")))
-    assert out.startswith("1/1 ops ok") and clicks["n"] == 2
-    clicks["n"] = 0
+    assert _confirm(fake, "Easy Apply to this job").startswith("1/1 ops ok") and clicks["n"] == 2
+    clicks.update(n=0, error="occluded: occluded")
     with pytest.raises(EntryRefused, match="did not go through"):
-        entry_click(fake, "s", table)                                    # no reread: reported, never ignored
+        _confirm(fake, "Easy Apply to this job")                           # not a re-render: reported, never retried
 
 
 def test_long_job_card_links_do_not_make_a_final_step():
-    from assistant.pages import Page, has_transmit, is_final
+    from assistant.pages import Page, is_final, judge
     card = Element(ref="e1", role="link", name="More options Acme Kildare (Hybrid) 50K EUR/yr Promoted · Easy Apply")
     p = Page(url=LI, title="Job", text="", table=T(LI, card))
-    assert not has_transmit(p) and not is_final(p)
+    assert not judge(p).submit_button and not is_final(p)
     p2 = Page(url=LI, title="Apply", text="", table=T(LI, Element(ref="e2", role="link", name="Submit application")))
-    assert has_transmit(p2)
+    assert judge(p2).submit_button

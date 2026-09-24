@@ -6,17 +6,19 @@ from assistant.pages import classify, classify_entry, read_page
 
 pytestmark = pytest.mark.browser
 
+# What each fixture page is (pages.classify). The same table runs offline, answered by tests/rule_decider.py, and
+# with --live (tests/test_decisions_live.py), answered by Jev.
 KINDS = {
-    "f01.html": "form", "f02.html": "form", "f03.html": "form", "f04.html": "form", "f05.html": "form",
-    "f06.html": "cookie", "f07.html": "form", "f08.html": "form", "f09.html": "form",
-    "f10.html": "ats_entry", "f10_form.html": "form", "f13.html": "form", "f14.html": "alarm",
+    "f01.html": "final", "f02.html": "form", "f03.html": "final", "f04.html": "form", "f05.html": "final",
+    "f06.html": "final", "f07.html": "final", "f08.html": "form", "f09.html": "form",
+    "f10.html": "navigate", "f10_form.html": "final", "f13.html": "form", "f14.html": "alarm",
     "f15_google.html": "google_wall", "f16_signup.html": "blocker", "f17_captcha.html": "blocker",
-    "f18_cookie.html": "cookie", "uas/login.html": "blocker",
+    "f18_cookie.html": "form", "uas/login.html": "blocker",
     "jobs/view/4012345605-submitted.html": "alarm",
 }
 ENTRY = {
-    "jobs/view/4012345601-easy.html": "entry", "jobs/view/4012345602-closed.html": "closed",
-    "jobs/view/4012345603-applied.html": "applied", "jobs/view/4012345604-external.html": "entry",
+    "jobs/view/4012345601-easy.html": "open", "jobs/view/4012345602-closed.html": "closed",
+    "jobs/view/4012345603-applied.html": "applied", "jobs/view/4012345604-external.html": "open",
     "jobs/view/4012345605-submitted.html": "applied", "uas/login.html": "signed_out",
 }
 
@@ -44,19 +46,15 @@ def test_classify_linkedin_entry(new_browser, fixture_server, name):
 
 def test_flags_and_details(new_browser, fixture_server):
     f01 = _page(new_browser, fixture_server.url("f01.html"))
-    assert pages.is_final(f01) and not pages.has_advance(f01)
+    assert pages.is_final(f01) and pages.judge(f01).submit_button
     f02 = _page(new_browser, fixture_server.url("f02.html"))
-    assert pages.has_advance(f02) and not pages.has_transmit(f02)      # hidden steps are not listed
-    f06 = _page(new_browser, fixture_server.url("f06.html"))
-    assert classify(f06).detail == "Reject all"
-    f18 = _page(new_browser, fixture_server.url("f18_cookie.html"))
-    assert classify(f18).detail == "Only necessary"
+    assert not pages.is_final(f02) and not pages.judge(f02).submit_button      # hidden steps are not listed
     f16 = _page(new_browser, fixture_server.url("f16_signup.html"))
     assert classify(f16).detail.startswith("signup") and pages.guest_link(f16).name == "Apply without an account"
     f17 = _page(new_browser, fixture_server.url("f17_captcha.html"))
     assert f17.captcha and classify(f17).detail.startswith("captcha")
     f10 = _page(new_browser, fixture_server.url("f10.html"))
-    assert not pages.has_transmit(f10)                                  # entry labels don't count without fields
+    assert not pages.judge(f10).submit_button and pages.judge(f10).kind == "job_posting"
 
 
 def test_f12_iframe_from_second_origin(new_browser, fixture_server):
@@ -72,11 +70,11 @@ def test_f13_validation_after_advance(new_browser, fixture_server):
         browser.open(fixture_server.url("f13.html"), "v")
         p = read_page(browser, "v")
         assert pages.validation_error(p) is None
-        nxt = pages.advance_buttons(p)[0]
+        nxt = next(e for e in pages.buttons(p) if e.name == "Next")
         browser.act([{"op": "click", "ref": nxt.ref}], "v", p.table)
         p = read_page(browser, "v")
         browser.close("v")
-    assert pages.validation_error(p) == "This field is required"
+    assert pages.validation_error(p)
     assert pages.gate(p, "Amin_Acme.pdf", {}).startswith("required fields still empty")
 
 
@@ -85,7 +83,7 @@ def test_guest_link_click_on_real_signup_page(new_browser, fixture_server):
     with new_browser() as browser:
         browser.open(fixture_server.url("f16_signup.html"), "g")
         p = read_page(browser, "g")
-        out = guest_click(browser, "g", p.table)
+        out = guest_click(browser, "g", p)
         after = read_page(browser, "g")
         browser.close("g")
     assert "needs_confirmation" not in out and after.title == "f01 single page"
@@ -99,7 +97,7 @@ def test_late_rendered_linkedin_page_is_waited_for(new_browser, fixture_server):
         settled = pages.settle(lambda: read_page(browser, "late"))
         browser.close("late")
     assert classify_entry(early) == "none"
-    assert classify_entry(settled) == "entry"
+    assert classify_entry(settled) == "open"
 
 
 def test_display_contents_wrapper_is_seen(new_browser, fixture_server):

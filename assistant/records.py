@@ -148,6 +148,40 @@ def recover(runs_dir: Path, tracker: Tracker) -> list[str]:
     return done
 
 
+# ------------------------------------------------------------------ requeue
+
+NA_NOTE_RE = re.compile(r"^Needs Attention: .*$\n?", re.M)
+
+
+def requeue(tracker: Tracker, journal: Journal, needs_dir: Path, applications: Path,
+            key: str | None = None) -> list[str]:
+    """Put Needs-Attention jobs back in the queue (all, or only `key`): Status back to Resume Built, the
+    "Needs Attention: …" line a run added to Notes removed, the folder moved back to Applications/. Journaled like
+    a record, so recover() completes an interrupted requeue. job.md keeps its notes: they are the job's history."""
+    done = []
+    for d in sorted(p for p in needs_dir.iterdir() if p.is_dir()) if needs_dir.exists() else []:
+        job = Job.from_dir(d)
+        if job is None or (key and job.key != key):
+            continue
+        hit = tracker.find(job.key)
+        if hit is None:
+            done.append(f"skipped {d.name}: no tracker row")
+            continue
+        dst = applications / d.name
+        if dst.exists():
+            raise StopRun(f"requeue: {dst} already exists")
+        journal.event(job.key, "record_start", RESUME_BUILT, str(d), str(dst))
+        tracker.set(job.key, RESUME_BUILT)
+        tracker.set_notes(job.key, NA_NOTE_RE.sub("", hit[1].get("Notes") or "").strip())
+        tracker.save()
+        journal.event(job.key, "tracker_saved", RESUME_BUILT, str(d), str(dst))
+        os.rename(d, dst)
+        journal.event(job.key, "folder_moved", RESUME_BUILT, str(d), str(dst))
+        journal.event(job.key, "record_done", RESUME_BUILT, str(d), str(dst))
+        done.append(f"requeued {d.name}")
+    return done
+
+
 # ------------------------------------------------------------------ job.md note (§8.3)
 
 def append_note(job_md: Path, entry: str) -> None:

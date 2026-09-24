@@ -185,3 +185,140 @@ In `chrome://inspect` mode Chrome can hold a new debugging connection until a pe
 Hardening from this run:
 - The tab helper's own tab was closed from outside mid-run, and `release()` crashed the run with no report. The helper now restarts itself. A tab it cannot name is switched to by verified position and is never closed by us. Release failures become report **Warnings**.
 - `computed` is enforced as *total* years only (`TOTAL_YEARS_RE`); a years-with-a-tool question (`TOOL_YEARS_RE`: "experience … with/in/using X") never gets a computed answer. The model had offered total years for the C++ question.
+
+## First real run: all seven jobs in Needs-Attention (runs/20260923-224945)
+
+Seven real jobs, recorded. From `calls.jsonl`, a replay of one answer-engine call, and the pages opened live:
+
+| Job | What happened | Cause |
+|---|---|---|
+| Linda AI (Easy Apply) | "Job search safety reminder" after Easy Apply; the rule clicked **Review job post** (it matched `^review`), which closes the pop-up; 12 loops | fixed label rules; the right choice, **Continue applying**, is a link |
+| Digital Mfg Ireland (Easy Apply) | pages 1–3 filled correctly; LinkedIn redrew the radio group after the toggle (e221 → e231, checked), the read-back by the old ref said "not set", the job was refilled twice and given up | read-back tied to refs |
+| Toast (Greenhouse form on the careers page) | a "Cookie consent" modal covered the form; every typed value `occluded` | the cookie rule knew only Reject all / Only necessary / Accept all; Toast says "I do not accept" |
+| Mastercard (Phenom) | the job page's job-alert box ("Please enter your email address") was filled as the application; "Apply Now" (a 6-step form, no account) never clicked | "has a field → a form" |
+| Genesys (Workday) | the entry click hit LinkedIn re-rendering (`detached`, then `page_changed`); given up after one retry, 3 s in | timing. Behind it Workday asks to **create an account**: a real blocker |
+| The Flex ×2 (Ashby) | "answer engine output invalid" | qwen3.7-flash spent all 8,192 output tokens reasoning (`finish_reason: length`): an empty answer, then a cut-off one |
+
+Five of the seven were the rule-based driver guessing wrong about what was on screen; the browser layer itself (observe, click, type, upload, the aa1–aa6 fixes) worked every time.
+
+## The browser agent drives (user decision, 2026-09-23)
+
+The user chose the package's own goal agent (`browser_goal`) over our own agent loop or Stagehand, and a mid-tier model.
+
+- **The decision model cannot be chosen.** OpenRouter's `/api/alpha/decisions` serves only TypeSafe's model: `jev-latest` resolved to `typesafe/jev-1.13-20260917`; `openai/gpt-5.4-mini`, `google/gemini-3.6-flash`, `anthropic/claude-haiku-4.5` and `deepseek/deepseek-v4-flash` answer "does not exist". It is fast and cheap (0.5 s, about $0.00002 per decision) and picked **Continue applying** on the Linda AI pop-up with 0.97 confidence.
+- **The mid-tier model is the text helper**, which writes each value the agent types. `deepseek/deepseek-chat` took up to 12 s a field (Toast: 7–38 s per goal); `openai/gpt-4.1-mini` answered the same three fields exactly in about 1 s each. `gemini-3.6-flash` was as good; `claude-haiku-4.5` did not return plain JSON.
+- **Navigation is the agent's, one action per goal** (`prompts/navigate_goal.md`, `max_steps=1`): cookie banners, pop-ups, job pages, start dialogs. The page is read again after every action, so the agent can never click through form steps we have not filled. Live fixture test: with several steps per goal it took a one-question first step for "not the form yet" and walked Next → Review → Submit (refused).
+- **Navigation stops in code** when an uncovered page looks like an application (a file input, an empty required field, or three visible fields) and has Next / Review / Submit. When the agent says "the form is here" on a page that does not look like one (the Mastercard job-alert box), it is asked once more with a hint; a second answer stands.
+- **Every Apply the agent picks comes back to the program**: the server refuses it (B1), and `entry.confirm_click` makes it only for an entry or guest label, with no field holding a value, and never for a button that submits a form with fields. The new read-only probe `ENTRY_SUBMITS` lists those: Toast's own submit is "Apply now!", next to an "APPLY NOW" link that starts the application. A stale click is re-read and retried up to three times (Genesys).
+- **Advancing is the agent's too** (`prompts/next_step_goal.md`, `max_steps=1`, asked again while it only scrolls or waits). A refused Submit/Send/Apply means the last step, as before.
+- **"Covered"** means a modal named like a cookie or consent pop-up, or a form field the observer marks covered. The page behind an application dialog is covered too, but that dialog is the form (the fixture's `div` dialog, unlike LinkedIn's `<dialog>`, shows its background as covered).
+- **Unchanged, in code:** the answers and their checks, the resume upload, direct typing of short answers, the blockers, Google sign-in, the final gate, the alarms, the records.
+
+Also fixed from the run:
+- the answer engine is sent `reasoning: {"enabled": false}`. The Flex's 43-field page then answered in 21 s with 2,473 tokens; `effort: low` still used all 8,192;
+- quotes match ignoring spacing, punctuation and case when they are 12 or more letters and digits long, so "+39 351 935 8813" matches the resume's "+393519358813" (Mastercard's email answer had been dropped for it);
+- a radio set by a toggle is found again by its question and option label after a redraw;
+- httpx's per-request INFO lines no longer print into the run's output;
+- `python -m assistant requeue` puts Needs-Attention jobs back in the queue.
+
+The end-to-end `process()` tests now need the decision model and run with `--live`; all four fixture postings (company site in a new tab, a late tab, a "You are leaving LinkedIn" dialog, an Easy Apply dialog) park with the real agent.
+
+OpenRouter, 2026-09-23 23:40: `/credits` reports $0 bought and $0.17 used, so the account balance is negative. A request reserving 8,192 tokens of `deepseek/deepseek-chat` got HTTP 402 ("can only afford 6447"). Smaller calls still went through.
+
+## Decisions by Jev instead of rules (user decision, 2026-09-24)
+
+The user asked for TypeSafe's Jev (`typesafe/jev-1.13` on OpenRouter) to make the program's decisions in place of the regex branches. Docs read: OpenRouter's [TypeSafe SDK guide](https://openrouter.ai/docs/guides/community/typesafe-sdk) and [System One API reference](https://openrouter.ai/docs/api/api-reference/systemone/submit-a-system-one-request), and TypeSafe's [docs](https://docs.typesafe.ai) (Choice, Noul, State).
+
+- **The API:** `POST https://openrouter.ai/api/v1/systemone` with `{model, state, questions}`. `state` is text or JSON. Question types:
+  - `noul`: the probability that a yes/no question is true, with optional `criteria` `{true, false}`;
+  - `choice`: up to 255 named options, each with a probability, plus a confidence;
+  - `score`: a point on an ordered scale.
+  Questions in one call are answered in parallel and independently. The model is text-only, has a 32K context and was trained mainly on English. It costs $0.042 per million input tokens, output is free, and a call takes about 0.3 s. `typesafe/jev-1.13` works on this route and on the goal agent's `/api/alpha/decisions`, so both now use it (`models.jev`).
+- **`decide.py`** is the client: it builds questions, splits them into batches of 60, retries once on a network error, 429 or 5xx, logs every call to `decisions.jsonl`, and keeps the thresholds in `THRESHOLDS`. A call that fails raises `DecisionError`, and the job goes to Needs Attention (`decision`). There is no fallback to the old rules.
+- **One call per page snapshot** (`pages.judge`, cached on the Page) replaces:
+  - the classifier;
+  - the posting states (closed, applied);
+  - captcha, sign-up and password walls, and error pages;
+  - Google's steps and buttons;
+  - "covered", "not drawn yet", validation messages and the Submit button;
+  - which fields are the application's (site search, language picker, job alert);
+  - which upload takes the resume, and which asks for a cover letter;
+  - which iframe holds the form.
+- **Two more calls per form page** (`answers.judge_answers`, `answers.judge_questions`): must a question never get a written answer, does it ask for total or tool-specific years, is a shown value a placeholder, and is it the resume or a cover-letter question.
+- **The agent's Apply** also needs Jev's "this starts the application" (`entry.starts_application`), on top of the guard's label list, the no-value rule and `ENTRY_SUBMITS`.
+- **Rules that stay:**
+  - the never-submit label lists in `guard.py` (and the server's copy of them);
+  - the confirmation-text tripwire, kept beside Jev's "submitted" answer;
+  - facts that aren't judgments: URLs and hosts, probe counts, the resume's file name, date arithmetic, quote-in-file checks.
+- **Found while testing on real pages:**
+  - "Is the page still loading?" was answered from the page title: a LinkedIn posting with only its nav bar drawn got 0.35. The question that works is "besides the site's navigation, is there something to act on for this job?": drawn pages score 0.94 or more, early ones 0.22–0.30.
+  - A form behind a cookie banner (f06) can come back as kind "other" with covered = yes. The loop sends it to the agent, which is the right thing to do.
+- **Live results (`tests/test_decisions_live.py`, 40 of 40):**
+  - on the six pages of runs/20260923-224945: Linda AI's safety reminder is an interstitial (0.98); Mastercard's job page is a job posting and its job-alert box is not an application field; Toast's form is covered by its cookie pop-up; Digital Manufacturing's radio step is a form step; Genesys is open and its language picker isn't a question; The Flex's form is a form with a resume upload;
+  - Greenhouse, Ashby, Workday and Nota AI pages captured from real sites;
+  - all fixture pages, the posting states, and the answer checks.
+- **Offline**, `tests/rule_decider.py` answers the same questions with the old rules, so unit and browser tests run without a network. The program never imports it.
+- **2026-09-24:** partway through the live suite, OpenRouter began answering HTTP 402 "Insufficient credits. This account never purchased credits." Each such decision became Needs Attention (`decision`), as designed. The remaining live tests need credits on the account.
+
+## Jev through Vercel AI Gateway; free Qwen for the chat models (user decision, 2026-09-24)
+
+The OpenRouter account has never bought credits, so it serves only `:free` models (checked with the `openrouter` SDK: paid models, including `openrouter/auto`, return 402, while `cohere/north-mini-code:free` answers). Jev has no free tier on OpenRouter. The user added a Vercel AI Gateway key and chose `qwen/qwen3.8-27b:free` for the chat models.
+
+- **Vercel's TypeSafe-compatible API** ([docs](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe)): `POST https://ai-gateway.vercel.sh/typesafe/v1/systemone` with model `typesafe-ai/jev` and `Authorization: Bearer $AI_GATEWAY_API_KEY`. It uses TypeSafe's request and answer shapes. Cost is in `provider_metadata.gateway.cost` (a string). Errors look like `{"error": {"message", "type"}}`. `GET /typesafe/v1/models` lists `jev`.
+- **Config:** `models.jev_route` (`vercel` or `openrouter`) chooses the endpoint and its key.
+  - The page decisions use `decide.for_config`.
+  - The browser agent uses `jev.agent_route`. The package takes a non-OpenRouter `TYPESAFE_BASE_URL` as the full endpoint, with `TYPESAFE_API_KEY`.
+  - Preflight checks that the gateway key is present.
+- **Live, 2026-09-24:** the gateway key lists Jev, but every evaluation returns **403** "AI Gateway requires a valid credit card on file to service requests … add a card and unlock your free credits". Preflight stops with that message.
+- **`qwen/qwen3.8-27b:free`** answered 429 "temporarily rate-limited upstream" (shared pool) on every try over several minutes. The answer engine now waits 15, 30, then 60 s after a 429 before it gives up (`RATE_LIMIT_WAITS`). The text helper is sent with reasoning off (`TEXT_MODEL_REASONING=none`). *Replaced by the rotation below.*
+
+## Free models in rotation (user decision, 2026-09-24)
+
+The user asked to pick a handful of the free OpenRouter models and rotate over them on each call: a model that is not available hands over to the next, and when none is available the call raises.
+
+- **The pick.** Each of the 24 free models got the answer engine's real request (strict json_schema, reasoning off), in parallel. Answered in shape:
+  - `dots-studio/dots-3-note-preview:free` (3.7 s);
+  - `nex-agi/nex-n2.5-mini:free` (1.3 s);
+  - `nex-agi/nex-n2.5-pro:free` (the first try timed out at 90 s; a later try answered, but took 54 s for one short text value).
+
+  Kept although they failed this time:
+  - `qwen/qwen3.8-27b:free` (the user's choice; 429 upstream);
+  - `nvidia/nemotron-3-super-120b-a12b:free` (structured outputs, but overloaded).
+
+  Not usable:
+  - Nemotron 3 Ultra and 3.5 Lightning, Laguna S, North Mini Code: no structured outputs; they answered in the wrong shape.
+  - Ling 3.0: 400 for both formats.
+  - Inkling: 403 "only available on agentic harnesses".
+  - Gemma 4: rate-limited, and no structured outputs.
+  - GLM 5.2: 33K context is too small for the sources.
+- **`rotation.Rotation`.** A call tries the model that answered last first, then the others in configured order. A model that fails is skipped for that call only, with no waiting. A rejected key (401) stops at once, because every model would fail the same way. `NoModelAvailable` names each model's failure.
+  - One `Rotation` lasts the whole run (`cli.run`), so later pages skip a model that is out.
+  - The answers log records the model that answered each page.
+  - `config.toml` lists the models; a single string is still a rotation of one.
+- **OpenRouter reports some failures as HTTP 200.** An overloaded provider comes back as 200 with an `error` body (code 503) and an empty choice. `_ask_model` treats an error body as a failure whatever the status.
+- **The text helper** is the package's `policy.text_for(cfg, …)`, called with one `TEXT_MODEL` that is read once at import. `jev.rotate_text_helper` wraps it after `load()` and calls the original with `dataclasses.replace(cfg, text_model=m)` for each model in turn. This works only because `server.py` looks up `policy.text_for` at call time; `contract_check` fails if it stops doing that.
+- **The account's free quota is a hard stop.** Later the same day, every free model returned 429 "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day". The limit is per account, across all free models, 50 requests a day without credits. The rotation raised with all five reasons, as intended.
+- **Jev on Vercel** has now accepted the card (live 2026-09-24).
+  - It answers with `gateway.cost = "0"` (the free credit) and `marketCost ≈ $0.0000116` per call.
+  - It returned 429 "high demand" and 503 "Service temporarily unavailable" on 7 of 42 live tests with one 2 s retry. `decide.RETRY_WAITS = (2, 5, 15)` brought that to 1 of 49.
+  - A decision that still fails sends the job to Needs Attention (`decision`), and `requeue` brings it back.
+
+## Chat models through Vercel AI Gateway (user decision, 2026-09-24)
+
+The user asked to be able to run the answer engine through Vercel AI Gateway once OpenRouter's free quota is used up, with a config setting naming the provider. They gave `mistral/mistral-nemo` as the model.
+
+- **Vercel's OpenAI-compatible endpoint:** `POST https://ai-gateway.vercel.sh/v1/chat/completions` with `Authorization: Bearer $AI_GATEWAY_API_KEY` ([docs](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions)).
+  - It takes the same `response_format` (strict `json_schema`) and `reasoning: {"enabled": false}` as OpenRouter, so one code path serves both.
+  - Errors come as `{"error": {"message", "type"}}`; cost is in `usage.cost`.
+  - The Python `ai` SDK from the user's snippet is async and streaming; the REST endpoint needs no new dependency.
+- **Config:** `models.chat_route` (`openrouter` or `vercel`) selects the `[models.openrouter]` or `[models.vercel]` table, the key (`config.chat_key`) and the URL (`config.chat_url`).
+  - The answer engine posts there.
+  - The package's text helper follows the same route (`TEXT_MODEL_BASE_URL`/`TEXT_MODEL_API_KEY` in `jev.env_values`).
+- **Mistral Nemo, live 2026-09-24:**
+  - Strict `json_schema` gave a valid answer set (1,165 tokens in, 705 out, $0.000043, 49 s).
+  - `json_object` mode used the wrong top-level key (`page_answers`).
+  - As the text helper it answered `{"text": "Dublin"}` in 1–7 s.
+- **Rate limit:** Vercel returned 429 "this team's limit of 5 requests per minute (per region) was reached. Retry after 22s", with a `Retry-After: 22` header. The limit is per model, and the gateway had also tried the model's second provider. The answer engine now waits out a `Retry-After` of up to 30 s once per model (`RETRY_AFTER_MAX`) before moving on.
+- **Answer quality:** Mistral Nemo and Mistral Small are weaker than the free Qwen on the live fill tests.
+  - The f02 fixture's second step has an optional "Years of experience" field. Both Mistral models marked it required and computed the total wrong (the code recomputed 1 from the quoted lines), so `check_answers` dropped the answer and the job went to Needs Attention (`unanswered`).
+  - The answers test passed on this route; both fill tests (f02, f08) failed on this.

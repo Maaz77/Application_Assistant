@@ -3,7 +3,7 @@ import pytest
 
 from assistant.answers import PageAnswers
 from assistant.blockers import NeedsAttention, StopRun
-from assistant.fill import JobCtx, parse_goal, run_pages
+from assistant.fill import NEXT_STEP_GOAL, JobCtx, parse_goal, run_pages
 from tests.fake_mcp import El, FakeBook, FakeMCP, FakePage
 
 pytestmark = pytest.mark.unit
@@ -41,6 +41,11 @@ def ctx_for(fake, answers, tmp_path, **kw):
     return JobCtx(browser=fake, session="job", book=FakeBook(), resume_pdf=pdf, answer_fn=engine(answers),
                   baseline={"T0"}, answers_log=tmp_path / "answers.json", shots_dir=tmp_path / "shots",
                   folder="1_Acme", sleep=no_sleep, **kw)
+
+
+def _goals(fake):
+    """The page goals (the model setting fields); the agent's navigate and next-step goals are not counted."""
+    return [a for n, a in fake.log if n == "browser_goal" and a["goal"].startswith("Set each field")]
 
 
 def single_page():
@@ -167,7 +172,7 @@ def test_no_final_step_after_max_pages(tmp_path):
         run_pages(ctx_for(fake, {}, tmp_path, max_pages=3))
 
 
-def test_two_advance_buttons_use_the_goal_and_strong_block_means_final(tmp_path):
+def test_advance_is_the_agent_and_a_refused_submit_means_final(tmp_path):
     site = {"p": FakePage("https://acme.io/a", "Apply", "Apply. Resume", [
         El("file", "Resume", required=True), El("button", "Submit application"),
         El("button", "Continue"), El("button", "Continue later")])}
@@ -175,7 +180,7 @@ def test_two_advance_buttons_use_the_goal_and_strong_block_means_final(tmp_path)
     parked = run_pages(ctx_for(fake, {"Apply": [Q("Resume", None, kind="file", ref="auto", source=None)]},
                                      tmp_path))
     assert parked.pages == 1 and fake.sent == []
-    assert any(n == "browser_goal" and a["goal"].startswith("Go to the next step") for n, a in fake.log)
+    assert any(n == "browser_goal" and a["goal"] == NEXT_STEP_GOAL and a["max_steps"] == 1 for n, a in fake.log)
 
 
 def test_captcha_gets_one_reload_then_needs_attention(tmp_path):
@@ -197,12 +202,12 @@ def test_required_cover_letter_file_is_a_blocker(tmp_path):
 def test_unlabelled_file_inputs_on_a_resume_step_are_a_blocker(tmp_path):
     site = {"p": FakePage("https://acme.io/a", "Docs", "Upload your resume", [
         El("file", "Attachment 1"), El("file", "Attachment 2"), El("button", "Submit application")])}
-    with pytest.raises(NeedsAttention, match="none is labelled resume"):
+    with pytest.raises(NeedsAttention, match="unclear which one takes the resume"):
         run_pages(ctx_for(FakeMCP(site, "p"), {}, tmp_path))
 
 
 def test_gate_failure_is_retried_once(tmp_path):
-    site = {"p": FakePage("https://acme.io/a", "Apply", "Apply", [El("button", "Submit application")])}
+    site = {"p": FakePage("https://acme.io/a", "Apply", "Apply", [El("button", "Submit application")], form_here=True)}
     with pytest.raises(NeedsAttention) as ei:
         run_pages(ctx_for(FakeMCP(site, "p"), {}, tmp_path))
     assert ei.value.cls == "gate" and "resume file name" in ei.value.what
@@ -301,14 +306,15 @@ def test_text_helper_failure_is_a_failed_goal_not_a_crash(tmp_path):
     calls = {"n": 0}
     orig = fake._browser_goal
 
-    def flaky(goal, **kw):                              # first goal dies in the text helper (B5), retry works
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return "turbo_unavailable: Text helper returned no usable value; nothing typed."
+    def flaky(goal, **kw):                              # the first page goal dies in the text helper (B5)
+        if goal.startswith("Set each field"):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return "turbo_unavailable: Text helper returned no usable value; nothing typed."
         return orig(goal, **kw)
     fake._browser_goal = flaky
     parked = run_pages(ctx_for(fake, WIDGET_ANSWERS, tmp_path))
-    assert parked.pages == 1 and calls["n"] == 2
+    assert parked.pages == 1 and calls["n"] == 2                      # the read-back retry set the widget
 
 
 def test_radios_and_native_selects_are_set_without_the_model(tmp_path):
@@ -321,7 +327,7 @@ def test_radios_and_native_selects_are_set_without_the_model(tmp_path):
                          Q("Country", "Iran", kind="choice", ref="auto", options=["Italy", "Iran"]),
                          Q("Resume", None, kind="file", ref="auto", source=None)]}
     run_pages(ctx_for(fake, answers, tmp_path))
-    assert not any(n == "browser_goal" for n, _ in fake.log)          # no model was needed
+    assert _goals(fake) == []                                          # no page goal: no model set a field
     ops = [op["op"] for n, a in fake.log if n == "browser_act" for op in a["ops"]]
     assert "toggle" in ops and "select" in ops
     assert site["p"].els[0].checked is True and site["p"].els[2].value == "Iran"
@@ -382,7 +388,7 @@ def test_an_engine_answer_for_an_older_resume_card_is_dropped(tmp_path):
     old, ours = p.elements[0], p.elements[1]
     pick = lambda ref: Question.model_validate(Q("Resume", "x", kind="choice", option_ref=ref))
     assert _other_resume_card(pick(old.ref), p, ctx) and not _other_resume_card(pick(ours.ref), p, ctx)
-    assert resume_input(p, resume_step=True) == p.elements[2].ref          # the "Upload resume" trigger
+    assert resume_input(p) == p.elements[2].ref                           # the "Upload resume" trigger
 
 
 def test_upload_on_a_transmit_label_is_refused():
@@ -397,10 +403,6 @@ def test_upload_on_a_transmit_label_is_refused():
 
 
 # ------------------------------------------------------------------ direct typing (user decision, 2026-09-23)
-
-def _goals(fake):
-    return [a for n, a in fake.log if n == "browser_goal"]
-
 
 def test_short_text_answers_are_typed_without_the_model(tmp_path):
     site = {"p": FakePage("https://acme.io/a", "Apply", "Apply. Resume", [
@@ -454,11 +456,191 @@ def test_a_resume_question_is_covered_once_the_resume_is_in_place(tmp_path):
     assert parked.pages == 1
 
 
-def test_is_resume_question():
-    from assistant.answers import Question
+def test_is_resume_question_is_the_deciders_verdict():
+    from assistant.answers import judge_questions
     from assistant.fill import is_resume_question
-    Qm = lambda **k: Question.model_validate(Q(**{"answer": None, "source": None, **k}))
-    assert is_resume_question(Qm(question="Resume*", kind="choice"))
-    assert is_resume_question(Qm(question="Select one", kind="choice", options=["Amin_A.pdf", "Amin_B.pdf"]))
-    assert not is_resume_question(Qm(question="Cover letter or resume notes"))       # a cover letter is not covered
-    assert not is_resume_question(Qm(question="Mobile phone number*"))
+    from assistant.jev import Table
+    from assistant.pages import Page
+    pa = PageAnswers.model_validate({"questions": [
+        Q("Resume*", None, kind="choice", source=None),
+        Q("Select one", None, kind="choice", source=None, options=["Amin_A.pdf", "Amin_B.pdf"]),
+        Q("Cover letter or resume notes", None, source=None),               # a cover letter is not covered
+        Q("Mobile phone number*", None, source=None)]})
+    judge_questions(pa, Page(url="u", title="Apply", text="", table=Table(url="u")))
+    assert [is_resume_question(q) for q in pa.questions] == [True, True, False, False]
+
+
+# ------------------------------------------------------------------ the browser agent (user decision 2026-09-23)
+# One test per job of the live run runs/20260923-224945, where the rule-based driver sent all seven to Needs-Attention.
+
+LI_JOB = "https://www.linkedin.com/jobs/view/4470454940/"
+
+
+def _clicked(fake) -> list[str]:
+    """Labels the fake clicked, through a goal or an act (a wrapper over _click installed by the test)."""
+    return fake.clicked
+
+
+def _record_clicks(fake):
+    fake.clicked = []
+    orig = fake._click
+
+    def click(e, confirm=False):
+        fake.clicked.append(e.name)
+        return orig(e, confirm)
+    fake._click = click
+
+
+def test_a_safety_reminder_after_easy_apply_is_passed_with_continue_applying(tmp_path):
+    """Linda AI: Easy Apply opened "Job search safety reminder"; the old rule clicked "Review job post" (it starts
+    with "Review") and looped twelve times. The agent continues the application instead."""
+    site = {
+        "job": FakePage(LI_JOB, "Founding Software Engineer | Linda AI | LinkedIn", "Founding Software Engineer",
+                        [El("button", "Easy Apply to this job", goto="safety"), El("button", "Save the job")]),
+        "safety": FakePage(LI_JOB, "Founding Software Engineer | Linda AI | LinkedIn", "Job search safety reminder",
+                           [El("button", "Dismiss", goto="job"), El("button", "Review job post", goto="job"),
+                            El("link", "Continue applying", goto="s1")], modal="Job search safety reminder"),
+        **steps_site()}
+    fake = FakeMCP(site, "job")
+    _record_clicks(fake)
+    parked = run_pages(ctx_for(fake, STEPS_ANSWERS, tmp_path))
+    assert parked.pages == 3 and fake.cur == "s3" and fake.sent == []
+    assert "Review job post" not in fake.clicked and "Continue applying" in fake.clicked
+    confirms = [op for n, a in fake.log if n == "browser_act" for op in a["ops"] if op.get("confirm")]
+    assert len(confirms) == 1                                         # only Easy Apply, by entry.confirm_click
+
+
+def test_a_cookie_pop_up_over_the_form_is_declined_and_the_form_submit_never_confirmed(tmp_path):
+    """Toast: the pop-up's "I do not accept / I accept" matched none of the old cookie rules; it covered the form
+    and every typed value was refused. The form's own submit is "Apply now!", an Apply label that must never be
+    taken for the entry click."""
+    site = {"t": FakePage("https://careers.toasttab.com/jobs/1", "Software Engineer II", "We use cookies. City Resume",
+                          [El("link", "APPLY NOW"), El("textbox", "City", required=True, occluded=True),
+                           El("file", "Resume", required=True, occluded=True), El("button", "I do not accept"),
+                           El("button", "I accept"), El("button", "Apply now!", submits=True)],
+                          modal="Cookie consent")}
+    fake = FakeMCP(site, "t")
+    _record_clicks(fake)
+    orig = fake._click
+
+    def click(e, confirm=False):
+        if e.name == "I do not accept":                             # declining removes the pop-up
+            page = site["t"]
+            page.modal, page.text = None, page.text.replace("We use cookies. ", "")
+            page.els = [x for x in page.els if x.name not in ("I do not accept", "I accept")]
+            for x in page.els:
+                x.occluded = False
+        return orig(e, confirm)
+    fake._click = click
+    answers = {"Software Engineer II": [Q("City", "Milan", ref="auto"),
+                                        Q("Resume", None, kind="file", ref="auto", source=None)]}
+    parked = run_pages(ctx_for(fake, answers, tmp_path))
+    assert parked.pages == 1 and fake.sent == [] and "I accept" not in fake.clicked
+    assert {e.name: e.value for e in site["t"].els}["City"] == "Milan"
+    assert not any(op.get("confirm") for n, a in fake.log if n == "browser_act" for op in a["ops"])
+
+
+def test_the_agents_apply_is_refused_when_it_submits_a_form_or_a_field_holds_a_value(tmp_path):
+    from assistant.entry import EntryRefused, confirm_click
+    from assistant.pages import read_page
+    site = {"t": FakePage("https://careers.example/jobs/1", "Job", "Apply", [
+        El("textbox", "City"), El("button", "Apply now!", submits=True), El("link", "Apply for this job")])}
+    fake = FakeMCP(site, "t")
+    read = lambda: read_page(fake, "s")
+    with pytest.raises(EntryRefused, match="submits the form"):
+        confirm_click(fake, "s", "Apply now!", read, lambda _: None)
+    with pytest.raises(EntryRefused, match="does not start"):
+        confirm_click(fake, "s", "Submit application", read, lambda _: None)
+    site["t"].els[0].value = "Milan"
+    with pytest.raises(EntryRefused, match="already holds a value"):
+        confirm_click(fake, "s", "Apply for this job", read, lambda _: None)
+    assert fake.sent == []
+    assert not any(op.get("confirm") for n, a in fake.log if n == "browser_act" for op in a["ops"])
+
+
+def test_a_job_alert_box_is_not_taken_for_the_application_form(tmp_path):
+    """Mastercard: the job page's job-alert box ("Please enter your email address") was filled as if it were the
+    application, and "Apply Now" was never clicked. The agent's first "the form is here" is checked, and questioned
+    once when the page does not look like an application."""
+    from assistant import decide
+    from assistant.fill import NOT_THE_FORM
+    from tests.rule_decider import RuleDecider
+    decide.use(RuleDecider(kinds={"https://careers.mastercard.com/job/1": "job_posting"}))   # what Jev says
+    site = {"job": FakePage("https://careers.mastercard.com/job/1", "Senior ML Ops", "Senior ML Ops. Job alerts", [
+                El("button", "Apply Now for R-286222", goto="p1"), El("textbox", "Please enter your email address"),
+                El("button", "Submit")], form_here=True),
+            **single_page()}
+    fake = FakeMCP(site, "job")
+    parked = run_pages(ctx_for(fake, SINGLE_ANSWERS, tmp_path))
+    assert parked.pages == 1 and fake.cur == "p1" and fake.sent == []
+    assert site["job"].els[1].value == ""                              # the job-alert box was left alone
+    navigates = [a["goal"] for n, a in fake.log if n == "browser_goal" and a["goal"].startswith("Bring")]
+    assert NOT_THE_FORM not in navigates[0] and NOT_THE_FORM in navigates[1]
+
+
+def test_a_radio_group_redrawn_after_the_toggle_is_read_back_by_its_label(tmp_path):
+    """Digital Manufacturing Ireland: LinkedIn redraws a radio group when an option is picked; the new radios have
+    new refs (e221 → e231, checked), the old ref read as "not set", and a correctly filled page was given up."""
+    q = "Are you currently a resident of Ireland?"
+    site = {"s": FakePage("https://www.linkedin.com/jobs/view/1/", "Additional Questions",
+                          f"Additional Questions {q} Yes No Resume", [
+                              El("radio", q, group=q, label="Yes", ref="e220"),
+                              El("radio", q, group=q, label="No", ref="e221"),
+                              El("file", "Resume", required=True, value=PDF), El("button", "Submit application")])}
+    fake = FakeMCP(site, "s")
+    orig = fake._browser_act
+
+    def act(ops, **kw):
+        out = orig(ops, **kw)
+        if any(op["op"] == "toggle" for op in ops):                     # the redraw: new radios, new refs
+            old = site["s"].els
+            site["s"].els = [El("radio", q, group=q, label=e.label, checked=e.checked, ref=f"e23{i}")
+                             for i, e in enumerate(old[:2])] + old[2:]
+        return out
+    fake._browser_act = act
+    answers = {"Additional Questions": [Q(q, "No", kind="choice", option_ref="e221", options=["Yes", "No"])]}
+    parked = run_pages(ctx_for(fake, answers, tmp_path))
+    assert parked.pages == 1 and [e.checked for e in site["s"].els[:2]] == [False, True]
+    assert not [a for n, a in fake.log if n == "browser_open"]         # never reopened: the answer was seen as set
+
+
+def test_the_agents_entry_click_is_retried_while_the_posting_re_renders(tmp_path):
+    """Genesys: the posting was still re-rendering — `detached`, then `page_changed` — and the old code gave the
+    job up after one retry, three seconds in."""
+    site = {"j": FakePage(LI_JOB, "Job", "Software Engineer",
+                          [El("link", "Apply on company website", goto="p1")]), **single_page()}
+    fake = FakeMCP(site, "j")
+    orig, n = fake._browser_act, {"clicks": 0}
+
+    def act(ops, **kw):
+        if ops and ops[0].get("confirm"):
+            n["clicks"] += 1
+            if n["clicks"] < 3:
+                return "0/1 ops ok  (stopped early)\n  x click e1  " + (
+                    "detached: detached" if n["clicks"] == 1 else "page_changed: page_changed")
+        return orig(ops, **kw)
+    fake._browser_act = act
+    parked = run_pages(ctx_for(fake, SINGLE_ANSWERS, tmp_path))
+    assert parked.pages == 1 and n["clicks"] == 3 and fake.cur == "p1"
+
+
+def test_an_agent_that_finds_no_way_forward_is_needs_attention(tmp_path):
+    site = {"j": FakePage("https://acme.io/jobs/1", "Job", "No longer open", [El("button", "Save")])}
+    with pytest.raises(NeedsAttention) as ei:
+        run_pages(ctx_for(FakeMCP(site, "j"), {}, tmp_path))
+    assert ei.value.cls == "navigation" and "no way forward" in ei.value.what
+
+
+def test_an_advance_goal_that_only_scrolled_is_asked_again(tmp_path):
+    fake = FakeMCP(steps_site(), "s1")
+    orig, first = fake._browser_goal, {"n": 0}
+
+    def goal(goal, **kw):
+        if goal == NEXT_STEP_GOAL and first["n"] == 0:
+            first["n"] += 1
+            return ("goal: x\nstatus: stopped: hit max_steps=1\nsteps: 1\ntrace:\n"
+                    "  1. SCROLL  → ok (1ms model / 1ms browser)\n\n" + fake.view())
+        return orig(goal, **kw)
+    fake._browser_goal = goal
+    parked = run_pages(ctx_for(fake, STEPS_ANSWERS, tmp_path))
+    assert parked.pages == 3 and first["n"] == 1

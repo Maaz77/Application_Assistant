@@ -1,4 +1,9 @@
-"""The page loop of one job (§5 from the entry click to the gate) and the fill mapping of §7."""
+"""The page loop of one job (§5 from the LinkedIn posting to the gate) and the fill mapping of §7.
+
+The browser agent (the package's browser_goal) finds its way: from the posting to the application form past
+pop-ups, cookie banners and job pages, and from one form step to the next. Code keeps what must not be left to a
+model: the answers (answers.py, checked against the files), the resume upload, the blockers, the final-step gate,
+and every click the server refuses as submit-like — an entry label is clicked by entry.py, never anything else."""
 from __future__ import annotations
 
 import time
@@ -11,16 +16,23 @@ from urllib.parse import urlparse
 from typing import Callable
 
 from assistant import pages, tabs
-from assistant.answers import LONG_TEXT, AnswerEngineError, PageAnswers, Question, uncovered_optional, uncovered_required
+from assistant.answers import (LONG_TEXT, AnswerEngineError, PageAnswers, Question, judge_questions,
+                               uncovered_optional, uncovered_required)
+from assistant.decide import DecisionError
 from assistant.blockers import Attempts, NeedsAttention, OpenQuestion, Parked, RestartFromEntry, StopRun
-from assistant.entry import EntryRefused, entry_click, guest_click
+from assistant.entry import EntryRefused, confirm_click, guest_click
 from assistant.guard import is_strong_transmit, is_transmit, label_of
 from assistant.jev import Jev, JevError, Table
 from assistant.pages import Page
 
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
 STALE = re.compile(r"\b(detached|page_changed|target_changed|unknown_ref|stale)\b")
-NEXT_STEP_GOAL = "Go to the next step of this application."
+NAVIGATE_GOAL = (PROMPTS / "navigate_goal.md").read_text().strip()
+NEXT_STEP_GOAL = (PROMPTS / "next_step_goal.md").read_text().strip()
+NOT_THE_FORM = ("\nThe fields on this page are not the application form (they look like a search box or a "
+                "job-alert sign-up). Start the application instead.")
+NAVIGATE_ROUNDS = 12        # one-action navigate goals per job: cookies, pop-ups, job pages, start dialogs, and spare
+ADVANCE_TRIES = 3           # one-action advance goals per step, while the agent only scrolls or waits
 
 
 def page_goal(answers: list[tuple[str, str]]) -> tuple[str, int]:
@@ -107,6 +119,7 @@ class JobCtx:
     prefills: list[tuple[str, str]] = field(default_factory=list)
     optional_empty: list[OpenQuestion] = field(default_factory=list)
     attempts: Attempts = field(default_factory=Attempts)
+    nav_rounds: int = 0
     stage: str = "entry"
     last: Page | None = None
     sleep: Callable[[float], None] = time.sleep
@@ -135,31 +148,24 @@ def _field_fingerprint(p: Page) -> tuple:
     return tuple(sorted((e.role, e.name) for e in pages.fields(p)))
 
 
-def resume_input(p: Page, resume_step: bool) -> str | None:
-    """C25: the file input labelled resume/CV; a lone file input on a resume step; several unlabelled → blocker."""
+RESUME_CONFIDENCE = 0.5     # below this, Jev cannot tell which of several uploads is the resume
+
+
+def resume_input(p: Page) -> str | None:
+    """The control that uploads the resume (a file input, or LinkedIn's "Upload resume" button that opens the file
+    chooser, aa6), as Jev picks it. Several uploads and no clear pick → a blocker (C25)."""
+    j = pages.judge(p)
     files = [e for e in p.elements if e.role == "file"]
-    if not files:
-        # No file input: an "Upload resume" button that opens the file chooser (LinkedIn Easy Apply, aa6).
-        triggers = [e for e in p.elements if e.role == "button" and pages.UPLOAD_TRIGGER_RE.search(e.name)
-                    and not is_transmit(e.name)]
-        return triggers[0].ref if resume_step and len(triggers) == 1 else None
-    named = [e for e in files if any(pages.RESUME_RE.search(x) for x in (e.name, e.label, e.context))]
-    if named:
-        return named[0].ref
-    if len(files) == 1 and resume_step:
-        return files[0].ref
-    if len(files) > 1 and resume_step:
-        raise NeedsAttention("broken_form", "several file inputs and none is labelled resume/CV")
-    return None
-
-
-def _required_file_labels(p: Page) -> list[str]:
-    return [i[0] for i in p.required_empty.get("items", []) if len(i) > 1 and i[1] == "file"]
+    if j.resume_ref is None:
+        return None
+    if len(files) > 1 and j.resume_confidence < RESUME_CONFIDENCE:
+        raise NeedsAttention("broken_form", "several file inputs and it is unclear which one takes the resume")
+    return j.resume_ref
 
 
 def upload_resume(ctx: JobCtx, p: Page) -> bool:
     """Upload the tailored resume on this page if it has a resume input. True if the resume is now in place."""
-    ref = resume_input(p, bool(pages.RESUME_RE.search(p.text)))
+    ref = resume_input(p)
     if ref is None:
         return False
     el = next(e for e in p.elements if e.ref == ref)
@@ -176,10 +182,9 @@ def upload_resume(ctx: JobCtx, p: Page) -> bool:
 
 
 def is_resume_question(q: Question) -> bool:
-    """A question the resume upload answers: about the resume/CV, or choosing among resume files (LinkedIn's
-    "Resume*" cards, live 2026-09-23)."""
-    return bool(pages.RESUME_RE.search(q.question)) and not re.search(r"cover", q.question, re.I) \
-        or any(pages.RESUME_FILE_RE.search(o or "") for o in (q.options or []))
+    """A question the resume upload answers (Jev's verdict, answers.judge_questions): about the resume/CV, or a
+    choice among resume files (LinkedIn's "Resume*" cards, live 2026-09-23)."""
+    return q.resume_upload
 
 
 def select_resume_card(ctx: JobCtx, p: Page) -> None:
@@ -292,10 +297,26 @@ def run_goal(ctx: JobCtx, items: list[Question], p: Page) -> GoalResult:
     return g
 
 
+def _key(s: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", pages.norm_label(s))
+
+
+def _option_now(q: Question, p: Page):
+    """The option a toggle set, found again after a re-render renumbered it: LinkedIn redraws its radio group on
+    every change (live 2026-09-23: e221 became e231, checked), so the old ref reads as "not set". The one option
+    named like the question whose own label is the answer, else the one named like the answer."""
+    kinds = {"radio", "checkbox", "switch"}
+    hits = [e for e in p.elements if e.role in kinds and _key(e.name) == _key(q.question) and e.label
+            and _key(e.label) == _key(q.answer)]
+    if not hits:
+        hits = [e for e in p.elements if e.role in kinds and _key(e.name) == _key(q.answer)]
+    return hits[0] if len(hits) == 1 else None
+
+
 def _holds(q: Question, p: Page, before_text: str) -> bool:
     by_ref = {e.ref: e for e in p.elements}
     if q.option_ref:
-        opt = by_ref.get(q.option_ref)
+        opt = by_ref.get(q.option_ref) or _option_now(q, p)
         return bool(opt and opt.checked)
     want = pages.norm_label(q.answer)
     el = by_ref.get(q.ref or "") or next((e for e in p.elements
@@ -325,13 +346,15 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
     except AnswerEngineError as exc:
         raise NeedsAttention("answer_engine", str(exc)) from exc
     log_answers(ctx, p, pa)
+    try:
+        judge_questions(pa, p)                                   # Jev: resume and cover-letter questions
+    except DecisionError as exc:
+        raise NeedsAttention("decision", str(exc)) from exc
     for q in pa.questions:
-        if q.kind == "file" and q.required and re.search(r"cover", q.question, re.I) \
-                and not pages.RESUME_RE.search(q.question):
+        if q.kind == "file" and q.required and q.cover_letter:
             raise NeedsAttention("broken_form", f"required cover-letter file: {q.question!r}")   # C15
-    for label in _required_file_labels(p):
-        if re.search(r"cover", label, re.I) and not pages.RESUME_RE.search(label):
-            raise NeedsAttention("broken_form", f"required cover-letter file: {label!r}")
+    for label in pages.judge(p).cover_letters:
+        raise NeedsAttention("broken_form", f"required cover-letter file: {label!r}")
     resume_in_place = upload_resume(ctx, p)                                # 1
     for q in pa.questions:                                                       # 2
         if q.answer is not None and _wrapper_types(q):
@@ -391,8 +414,8 @@ def log_answers(ctx: JobCtx, p: Page, pa: PageAnswers) -> None:
         return
     ctx.answers_log.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(ctx.answers_log.read_text()) if ctx.answers_log.exists() else []
-    data += [{"page": ctx.pages + 1, "url": p.url, "question": q.question, "answer": q.answer, "source": q.source,
-              "quote": q.quote, "relies_on": q.relies_on, "note": q.note} for q in pa.questions]
+    data += [{"page": ctx.pages + 1, "url": p.url, "model": pa.model, "question": q.question, "answer": q.answer,
+              "source": q.source, "quote": q.quote, "relies_on": q.relies_on, "note": q.note} for q in pa.questions]
     ctx.answers_log.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
@@ -402,20 +425,13 @@ ENTRY_TAB_WAIT = 8          # s: LinkedIn may open the company site a few second
 CLICK_TAB_WAIT = 3          # s: after an advance click (an interstitial "Continue" can open the site too)
 
 
-def page_shape(p: Page) -> tuple:
-    """What a click is expected to change: the page, its real fields and its advance buttons."""
-    return (urlparse(p.url)._replace(query="", fragment="").geturl(),
-            tuple(sorted((e.role, e.name) for e in pages.real_fields(p))),
-            tuple(sorted(e.name for e in pages.advance_buttons(p))))
-
-
 def follow_new_tab(ctx: JobCtx, known: set[str], seconds: int, before: Page | None = None) -> bool:
     """After a click: if a new tab appears within `seconds`, hand the job off to it (and close the tab we
     were on, unless it is the user's). Stops waiting as soon as this tab has visibly changed from `before`
     (the page at the click) and shows a real form field or an advance button, or shows confirmation text.
     LinkedIn opens its Easy Apply dialog a moment after the click, over a page that already has a switch
     (live 2026-09-23), so "any field" is not enough. Returns True if the job moved to a new tab."""
-    shape = page_shape(before) if before is not None else None
+    shape = pages.page_shape(before) if before is not None else None
     for i in range(seconds + 1):
         if ctx.book.handles() - known - ctx.baseline:
             ctx.book.hand_off(ctx.session, ctx.baseline, known)
@@ -425,35 +441,71 @@ def follow_new_tab(ctx: JobCtx, known: set[str], seconds: int, before: Page | No
         p = pages.read_page(ctx.browser, ctx.session)
         if pages.is_alarm(p):
             return False
-        if (pages.real_fields(p) or pages.has_advance(p)) and (shape is None or page_shape(p) != shape):
+        if pages.page_shape(p) != shape if shape is not None else pages.form_is_here(p):
             return False
         ctx.sleep(1.0)
     return False
 
 
-# ------------------------------------------------------------------ advance and final (§4.3, §4.4)
+# ------------------------------------------------------------------ the browser agent (browser_goal)
+
+def acted(g: GoalResult) -> bool:
+    """The agent changed something: a click, a choice, a toggle or typing went through."""
+    return any((m := TRACE_RE.match(line)) and m.group(1) not in ("SCROLL", "WAIT") and m.group(4) == "ok"
+               for line in g.trace)
+
+
+def navigate(ctx: JobCtx, p: Page, hint: str = "") -> str:
+    """One agent action from `p` towards the application form (NAVIGATE_GOAL, max_steps=1: the page is looked at
+    again after every action, so the agent can never run through a form we have not filled). Returns "form" (the
+    agent says the form is on screen, or starts answering it), "moved" (it, or our entry click, changed the page)
+    or "stuck". A click the server refused as submit-like is made by entry.confirm_click when it starts the
+    application; a refused Apply that belongs to a form already on the page means the form is here."""
+    ctx.stage = "navigate"
+    ctx.nav_rounds += 1
+    if ctx.nav_rounds > NAVIGATE_ROUNDS:
+        raise NeedsAttention("navigation", f"the browser agent did not reach the application form in "
+                                           f"{NAVIGATE_ROUNDS} tries (last page: {p.title or p.url!r})")
+    known = ctx.book.handles()
+    out = ctx.browser.goal(NAVIGATE_GOAL + hint, ctx.session, max_steps=1)
+    if "no decision-model key" in out:
+        raise NeedsAttention("navigation", "the browser agent is not available: no decision-model key")
+    g = parse_goal(out)
+    check_goal_alarm(g, p.table)
+    blocked = blocked_transmit(g, p.table)
+    if blocked:
+        try:
+            confirm_click(ctx.browser, ctx.session, blocked, ctx.read, ctx.sleep)
+        except EntryRefused as exc:
+            if pages.has_fields(ctx.read()):
+                return "form"
+            raise NeedsAttention("navigation", f"the browser agent chose {blocked!r}, which the program does "
+                                               f"not click: {exc}") from exc
+        follow_new_tab(ctx, known, ENTRY_TAB_WAIT, p)       # a dialog or the company site may open a moment later
+        return "moved"
+    if follow_new_tab(ctx, known, 0):                         # the agent's own click opened a tab
+        return "moved"
+    if g.done or any((m := TRACE_RE.match(line)) and m.group(1) in ("TYPE_TEXT", "SELECT", "TOGGLE")
+                     for line in g.trace):
+        return "form"                                         # it says so, or it began to answer the form
+    return "moved" if acted(g) else "stuck"
+
 
 def advance(ctx: JobCtx, p: Page) -> str:
-    """'moved' | 'final' | 'stuck'."""
+    """'moved' | 'final' | 'stuck'. The agent clicks this step's Next / Continue / Review (NEXT_STEP_GOAL), one
+    action per goal so it can never run past a step we have not filled; a goal that only scrolled or waited is
+    asked again. The server refusing a strong transmit label (Submit, Send, Apply) means this is the last step."""
     ctx.stage = "advance"
     before = _field_fingerprint(p)
     known = ctx.book.handles()
-    btns = pages.advance_buttons(p)
-    if len(btns) == 1:
-        out = ctx.browser.act([{"op": "click", "ref": btns[0].ref}, {"op": "wait_for_load", "timeout_ms": 20000}],
-                              ctx.session, p.table, stop_on_error=False)
-        if STALE.search(out.split("\n", 2)[1] if "\n" in out else out):     # re-rendered: re-map by name, once
-            fresh = ctx.read()
-            again = [b for b in pages.advance_buttons(fresh) if b.name == btns[0].name]
-            if len(again) == 1:
-                ctx.browser.act([{"op": "click", "ref": again[0].ref}, {"op": "wait_for_load", "timeout_ms": 20000}],
-                                ctx.session, fresh.table, stop_on_error=False)
-    else:
-        g = parse_goal(ctx.browser.goal(NEXT_STEP_GOAL, ctx.session, max_steps=4))
+    for _ in range(ADVANCE_TRIES):
+        g = parse_goal(ctx.browser.goal(NEXT_STEP_GOAL, ctx.session, max_steps=1))
         check_goal_alarm(g, p.table)
         blocked = blocked_transmit(g, p.table)
         if blocked and is_strong_transmit(blocked):
             return "final"
+        if acted(g) or blocked or g.status in ("done", "blocked"):
+            break
     if follow_new_tab(ctx, known, CLICK_TAB_WAIT, p):  # e.g. LinkedIn's "Continue" to the company site
         return "moved"
     q = ctx.read()
@@ -467,13 +519,17 @@ def advance(ctx: JobCtx, p: Page) -> str:
 # ------------------------------------------------------------------ the loop
 
 def run_pages(ctx: JobCtx) -> Parked:
-    """From the application's first page to the parked final step. Raises NeedsAttention / StopRun /
-    RestartFromEntry. Never clicks a transmit label (the guard would refuse)."""
+    """From wherever the job's tab is (the LinkedIn posting) to the parked final step. Two stages: "navigate",
+    where the agent looks for the application form, and "form", where each step is filled and advanced. A page
+    that is covered by a pop-up, or shows neither fields nor a way forward, goes back to the agent.
+    Raises NeedsAttention / StopRun / RestartFromEntry. Never clicks a transmit label (the guard would refuse)."""
+    ctx.nav_rounds = 0
+    stage, hint, stuck = "navigate", "", 0
     filled, gate_retry, iframe_hops, guard_rounds, final_hint = False, False, 0, 0, False
     try:
         while True:
             guard_rounds += 1
-            if guard_rounds > ctx.max_pages * 4:
+            if guard_rounds > ctx.max_pages * 4 + NAVIGATE_ROUNDS:
                 raise NeedsAttention("broken_form", "the page loop is not making progress")
             p = ctx.read()
             v = pages.classify(p)
@@ -481,30 +537,38 @@ def run_pages(ctx: JobCtx) -> Parked:
                 raise StopRun(f"ALARM: {v.detail!r} on {p.url}")
             if v.kind == "blocker":
                 _attempt2(ctx, p, v.detail.split(":", 1)[0], v.detail)
-                filled = False
+                stage, filled = "navigate", False
                 continue
             if v.kind in ("google", "google_wall"):
                 from assistant.google_signin import sign_in
                 ctx.stage = "google sign-in"
                 sign_in(ctx.browser, ctx.session, ctx.book, ctx.google_email, ctx.baseline)
-                continue
-            if v.kind == "cookie":
-                ctx.browser.act([{"op": "click", "ref": v.ref}], ctx.session, p.table, stop_on_error=False)
-                continue
-            if v.kind == "ats_entry":
-                ctx.stage = "entry"
-                known = ctx.book.handles()
-                try:
-                    entry_click(ctx.browser, ctx.session, p.table, reread=lambda: ctx.read().table)
-                except EntryRefused as exc:
-                    raise NeedsAttention("load_failure", f"company-site Apply: {exc}") from exc
-                follow_new_tab(ctx, known, ENTRY_TAB_WAIT, p)
+                stage = "navigate"
                 continue
             if v.kind == "iframe":
                 iframe_hops += 1
                 if iframe_hops > 2:
                     raise NeedsAttention("load_failure", "the embedded application form did not load")
                 ctx.browser.open(v.detail, ctx.session)
+                continue
+            if stage == "navigate" and pages.form_is_here(p):
+                stage, hint = "form", ""
+            if stage == "navigate" or not pages.form_is_here(p):
+                r = navigate(ctx, p, hint)
+                if r == "form" and stage == "navigate" and not hint and not pages.form_is_here(ctx.read()):
+                    hint = NOT_THE_FORM                        # ask once more; a second "the form is here" stands
+                    continue
+                if r == "stuck" and hint:
+                    r = "form"                     # asked for the application's start, it found nothing to click
+                if r == "stuck":
+                    stuck += 1
+                    if stuck >= 2:
+                        raise NeedsAttention("navigation", f"the browser agent found no way forward on "
+                                                           f"{p.title or p.url!r}")
+                    continue
+                stuck, hint = 0, ""
+                if r == "form":
+                    stage = "form"
                 continue
             if pages.has_fields(p) and not filled:
                 try:
@@ -514,10 +578,11 @@ def run_pages(ctx: JobCtx) -> Parked:
                         ctx.browser.open(r.url, ctx.session)
                     else:
                         _reload(ctx)
+                    stage = "navigate"                        # a reopened LinkedIn job shows the posting again
                     continue
                 filled = True
                 continue
-            if pages.is_final(p) or (final_hint and pages.has_transmit(p)):
+            if pages.is_final(p) or (final_hint and pages.judge(p).submit_button):
                 ctx.stage = "final"
                 why = pages.gate(p, ctx.resume_pdf.name, ctx.typed)
                 if why is None:
@@ -540,6 +605,8 @@ def run_pages(ctx: JobCtx) -> Parked:
                 raise NeedsAttention("broken_form", f"no final step after {ctx.max_pages} pages")
     except NeedsAttention as exc:
         raise _where(exc, ctx)
+    except DecisionError as exc:
+        raise _where(NeedsAttention("decision", str(exc)), ctx) from exc
     except JevError as exc:
         try:
             ctx.attempts.fail("load_failure", str(exc)[:160])
@@ -556,7 +623,7 @@ def _attempt2(ctx: JobCtx, p: Page, cls: str, detail: str) -> None:
         _reload(ctx)
     elif cls == "signup":
         try:
-            guest_click(ctx.browser, ctx.session, p.table)
+            guest_click(ctx.browser, ctx.session, p)
         except EntryRefused as exc:
             raise NeedsAttention("signup", f"{detail}; guest link not usable: {exc}") from exc
     elif cls == "broken_form":

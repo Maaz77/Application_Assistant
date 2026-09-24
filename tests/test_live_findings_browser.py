@@ -7,7 +7,7 @@ from pypdf import PdfWriter
 
 from assistant import cli, config as config_mod, pages, tabs
 from assistant.answers import PageAnswers
-from assistant.entry import entry_click
+from assistant.entry import confirm_click
 from assistant.fill import resume_input
 from assistant.jev import Jev
 from assistant.pages import classify, read_page
@@ -31,13 +31,13 @@ def test_greenhouse_like_labels_values_and_no_false_captcha(new_browser, fixture
     files = [e for e in p.elements if e.role == "file"]
     assert [e.name for e in files] == ["Attach", "Attach"]                     # what the table alone says
     assert [e.label for e in files] == ["Resume/CV* (resume)", "Cover Letter (cover_letter)"]
-    assert resume_input(p, resume_step=True) == files[0].ref                   # C25 by the group label
+    assert resume_input(p) == files[0].ref                                     # C25 by the group label
     combos = {e.name: e.current for e in p.elements if e.role == "combobox"}
     assert combos["Will you now or in the future require sponsorship for a visa?*"] == "No"
     assert combos["Gender"] == "Select..."
     assert p.captcha is False                                                  # invisible reCAPTCHA badge
     assert ["Resume/CV*", "file"] in p.required_empty["items"]                 # not "Attach"
-    assert classify(p).kind == "form" and pages.is_final(p)
+    assert classify(p).kind == "final" and pages.is_final(p)
 
 
 def test_a_visible_captcha_still_counts(new_browser, fixture_server):
@@ -48,26 +48,26 @@ def test_a_visible_captcha_still_counts(new_browser, fixture_server):
 def test_greeting_like_link_wrapped_apply_is_the_entry_not_the_map(new_browser, fixture_server):
     p = _read(new_browser, fixture_server.url("ats/greeting_like.html"))
     v = classify(p)
-    assert v.kind == "ats_entry" and v.detail == "Apply"
+    assert v.kind == "navigate" and v.detail == "job_posting"
     assert pages.iframe_form_src(p) is None                                    # the map is not a form
 
 
 def test_ashby_like_entry_and_late_form(new_browser, fixture_server):
     job = _read(new_browser, fixture_server.url("ats/ashby_like.html"))
-    assert classify(job).kind == "ats_entry"
+    assert classify(job).kind == "navigate"
     app = _read(new_browser, fixture_server.url("ats/ashby_like_app.html"), settle=True)
     assert {"Name*", "Email*", "Resume*"} <= {e.name for e in app.elements}    # waited for "Fetching application form"
     radios = [e.name for e in app.elements if e.role == "radio"]
     assert radios == ["Job board", "Referral"]                                 # opacity-0 custom radios (aa3)
-    assert app.captcha is False and classify(app).kind == "form"
+    assert app.captcha is False and classify(app).kind in ("form", "final")
 
 
 def test_modal_dialog_hides_the_page_behind_it(new_browser, fixture_server):
     with new_browser() as b:
         b.open(fixture_server.url("jobs/view/4012345610-easy-dialog.html"), "dlg")
         before = read_page(b, "dlg")
-        assert pages.classify_entry(before) == "entry" and not pages.real_fields(before)   # chrome only
-        entry_click(b, "dlg", before.table)
+        assert pages.classify_entry(before) == "open" and not pages.real_fields(before)    # chrome only
+        confirm_click(b, "dlg", "Easy Apply to this job", lambda: read_page(b, "dlg"), lambda _: None)
         for _ in range(8):                                                     # the dialog opens 1.5 s later
             p = read_page(b, "dlg")
             if pages.real_fields(p):
@@ -81,6 +81,7 @@ def test_modal_dialog_hides_the_page_behind_it(new_browser, fixture_server):
     assert "real-time systems" not in p.text                                   # nor its text
 
 
+@pytest.mark.live_model          # the browser agent finds the way from the posting (OpenRouter)
 def test_linkedin_like_easy_apply_dialog_is_parked(fixture_server, chrome, tmp_path, monkeypatch):
     seen = []
 
@@ -127,13 +128,13 @@ def test_only_the_topmost_modal_counts(new_browser, fixture_server):
     with new_browser() as b:
         b.open(fixture_server.url("jobs/view/4012345610-easy-dialog.html"), "top")
         p = read_page(b, "top")
-        entry_click(b, "top", p.table, reread=lambda: read_page(b, "top").table)
+        confirm_click(b, "top", "Easy Apply to this job", lambda: read_page(b, "top"), time.sleep)
         for _ in range(8):
             p = read_page(b, "top")
             if pages.real_fields(p):
                 break
             time.sleep(0.5)
-        dismiss = pages.find_button(p, r"^\s*dismiss\b")
+        dismiss = next(e for e in pages.buttons(p) if e.name.lower().startswith("dismiss"))
         b.act([{"op": "click", "ref": dismiss.ref}], "top", p.table)
         prompt = read_page(b, "top")
         b.close("top")

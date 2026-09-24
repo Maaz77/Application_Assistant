@@ -1,4 +1,4 @@
-"""Command line: run · preflight · tripwire · capture (§2, §1, §8.5)."""
+"""Command line: run · preflight · tripwire · capture · requeue (§2, §1, §8.5)."""
 from __future__ import annotations
 
 import argparse
@@ -11,12 +11,13 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from assistant import config as config_mod
+from assistant import decide
 from assistant import jev as jevlib
 from assistant import pages, records, tabs
 from assistant.answers import Policy, Sources, answer_page, resume_text
+from assistant.rotation import Rotation
 from assistant.blockers import NeedsAttention, Parked, RestartFromEntry, StopRun
-from assistant.entry import EntryRefused, entry_click
-from assistant.fill import ENTRY_TAB_WAIT, JobCtx, follow_new_tab, run_pages
+from assistant.fill import JobCtx, run_pages
 from assistant.jev import Jev, JevError, split_json
 from assistant.report import EXIT_PREFLIGHT, EXIT_STOPPED, JobResult, Report
 from assistant.tracker import NEEDS_ATTENTION, PENDING_REVIEW, Tracker, TrackerError
@@ -43,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     trip.add_argument("--live", action="store_true", help="also run the live_model goal tripwire (OpenRouter)")
     cap = sub.add_parser("capture", help="save a read-only snapshot of a page for tests")
     cap.add_argument("url")
+    req = sub.add_parser("requeue", help="put Needs-Attention jobs back in the queue (status Resume Built)")
+    req.add_argument("--job", metavar="URL", help="only the job with this LinkedIn URL")
     return p
 
 
@@ -62,8 +65,16 @@ class PreflightError(RuntimeError):
 
 
 def preflight(browser: Jev) -> list[str]:
-    """Server, capabilities, LinkedIn sign-in. Raises PreflightError. Writes nothing."""
+    """Decision model, server, capabilities, LinkedIn sign-in. Raises PreflightError. Writes nothing."""
     done = []
+    try:
+        a = decide.current().ask("preflight", "A job application form asks for the candidate's email address.",
+                                 {"form": decide.noul("Is this about a job application?")})
+    except decide.DecisionError as exc:
+        raise PreflightError(f"the decision model (Jev) does not answer: {exc}") from exc
+    if not a["form"].yes(0.5):
+        raise PreflightError("the decision model (Jev) answered a trivial question wrongly")
+    done.append(f"decision model {browser.cfg.models.jev} answers (via {browser.cfg.models.jev_route})")
     doc = browser.doctor()
     for cap in ("text_model", "uploads", "js_eval"):
         if doc.get(cap) is not True:
@@ -100,26 +111,35 @@ def preflight(browser: Jev) -> list[str]:
 
 
 def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
+    """`key` is the chat route's key (config.chat_key). A key both routes use is reported once."""
     problems = cfg.problems()
+    missing: dict[str, list[str]] = {}
     if not key:
-        problems.append("OPENROUTER_API_KEY is missing (put it in Tools/Application_Assistant/.env)")
+        missing.setdefault(config_mod.KEY_NAMES[cfg.models.chat_route], []).append("the answer engine and text helper")
+    if not config_mod.jev_key(cfg):
+        missing.setdefault(config_mod.KEY_NAMES[cfg.models.jev_route], []).append("Jev")
+    for name, users in missing.items():
+        problems.append(f"{name} is missing ({' and '.join(users)} need it; put it in Tools/Application_Assistant/.env)")
     return problems
 
 
 # ------------------------------------------------------------------ one job (§5)
 
 def process(job: records.Job, *, browser: Jev, book: tabs.TabBook, cfg: config_mod.Config, key: str, profile: str,
-                  run_dir: Path, today: date, warn: Callable[[str], None] | None = None) -> Parked:
-    """Open → entry → page loop → parked. Raises NeedsAttention / StopRun. Tabs are released in all cases;
-    a release that fails is reported through `warn` instead of crashing the run."""
+                  run_dir: Path, today: date, warn: Callable[[str], None] | None = None,
+                  engines: Rotation | None = None) -> Parked:
+    """Open the posting → the page loop (the browser agent from there) → parked. Raises NeedsAttention / StopRun.
+    Tabs are released in all cases; a release that fails is reported through `warn` instead of crashing the run."""
     pdf = job.resume_pdf()                                              # before any browser work
     S = f"job-{job.key}"
     baseline = book.handles()
     src = Sources(profile=profile, job=job.job_md.read_text(), resume=resume_text(pdf))
     policy = Policy(cfg.policy.prefill, cfg.policy.free_text_max_chars)
+    engines = engines or Rotation(cfg.models.answer_engine)
 
     def engine(p):
-        return answer_page(p, src, key=key, model=cfg.models.answer_engine, policy=policy, today=today)
+        return answer_page(p, src, key=key, models=engines, policy=policy, today=today,
+                           url=config_mod.chat_url(cfg))
 
     ctx = JobCtx(browser=browser, session=S, book=book, resume_pdf=pdf, answer_fn=engine, baseline=baseline,
                  google_email=cfg.google.account_email, max_pages=cfg.browser.max_pages_per_job,
@@ -137,19 +157,15 @@ def process(job: records.Job, *, browser: Jev, book: tabs.TabBook, cfg: config_m
             if state in ("closed", "applied"):
                 raise NeedsAttention(state, "LinkedIn says this job is " + (
                     "no longer accepting applications" if state == "closed" else "already applied to"))
-            if state != "entry":
+            if state != "open":
                 raise NeedsAttention("load_failure", "no Easy Apply / Apply button on the LinkedIn job page")
-            known = book.handles()
             try:
-                entry_click(browser, S, p.table, reread=lambda: pages.read_page(browser, S).table)
-            except EntryRefused as exc:
-                raise NeedsAttention("load_failure", f"entry click refused: {exc}") from exc
-            follow_new_tab(ctx, known, ENTRY_TAB_WAIT, p)    # a dialog or the company site may open a moment later
-            try:
-                return run_pages(ctx)
+                return run_pages(ctx)                          # the browser agent takes it from the posting
             except RestartFromEntry as exc:
                 if attempt == 2:
                     raise NeedsAttention("load_failure", f"{exc} (after 2 attempts)") from exc
+    except decide.DecisionError as exc:
+        raise NeedsAttention("decision", str(exc)) from exc
     except NeedsAttention as na:
         if ctx.last and not na.url:
             na.url, na.title = ctx.last.url, ctx.last.title
@@ -208,7 +224,7 @@ def _load_package(cfg: config_mod.Config, key: str) -> None:
 
 
 def run(cfg: config_mod.Config, args) -> int:
-    key = config_mod.api_key()
+    key = config_mod.chat_key(cfg)
     if problems := _static_checks(cfg, key):
         for p in problems:
             print(f"✗ preflight: {p}")
@@ -223,6 +239,7 @@ def run(cfg: config_mod.Config, args) -> int:
         print(f"Report: {report.write(run_dir)}")
 
     browser = Jev(cfg, key, on_timeout=on_timeout)     # calls are not logged until preflight passes
+    decide.use(decide.for_config(cfg))
     try:
         _load_package(cfg, key)
         tracker = Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
@@ -233,6 +250,7 @@ def run(cfg: config_mod.Config, args) -> int:
         return EXIT_PREFLIGHT
     try:
         browser.calls_log = run_dir / "calls.jsonl"
+        decide.current().log = run_dir / "decisions.jsonl"
         book = tabs.TabBook(browser)                   # before any job tab exists (full IDs, §4.5)
         tracker.backup(run_dir / "tracker-backup.numbers")
         if not args.no_record:
@@ -242,13 +260,14 @@ def run(cfg: config_mod.Config, args) -> int:
         recorder = records.Recorder(tracker, records.Journal(run_dir / "journal.jsonl"), cfg.base_dir(),
                                     cfg.path("pending_review"), cfg.path("needs_attention"), set(q.new_rows))
         profile = cfg.path("profile").read_text()
+        engines = Rotation(cfg.models.answer_engine)   # one for the run: each page starts at the last model that answered
         for job in q.jobs:
             t0 = time.monotonic()
             result = JobResult(job.company, job.title, job.linkedin_url, job.folder, 0,
                                date=started.strftime("%Y-%m-%d"))
             try:
                 result.parked = process(job, browser=browser, book=book, cfg=cfg, key=key, profile=profile, run_dir=run_dir,
-                                        today=started.date(), warn=report.warnings.append)
+                                        today=started.date(), warn=report.warnings.append, engines=engines)
             except NeedsAttention as na:
                 result.attention = na
             result.seconds = time.monotonic() - t0
@@ -271,23 +290,26 @@ def run(cfg: config_mod.Config, args) -> int:
             book.close()
         except (NameError, JevError):
             pass
+        d = decide.current()
+        report.decisions = (d.calls, d.cost)
     path = report.write(run_dir)
     print(f"Report: {path}")
     return report.exit_code()
 
 
 def run_preflight(cfg: config_mod.Config) -> int:
-    key = config_mod.api_key()
+    key = config_mod.chat_key(cfg)
     if problems := _static_checks(cfg, key):
         for p in problems:
             print(f"✗ {p}")
         return EXIT_PREFLIGHT
-    print("✓ config valid, OpenRouter key present")
+    print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, Jev via {cfg.models.jev_route})")
     try:
         _load_package(cfg, key)
         print("✓ jev-ultrafast-mcp loaded after apply_env()")
         Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
         print("✓ tracker readable")
+        decide.use(decide.for_config(cfg))
         for line in preflight(Jev(cfg, key)):
             print(f"✓ {line}")
     except (PreflightError, TrackerError, JevError) as exc:
@@ -301,8 +323,9 @@ def capture(cfg: config_mod.Config, url: str) -> int:
     host = (urlparse(url).hostname or "page").replace(".", "-")
     out = CAPTURED / f"{host}-{datetime.now():%Y%m%d-%H%M%S}"
     out.mkdir(parents=True)
-    key = config_mod.api_key()
+    key = config_mod.chat_key(cfg)
     jevlib.apply_env(cfg, key)
+    decide.use(decide.for_config(cfg))
     browser = Jev(cfg, key)
     book = tabs.TabBook(browser)                       # before the captured tab exists
     S = "capture"
@@ -318,6 +341,23 @@ def capture(cfg: config_mod.Config, url: str) -> int:
     book.close()
     print(f"Saved {out}")
     print("Optionally add expected_kind.txt (form, final, blocker, …) to pin the classifier result.")
+    return 0
+
+
+def requeue(cfg: config_mod.Config, job_url: str | None) -> int:
+    """Needs-Attention/ → Applications/ with Status back to Resume Built; the tracker is backed up first."""
+    from assistant.tracker import job_id
+    run_dir = RUNS / f"{datetime.now():%Y%m%d-%H%M%S}-requeue"
+    try:
+        tracker = Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
+        tracker.backup(run_dir / "tracker-backup.numbers")
+        lines = records.requeue(tracker, records.Journal(run_dir / "journal.jsonl"), cfg.path("needs_attention"),
+                                cfg.path("applications"), job_id(job_url) if job_url else None)
+    except (TrackerError, StopRun) as exc:
+        print(f"✗ {exc}")
+        return EXIT_STOPPED
+    for line in lines or ["nothing to requeue"]:
+        print(f"• {line}")
     return 0
 
 
@@ -338,4 +378,6 @@ def main(argv: list[str] | None = None) -> int:
         return run_preflight(cfg)
     if args.cmd == "capture":
         return capture(cfg, args.url)
+    if args.cmd == "requeue":
+        return requeue(cfg, args.job)
     return EXIT_STOPPED

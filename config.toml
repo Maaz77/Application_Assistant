@@ -13,10 +13,33 @@ chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # test
 max_actions = 2000
 max_pages_per_job = 15
 
-[models]                           # OpenRouter slugs
-answer_engine = "qwen/qwen3.7-flash"
-text_helper = "deepseek/deepseek-chat"
-jev = "jev-latest"
+[models]                           # model IDs, as each route names them
+chat_route = "openrouter"                 # who serves the answer engine and the text helper: "openrouter" (free
+                                          # models below) or "vercel" (paid, for when OpenRouter's free quota is out)
+jev = "typesafe-ai/jev"                   # TypeSafe's decision model: the browser agent and every page decision
+jev_route = "vercel"                      # Jev through Vercel AI Gateway (AI_GATEWAY_API_KEY), or "openrouter"
+
+# Each list is tried in turn: the model that answered last goes first, and one that is out (rate-limited,
+# overloaded, wrong output) hands over to the next; when none answers the job goes to Needs Attention.
+[models.openrouter]                # OPENROUTER_API_KEY. Free tier: 50 requests a day across all free models
+# Each one supports structured outputs and answered the engine's real request shape on 2026-09-24.
+answer_engine = [
+  "qwen/qwen3.8-27b:free",
+  "dots-studio/dots-3-note-preview:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "nex-agi/nex-n2.5-mini:free",
+  "nex-agi/nex-n2.5-pro:free",             # slow (54 s for one short value): last
+]
+text_helper = [                    # types the values the browser agent enters
+  "qwen/qwen3.8-27b:free",
+  "dots-studio/dots-3-note-preview:free",
+  "nex-agi/nex-n2.5-mini:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+]
+
+[models.vercel]                    # AI_GATEWAY_API_KEY (Vercel AI Gateway, paid from its credit)
+answer_engine = ["mistral/mistral-nemo"]  # about $0.00004 a page; strict JSON output works (2026-09-24)
+text_helper = ["mistral/mistral-nemo"]
 
 [policy]
 prefill = "keep-if-silent"         # or "strict"

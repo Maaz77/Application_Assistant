@@ -183,3 +183,28 @@ def test_report_lists_warnings_when_there_are_any(tmp_path):
     md = r.write(tmp_path).read_text()
     assert "## Warnings" in md and "could not be released" in md
     assert "## Warnings" not in Report(WHEN).markdown()
+
+
+def test_requeue_moves_needs_attention_jobs_back_and_resets_their_row(ws):
+    """User decision 2026-09-23: the jobs of a run that all ended in Needs Attention go back to the queue."""
+    t = Tracker(ws / "Job_Tracker.numbers").load()
+    q = build_queue(ws / "Applications", t)
+    rec = Recorder(t, Journal(ws / "runs/1/journal.jsonl"), ws, ws / "Pending-Review", ws / "Needs-Attention",
+                   new_rows=set(q.new_rows))
+    job, new = q.jobs
+    rec.record(job, NEEDS_ATTENTION, "## note", "Needs Attention: navigation — no form")
+    rec.record(new, PENDING_REVIEW, "## note", None)                 # parked jobs stay where they are
+    t = Tracker(ws / "Job_Tracker.numbers").load()
+    t.set_notes("4100000001", "Referral from Ana\nNeeds Attention: navigation — no form")
+    t.save()
+    lines = records.requeue(Tracker(ws / "Job_Tracker.numbers").load(), Journal(ws / "runs/2/journal.jsonl"),
+                            ws / "Needs-Attention", ws / "Applications")
+    assert lines == [f"requeued {job.folder}"]
+    assert (ws / "Applications" / job.folder).exists() and not (ws / "Needs-Attention" / job.folder).exists()
+    row = Tracker(ws / "Job_Tracker.numbers").load().find("4100000001")[1]
+    assert row["Status"] == RESUME_BUILT and row["Notes"] == "Referral from Ana"     # only the run's line is gone
+    assert "## note" in (ws / "Applications" / job.folder / "job.md").read_text()      # job.md keeps its history
+    assert [j.key for j in build_queue(ws / "Applications", Tracker(ws / "Job_Tracker.numbers").load()).jobs] \
+        == ["4100000001"]
+    events = [json.loads(l)["event"] for l in (ws / "runs/2/journal.jsonl").read_text().splitlines()]
+    assert events == ["record_start", "tracker_saved", "folder_moved", "record_done"]

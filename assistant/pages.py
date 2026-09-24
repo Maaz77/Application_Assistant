@@ -1,4 +1,9 @@
-"""Deterministic page rules (§6). Pure functions over a Page snapshot; read_page() is the only I/O here."""
+"""Pages: what the program reads (read_page: the element table and the read-only probes) and what it decides
+about a page. Facts stay facts — refs, values, URLs, the probes' counts, the resume's file name. Every judgment
+about what a page *is* comes from TypeSafe's Jev (decide.py): one call per page snapshot, made the first time a
+question about it is asked, then cached on the Page (judge). The one exception is the safety floor: guard.py's
+never-submit label list, and the confirmation-text tripwire below, stay rules; Jev can add to them, never lift them.
+"""
 from __future__ import annotations
 
 import re
@@ -6,35 +11,18 @@ import time
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from assistant import guard
-from assistant.guard import is_advance, is_entry, is_transmit
+from assistant import decide, guard
+from assistant.decide import THRESHOLDS as T
 from assistant import probes as probes_mod
 from assistant.jev import Jev, Element, Table, split_json
 
 FORM_ROLES = {"textbox", "searchbox", "combobox", "listbox", "checkbox", "radio", "spinbutton", "switch", "file"}
+CONTROL_ROLES = {"button", "link", "menuitem", "tab"}
 
 SIGNED_OUT_MARKERS = ("/login", "/authwall", "/checkpoint", "/uas/")
-CLOSED_RE = re.compile(r"no longer accepting applications", re.I)
-APPLIED_RE = re.compile(r"\bapplied \d+ \w+ ago\b|application submitted", re.I)
+# Safety floor, kept beside Jev's "submitted" answer: the run stops if either sees a confirmation (exit 3).
 ALARM_RE = re.compile(r"(your )?application (was )?(submitted|sent)|thank(s| you) for (applying|your application)", re.I)
-VALIDATION_RE = re.compile(r"this field is required|is required\.|please (enter|select|fill|provide)|"
-                           r"invalid (value|format|email|phone)", re.I)
-CAPTCHA_TEXT_RE = re.compile(r"verify you('| a)re human|are you a robot", re.I)
-SIGNUP_RE = re.compile(r"create (an |your )?account|sign up|register", re.I)
-GOOGLE_BUTTON_RE = re.compile(r"(sign in|continue) with google", re.I)
-GOOGLE_REGISTRATION_RE = re.compile(r"create (an |your )?(account|profile)|terms of (use|service)|"
-                                    r"complete (your )?registration", re.I)
-GOOGLE_CONSENT_RE = re.compile(r"wants to access your google account|\ballow\b", re.I)
-GUEST_RE = re.compile(guard.GUEST_RE, re.I)
-TWO_STEP_RE = re.compile(r"2-step verification|two-step verification|verification code|enter the code", re.I)
-LOAD_FAIL_RE = re.compile(r"^\s*(404|500|502|503)\b|page not found|this site can.t be reached|"
-                          r"err_[a-z_]+|server error", re.I)
-COOKIE_RE = re.compile(r"cookie", re.I)
-COOKIE_CHOICES = [r"^\s*reject all\b", r"^\s*only (the )?necessary\b", r"^\s*accept all\b"]  # C24, in order
-RESUME_RE = re.compile(r"resume|résumé|\bcv\b|curriculum", re.I)
-# A button that opens the file chooser for the resume (LinkedIn Easy Apply: no file input until clicked).
-UPLOAD_TRIGGER_RE = re.compile(r"^\s*(upload|attach|add)\b.{0,20}\b(resume|résumé|cv|file|document)\b", re.I)
-RESUME_FILE_RE = re.compile(r"\.(pdf|docx?|rtf|txt)\b", re.I)
+RESUME_FILE_RE = re.compile(r"\.(pdf|docx?|rtf|txt)\b", re.I)      # a file name, not a judgment: LinkedIn's resume cards
 
 
 @dataclass
@@ -47,6 +35,8 @@ class Page:
     maxlengths: dict = field(default_factory=lambda: {"n": 0, "more": False, "items": [], "min": None})
     iframe_srcs: dict = field(default_factory=lambda: {"n": 0, "more": False, "items": [], "long": 0})
     captcha: bool = False
+    dialogs: list[str] = field(default_factory=list)   # open modal dialogs' names (`! dialog open: … [modal]`)
+    judgment: "Judgment | None" = field(default=None, repr=False, compare=False)
 
     @property
     def elements(self) -> list[Element]:
@@ -67,13 +57,17 @@ PAGE_PROBES = ("REQUIRED_EMPTY", "MAXLENGTHS", "IFRAME_SRCS", "FILE_LABELS", *so
                *sorted(probes_mod.RADIO_OPTIONS))
 
 
+MODAL_RE = re.compile(r"^\s*! dialog open: (.*?) \[modal\]\s*$", re.M)
+
+
 def read_page(browser: Jev, session: str) -> Page:
     view, table = split_json(browser.observe(session))
     pr = browser.probe(session, *PAGE_PROBES)
     enrich(table, pr)
     return Page(url=table.url, title=table.title, text=view_text(view), table=table,
                 required_empty=pr["REQUIRED_EMPTY"], maxlengths=pr["MAXLENGTHS"],
-                iframe_srcs=pr["IFRAME_SRCS"], captcha=browser.captcha_present(session))
+                iframe_srcs=pr["IFRAME_SRCS"], captcha=browser.captcha_present(session),
+                dialogs=MODAL_RE.findall(view.partition("\ntext:\n")[0]))
 
 
 def enrich(table: Table, pr: dict) -> None:
@@ -114,35 +108,189 @@ def enrich(table: Table, pr: dict) -> None:
             e.current = shown[i]
 
 
+# ------------------------------------------------------------------ Jev's judgment of a page
+
+PAGE_KINDS = {
+    "job_posting": "A job description page. It offers a button or link to start applying (Apply, Easy Apply, "
+                   "Apply now).",
+    "interstitial": "A step between the job posting and the application form: a job-search safety reminder, a "
+                    "'you are leaving this site' notice, or a choice of how to start the application (apply "
+                    "manually, autofill with a resume).",
+    "application_form": "A step of the job application itself: its own fields such as name, email, phone, "
+                        "resume upload or screening questions, with a way to go on to the next step.",
+    "final_step": "The application's last step: a review or summary, or a form whose only way forward is a "
+                  "button that submits the application.",
+    "account_wall": "Asks to sign in, to create an account or to enter a password before the application can go on.",
+    "google_sign_in": "Google's own sign-in page: an account chooser, a permission request, a password or code.",
+    "captcha": "A human-verification challenge.",
+    "confirmation": "Says that the application was submitted, sent or received.",
+    "closed": "Says that the job is closed or no longer accepts applications.",
+    "error": "An error page, a page that did not load, or an empty page.",
+    "other": "None of the above.",
+}
+FORM_KINDS = {"application_form", "final_step"}
+SETTLED_KINDS = {"confirmation", "closed", "error", "captcha", "account_wall", "google_sign_in"}   # never waited on
+GOOGLE_STEPS = {
+    "account_chooser": "Choose one of the listed Google accounts.",
+    "consent": "Asks to allow an app to access the Google account or share its details.",
+    "password": "Asks for the Google account's password.",
+    "two_step": "Asks for a verification code or another 2-step verification.",
+    "other": "None of the above.",
+}
+MAX_CONTROLS = 120          # controls listed in the state and offered as options (Jev's context is 32K tokens)
+STATE_TEXT = 6000           # chars of page text in the state
+
+
+@dataclass
+class Judgment:
+    kind: str
+    kind_confidence: float
+    submitted: bool             # the page says an application was submitted
+    applied: bool               # the page says the candidate already applied to this job
+    covered: bool               # a pop-up that is not part of the application sits over the page
+    loading: bool               # nothing to act on yet, and not a page that is final in itself
+    validation: bool            # a field shows an error message
+    registration: bool          # asks to complete a registration or accept terms
+    account: str                # create_account | sign_in | none
+    submit_button: bool         # a button that submits the application is on screen
+    app_fields: set[str]        # refs of fields that belong to the application
+    resume_ref: str | None      # the control that uploads the resume
+    resume_confidence: float
+    cover_letters: list[str]    # required-empty upload labels that ask for a cover letter
+    google_ref: str | None      # the control that signs in with Google
+    google_step: str | None     # on accounts.google.com
+    form_iframe: str | None     # the iframe src that holds the application form
+
+
+def _describe(e: Element) -> dict:
+    d = {"ref": e.ref, "role": e.role, "name": (e.name or e.label)[:90]}
+    if e.label and e.label != e.name:
+        d["option"] = e.label[:40]
+    shown = e.current or e.value
+    if shown:
+        d["value"] = str(shown)[:60]
+    if e.checked is not None:
+        d["checked"] = e.checked
+    if e.occluded:
+        d["covered"] = True
+    if e.options:
+        d["options"] = [o.label for o in e.options[:8] if o.label]
+    return d
+
+
+def page_state(p: Page) -> dict:
+    """What Jev sees of a page: its address, open dialogs, controls and text."""
+    return {"url": p.url, "title": p.title, "open_dialogs": p.dialogs,
+            "controls": [_describe(e) for e in p.elements[:MAX_CONTROLS]],
+            "required_fields_still_empty": [i[0] for i in p.required_empty.get("items", [])],
+            "text": p.text[:STATE_TEXT]}
+
+
+def _field_question(e: Element) -> dict:
+    return decide.noul({"field": _describe(e), "question": "Is `field` one of the job application's own questions?"},
+                       true="A question of the application form: contact details, resume, cover letter, experience, "
+                            "eligibility, or any other question the employer asks the candidate.",
+                       false="Part of the site around the application: a site search box, a language picker, a "
+                             "job-alert or newsletter sign-up, a chat box, a filter or a sort control.")
+
+
+def page_questions(p: Page) -> dict[str, dict]:
+    controls = [e for e in p.elements if e.role in CONTROL_ROLES | {"file"}][:MAX_CONTROLS]
+    qs = {
+        "kind": decide.choice("What is this page, as a step of applying for a job?", PAGE_KINDS),
+        "submitted": decide.noul("Does the page say that a job application was just submitted, sent or received?",
+                                 true="A confirmation such as 'Your application was submitted' or 'Thank you for "
+                                      "applying'.",
+                                 false="No such confirmation. Counts of applicants, or a badge on another job, "
+                                       "do not count."),
+        "applied": decide.noul("Does the page say that the candidate has already applied to this job?"),
+        "covered": decide.noul("Is a pop-up that is not part of the job application in front of the page, covering "
+                               "what is behind it?",
+                               true="A cookie or consent banner, a newsletter pop-up or another overlay sits over "
+                                    "the application or the job page.",
+                               false="Nothing covers the page, or what is in front is the application form itself."),
+        # "Still loading?" alone was answered from the title (a LinkedIn posting with only its nav bar drawn, 0.35);
+        # "anything to act on?" separates drawn pages (0.94 and up) from early ones (0.22–0.30), live 2026-09-24.
+        "actionable": decide.noul("Besides the site's own navigation, does the page already offer something to act "
+                                  "on for this job?",
+                                  true="An apply button or link, a field of a form, or the buttons of a dialog "
+                                       "about the application.",
+                                  false="Only the site's navigation links, a search box, a spinner or a loading "
+                                        "message."),
+        "validation": decide.noul("Does the page show an error message about a form field, such as 'This field is "
+                                  "required' or 'Invalid email'?"),
+        "registration": decide.noul("Does the page ask to complete a registration, create a profile or accept terms "
+                                    "of use before going on?"),
+        "account": decide.choice("What does the page ask for about an account?", {
+            "create_account": "To create a new account: sign up, register, choose a password.",
+            "sign_in": "To sign in to an existing account or enter a password.",
+            "none": "Neither."}),
+        "submit_button": decide.noul("Is there a button that would submit the job application, such as 'Submit "
+                                     "application', 'Send application' or 'Apply'?"),
+    }
+    for e in fields(p):
+        qs[f"field_{e.ref}"] = _field_question(e)
+    if any(e.role == "file" for e in p.elements) or controls:
+        qs["resume_input"] = decide.choice(
+            "Which control uploads the candidate's resume (CV)?",
+            {**{e.ref: _describe(e)["name"] or e.role for e in controls if e.role in {"file", "button"}},
+             "none": "No control on this page uploads a resume."})
+    for i, (label, kind, *_) in enumerate(p.required_empty.get("items", [])):
+        if kind == "file":
+            qs[f"cover_{i}"] = decide.noul({"upload": label, "question": "Does `upload` ask for a cover letter?"})
+    if p.host == "accounts.google.com":
+        qs["google_step"] = decide.choice("What does this Google page ask for?", GOOGLE_STEPS)
+    elif controls:
+        qs["google_button"] = decide.choice(
+            "Which control signs in or continues with Google?",
+            {**{e.ref: _describe(e)["name"] or e.role for e in controls if e.role in {"button", "link"}},
+             "none": "No control signs in with Google."})
+    if p.iframe_srcs.get("items"):
+        qs["form_iframe"] = decide.choice(
+            "Which embedded frame holds the job application form?",
+            {**{f"frame{i}": src for i, src in enumerate(p.iframe_srcs["items"])},
+             "none": "None of these frames holds an application form."})
+    return qs
+
+
+def judge(p: Page) -> Judgment:
+    """Jev's judgment of the page: one call per snapshot, cached on it. Raises decide.DecisionError."""
+    if p.judgment is not None:
+        return p.judgment
+    a = decide.current().ask("page", page_state(p), page_questions(p))
+    kind = a["kind"]
+
+    def pick(key: str) -> str | None:
+        return a[key].choice if key in a and a[key].choice != "none" else None
+    frame = pick("form_iframe")
+    p.judgment = Judgment(
+        kind=kind.choice if kind.choice in PAGE_KINDS else "other", kind_confidence=kind.confidence or 0.0,
+        submitted=a["submitted"].yes(T["submitted"]), applied=a["applied"].yes(T["applied"]),
+        covered=a["covered"].yes(T["covered"]),
+        loading=not a["actionable"].yes(T["actionable"]) and kind.choice not in SETTLED_KINDS,
+        validation=a["validation"].yes(T["validation"]), registration=a["registration"].yes(T["registration"]),
+        account=a["account"].choice or "none", submit_button=a["submit_button"].yes(T["submit_button"]),
+        app_fields={e.ref for e in fields(p) if a[f"field_{e.ref}"].yes(T["app_field"])},
+        resume_ref=pick("resume_input"), resume_confidence=(a["resume_input"].confidence or 0.0)
+        if "resume_input" in a else 0.0,
+        cover_letters=[label for i, (label, kind_, *_) in enumerate(p.required_empty.get("items", []))
+                       if kind_ == "file" and a[f"cover_{i}"].yes(T["cover_letter"])],
+        google_ref=pick("google_button"), google_step=pick("google_step"),
+        form_iframe=p.iframe_srcs["items"][int(frame[5:])] if frame else None)
+    return p.judgment
+
+
+# ------------------------------------------------------------------ settling
+
 SETTLE_SECONDS = 10.0
-# Site chrome, not application questions: a site-wide search box (LinkedIn's nav bar), a site language picker
-# (LinkedIn's footer "Select language", which always holds a value) and LinkedIn's "Set alert for similar jobs"
-# switch on the job page (live 2026-09-23; toggling it would create a job alert). Kept narrow on purpose.
-SITE_CHROME_RE = re.compile(r"^\s*(search\b|select language\s*$|set alert for similar jobs\b)", re.I)
-SETTLE_TEXT = 200          # chars: a rendered job or form page has far more text than a bare navigation bar
-
-
-def real_fields(p: Page) -> list[Element]:
-    """Form fields other than a site-wide search box."""
-    return [e for e in fields(p) if not (e.role == "searchbox" or SITE_CHROME_RE.match(e.name))]
-
-
-LOADING_RE = re.compile(r"\b(fetching|loading)\b[^.\n]{0,40}\b(form|application|questions|job|content)\b"
-                        r"|\bplease wait\b|\bloading\s*(\.\.\.|…)", re.I)
 
 
 def unsettled(p: Page) -> bool:
-    """A snapshot taken before a client-rendered page drew its content: no fields, no button we act on, no captcha
-    or alarm text, and almost no page text (LinkedIn job pages, for a second after loading) — or no fields and a
-    loading message (Ashby: "Fetching application form", live 2026-09-23)."""
-    if real_fields(p) or p.captcha or is_alarm(p):
-        return False
-    if LOADING_RE.search(p.text):
+    """Not drawn yet: nothing on the page at all, or nothing to act on so far (LinkedIn job pages show only their
+    nav bar for a second; Ashby says "Fetching application form", live 2026-09-23)."""
+    if not p.elements and not p.text.strip():
         return True
-    if len(p.text.strip()) >= SETTLE_TEXT:
-        return False
-    return not any(is_entry(e.name) or is_advance(e.name) or is_transmit(e.name) or GOOGLE_BUTTON_RE.search(e.name)
-                   or GUEST_RE.search(e.name) for e in buttons(p))
+    return judge(p).loading
 
 
 def settle(read, sleep=time.sleep, seconds: float = SETTLE_SECONDS) -> Page:
@@ -159,7 +307,8 @@ def settle(read, sleep=time.sleep, seconds: float = SETTLE_SECONDS) -> Page:
 def page_from_capture(observe_text: str) -> Page:
     """A Page built from a saved browser_observe(mode="full", include_json=True) output (no probes)."""
     view, table = split_json(observe_text)
-    return Page(url=table.url, title=table.title, text=view_text(view), table=table)
+    return Page(url=table.url, title=table.title, text=view_text(view), table=table,
+                dialogs=MODAL_RE.findall(view.partition("\ntext:\n")[0]))
 
 
 # ------------------------------------------------------------------ element helpers
@@ -169,64 +318,69 @@ def norm_label(s: str | None) -> str:
 
 
 def buttons(p: Page) -> list[Element]:
-    return [e for e in p.elements if e.role in {"button", "link", "menuitem", "tab"}]
+    return [e for e in p.elements if e.role in CONTROL_ROLES]
 
 
 def fields(p: Page) -> list[Element]:
     return [e for e in p.elements if e.role in FORM_ROLES]
 
 
-def password_fields(p: Page) -> list[Element]:
-    return [e for e in p.elements if e.role == "textbox" and re.search(r"pass(word|code)", e.name, re.I)]
+def real_fields(p: Page) -> list[Element]:
+    """The fields Jev counts as the application's own (not a site search, language picker or job alert)."""
+    refs = judge(p).app_fields
+    return [e for e in fields(p) if e.ref in refs]
 
-
-def find_button(p: Page, pattern: str | re.Pattern) -> Element | None:
-    rx = re.compile(pattern, re.I) if isinstance(pattern, str) else pattern
-    return next((e for e in buttons(p) if rx.search(e.name)), None)
-
-
-# ------------------------------------------------------------------ §6.5 flags
 
 def has_fields(p: Page) -> bool:
-    """§6.5, minus site chrome (a search box or language picker is not an application form)."""
     return bool(real_fields(p))
 
 
-TRANSMIT_LINK_MAX = 40   # a link whose long label merely mentions "Easy Apply" (a job card) is not a submit
+def form_is_here(p: Page) -> bool:
+    """The application form is on screen and nothing covers it."""
+    j = judge(p)
+    # Jev's top choice decides (user decision 2026-09-24), not the summed probability of the form kinds or a
+    # confidence floor. A near-tie goes either way; a wrong "form" fails the final check, a wrong "not yet" costs
+    # one agent action.
+    return j.kind in FORM_KINDS and not j.covered
 
 
-def has_transmit(p: Page) -> bool:
-    """§6.5, with one live-page refinement: links count only with a short label (LinkedIn's "similar jobs" cards
-    are links whose long text ends in "Easy Apply", live 2026-09-23). The guard still blocks clicking them."""
-    no_fields = not has_fields(p)
-    return any(is_transmit(e.name) and not (no_fields and is_entry(e.name)) for e in buttons(p)
-               if e.role == "button" or (e.role == "link" and len(e.name) <= TRANSMIT_LINK_MAX))
-
-
-def advance_buttons(p: Page) -> list[Element]:
-    return [e for e in buttons(p) if e.role == "button" and is_advance(e.name)]
-
-
-def has_advance(p: Page) -> bool:
-    return bool(advance_buttons(p))
+def covered(p: Page) -> bool:
+    return judge(p).covered
 
 
 def is_final(p: Page) -> bool:
-    return has_transmit(p) and not has_advance(p)
+    return judge(p).kind == "final_step"
+
+
+def is_alarm(p: Page) -> bool:
+    """Confirmation text: Jev's answer, or the tripwire rule (the safety floor)."""
+    return bool(ALARM_RE.search(p.text)) or judge(p).submitted
+
+
+def validation_error(p: Page) -> str | None:
+    return "an error message on a field" if judge(p).validation else None
+
+
+def page_shape(p: Page) -> tuple:
+    """What a click is expected to change: the address, the fields and the controls (a change detector)."""
+    return (urlparse(p.url)._replace(query="", fragment="").geturl(),
+            tuple(sorted((e.role, e.name) for e in fields(p))),
+            tuple(sorted(e.name for e in buttons(p) if not e.occluded)))
 
 
 # ------------------------------------------------------------------ §6.1 LinkedIn job page
 
 def classify_entry(p: Page) -> str:
-    """signed_out | closed | applied | entry | none."""
+    """signed_out | closed | applied | open | none."""
     if any(m in p.url for m in SIGNED_OUT_MARKERS):
         return "signed_out"
-    if CLOSED_RE.search(p.text):
+    j = judge(p)
+    if j.kind == "closed":
         return "closed"
-    if APPLIED_RE.search(p.text):
+    if j.applied:
         return "applied"
-    if any(is_entry(e.name) for e in buttons(p) if e.role in {"button", "link"}):
-        return "entry"
+    if j.kind in {"job_posting", "interstitial"} | FORM_KINDS:
+        return "open"
     return "none"
 
 
@@ -242,21 +396,23 @@ def is_google_page(p: Page) -> bool:
 
 
 def google_button(p: Page) -> Element | None:
-    return find_button(p, GOOGLE_BUTTON_RE)
+    ref = judge(p).google_ref
+    return next((e for e in p.elements if e.ref == ref), None) if ref else None
 
 
 def google_blocker(p: Page) -> str | None:
     """On accounts.google.com: why the one-click rule cannot continue, else None."""
-    if password_fields(p) or TWO_STEP_RE.search(p.text):
+    step = judge(p).google_step
+    if step in ("password", "two_step"):
         return "Google asks for a password or 2-step verification"
-    if GOOGLE_CONSENT_RE.search(p.text):
+    if step == "consent":
         return "Google asks for consent to share the account"
     return None
 
 
 def after_google_blocker(p: Page) -> str | None:
     """Back on the site after Google: registration or terms still pending?"""
-    return "site asks to complete a registration after Google sign-in" if GOOGLE_REGISTRATION_RE.search(p.text) else None
+    return "site asks to complete a registration after Google sign-in" if judge(p).registration else None
 
 
 # ------------------------------------------------------------------ §6.3 blockers
@@ -268,114 +424,57 @@ class Blocker:
 
 
 def blocker(p: Page) -> Blocker | None:
-    """First blocker cue on the page. Google paths are not blockers here (handled by §6.2)."""
-    if p.captcha or CAPTCHA_TEXT_RE.search(p.text):
-        return Blocker("captcha", "captcha on page")
-    if password_fields(p):
-        if google_button(p) or is_google_page(p):
-            return None
-        if SIGNUP_RE.search(p.text) or SIGNUP_RE.search(p.title):
-            return Blocker("signup", "site asks to create an account")
-        return Blocker("credentials", "site asks for a password")
+    """A blocker on the page. Google paths are not blockers here (handled by §6.2)."""
     if not p.elements and not p.text.strip():
         return Blocker("load_failure", "blank page")
-    if LOAD_FAIL_RE.search(p.title) or (not fields(p) and LOAD_FAIL_RE.search(p.text[:300])):
+    j = judge(p)
+    if p.captcha or j.kind == "captcha":
+        return Blocker("captcha", "captcha on page")
+    if j.kind == "account_wall" and not is_google_page(p) and not j.google_ref:
+        if j.account == "create_account":
+            return Blocker("signup", "site asks to create an account")
+        return Blocker("credentials", "site asks for a password")
+    if j.kind == "error":
         return Blocker("load_failure", f"error page: {p.title or p.text[:60]!r}")
     return None
 
 
-def validation_error(p: Page) -> str | None:
-    m = VALIDATION_RE.search(p.text)
-    return m.group(0) if m else None
-
-
 def guest_link(p: Page) -> Element | None:
-    return find_button(p, GUEST_RE)
-
-
-# ------------------------------------------------------------------ banners, ATS pages, iframes
-
-def cookie_choice(p: Page) -> Element | None:
-    """The cookie-banner button to click (C24): Reject all, else Only necessary, else Accept all."""
-    if not COOKIE_RE.search(p.text):
-        return None
-    for pat in COOKIE_CHOICES:
-        if hit := find_button(p, pat):
-            return hit
-    return None
-
-
-def ats_entry_button(p: Page) -> Element | None:
-    """An Apply button on a page without form fields (an ATS job page). A button covered by a dialog
-    (occluded) is not offered: the dialog in front is the next step, not a second Apply."""
-    if has_fields(p):
-        return None
-    return single_entry([e for e in buttons(p) if not e.occluded])
-
-
-def single_entry(elements: list[Element]) -> Element | None:
-    """The one Apply control among `elements`. A link and a button with the same label count as one control
-    (a <button> nested in an <a>: Greeting ATS, Ashby, live 2026-09-23); the button is returned. Differently
-    labelled Apply controls stay ambiguous → None."""
-    hits = [e for e in elements if e.role in {"button", "link"} and is_entry(e.name)]
-    if len({norm_label(e.name) for e in hits}) != 1:
-        return None
-    if len(hits) > 2 or (len(hits) == 2 and {e.role for e in hits} != {"button", "link"}):
-        return None
-    return next((e for e in hits if e.role == "button"), hits[0])
-
-
-FORM_IFRAME_RE = re.compile(r"greenhouse|lever\.co|workday|myworkdayjobs|ashbyhq|smartrecruiters|icims|jobvite|"
-                            r"personio|teamtailor|recruitee|workable|bamboohr|breezy|successfactors|taleo|"
-                            r"apply|application|candidate|career|recruit|/jobs?/|(?<![a-z])forms?(?![a-z])", re.I)
-NON_FORM_IFRAME_RE = re.compile(r"google\.[a-z.]+/maps|maps\.google|youtube|vimeo|wistia|recaptcha|hcaptcha|"
-                                r"doubleclick|googletagmanager|facebook|twitter|instagram|linkedin\.com/(px|li/track)|"
-                                r"analytics|hotjar|intercom|drift|zendesk|onetrust|cookiebot|consent", re.I)
+    """The guest link a sign-up wall offers; the label list is the guard's (it unlocks `confirm`)."""
+    return next((e for e in buttons(p) if guard.is_guest(e.name)), None)
 
 
 def iframe_form_src(p: Page) -> str | None:
-    """A form-looking iframe src to navigate to when the page itself has no fields."""
-    if has_fields(p) or not p.iframe_srcs.get("items"):
-        return None
-    return next((u for u in p.iframe_srcs["items"] if FORM_IFRAME_RE.search(u) and not NON_FORM_IFRAME_RE.search(u)),
-                None)
-
-
-def is_alarm(p: Page) -> bool:
-    return bool(ALARM_RE.search(p.text))
+    """The iframe that holds the application form, when the page itself shows none of its fields."""
+    return None if has_fields(p) else judge(p).form_iframe
 
 
 # ------------------------------------------------------------------ classifier (the §5 loop order)
 
 @dataclass
 class Verdict:
-    kind: str       # alarm | blocker | google | google_wall | cookie | ats_entry | iframe | form | final | advance | unknown
+    kind: str       # alarm | google | blocker | google_wall | iframe | form | final | navigate
     detail: str = ""
     ref: str | None = None
 
 
 def classify(p: Page) -> Verdict:
     if is_alarm(p):
-        return Verdict("alarm", ALARM_RE.search(p.text).group(0))
+        return Verdict("alarm", "confirmation text on the page")
     if is_google_page(p):
         return Verdict("google", google_blocker(p) or "")
     if b := blocker(p):
         return Verdict("blocker", f"{b.cls}: {b.cue}")
-    if g := google_button(p):
+    j = judge(p)
+    if j.kind == "account_wall" and (g := google_button(p)):
         return Verdict("google_wall", g.name, g.ref)
-    if c := cookie_choice(p):
-        return Verdict("cookie", c.name, c.ref)
-    if a := ats_entry_button(p):
-        return Verdict("ats_entry", a.name, a.ref)
     if src := iframe_form_src(p):
         return Verdict("iframe", src)
-    if has_fields(p):
-        return Verdict("form", f"{len(fields(p))} fields")
-    if is_final(p):
+    if j.kind == "final_step":
         return Verdict("final")
-    if has_advance(p):
-        return Verdict("advance", advance_buttons(p)[0].name, advance_buttons(p)[0].ref)
-    return Verdict("unknown")
+    if j.kind == "application_form":
+        return Verdict("form", f"{len(real_fields(p))} fields")
+    return Verdict("navigate", j.kind)
 
 
 # ------------------------------------------------------------------ §6.4 gate
@@ -386,11 +485,11 @@ def gate(p: Page, resume_name: str, typed: dict[str, str]) -> str | None:
         items = ", ".join(i[0] for i in p.required_empty.get("items", []))
         return f"required fields still empty ({p.required_empty['n']}): {items}"
     if v := validation_error(p):
-        return f"validation message on page: {v!r}"
+        return f"validation message on page: {v}"
     stem = resume_name[:30]
     if stem not in p.text and not any(stem in (e.value or "") for e in p.elements):
         return f"resume file name {stem!r} not on the page"
-    if not has_transmit(p):
+    if not judge(p).submit_button:
         return "no submit button on the final page"
     if is_alarm(p):
         return "confirmation text on page"

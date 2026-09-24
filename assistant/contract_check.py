@@ -37,15 +37,29 @@ def differences(signatures: dict[str, inspect.Signature]) -> list[str]:
     return out
 
 
+def text_helper_differences(server) -> list[str]:
+    """jev.rotate_text_helper wraps policy.text_for(cfg, …); the wrap applies only while server.py looks it up on
+    the module at call time and passes the Config dataclass first."""
+    out = []
+    if "policy.text_for(CONFIG," not in inspect.getsource(server):
+        out.append("server.py no longer calls policy.text_for(CONFIG, …): the text helper would not rotate models")
+    original = getattr(server.policy.text_for, "__wrapped__", None)
+    if original is None:
+        out.append("policy.text_for is not wrapped by jev.rotate_text_helper")
+    elif next(iter(inspect.signature(original).parameters), None) != "cfg":
+        out.append(f"policy.text_for{inspect.signature(original)} no longer takes cfg first")
+    return out
+
+
 def main() -> int:
     from assistant import config, jev
     cfg = config.load()
-    jev.apply_env(cfg, config.api_key())
-    diffs = differences(jev.server_signatures())
+    jev.apply_env(cfg, config.chat_key(cfg))
+    diffs = differences(jev.server_signatures()) + text_helper_differences(jev.load())
     for d in diffs:
         print("✗", d)
     if not diffs:
-        print(f"✓ {len(EXPECTED)} browser_* signatures match spec §3")
+        print(f"✓ {len(EXPECTED)} browser_* signatures match spec §3; the text helper rotation is in place")
     return 1 if diffs else 0
 
 

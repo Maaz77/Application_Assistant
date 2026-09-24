@@ -39,12 +39,18 @@ def test_gate_checks_resume_submit_and_typed_text():
     assert "typed text" in gate(page(FINAL), "Amin_Acme_Data_Engineer_2026.pdf", {"e1": "Something else"})
 
 
-def test_transmit_and_advance_flags():
+def test_final_step_and_submit_button_come_from_the_judgment():
     p = page([Element(ref="e1", role="textbox", name="City"), Element(ref="e2", role="button", name="Continue"),
               Element(ref="e3", role="button", name="Save and continue")])
-    assert pages.has_advance(p) and not pages.is_final(p) and len(pages.advance_buttons(p)) == 2
-    q = page([Element(ref="e1", role="button", name="Continue to submit")])   # advance-looking but TRANSMIT
-    assert not pages.has_advance(q) and pages.is_final(q)
+    assert pages.classify(p).kind == "form" and not pages.is_final(p) and not pages.judge(p).submit_button
+    q = page([Element(ref="e1", role="button", name="Continue to submit")])
+    assert pages.is_final(q) and pages.judge(q).submit_button
+
+
+def test_one_decision_call_per_page_snapshot(decider):
+    p = page([Element(ref="e1", role="textbox", name="City"), Element(ref="e2", role="button", name="Next")])
+    pages.classify(p), pages.is_final(p), pages.real_fields(p), pages.covered(p), pages.unsettled(p)
+    assert [t for t, _ in decider.asked] == ["page"]                           # cached on the Page
 
 
 def test_google_rules():
@@ -82,16 +88,16 @@ def test_classifier_on_captured_pages(capture):
 
 
 def test_unsettled_pages_are_recognised():
-    bare = page([Element(ref="e1", role="link", name="Home"), Element(ref="e2", role="combobox", name="Search")],
-                text="0 notifications", url="https://www.linkedin.com/jobs/view/4460337345/")
-    assert pages.unsettled(bare)                             # nav bar + site Search box: not drawn yet
-    bare.table.elements.append(Element(ref="e3", role="textbox", name="Phone number"))
-    assert not pages.unsettled(bare)                         # a real form field: drawn
+    nav = [Element(ref="e1", role="link", name="Home"), Element(ref="e2", role="combobox", name="Search")]
+    li = "https://www.linkedin.com/jobs/view/4460337345/"
+    assert pages.unsettled(page(nav, text="0 notifications", url=li))              # nav bar + site Search box
+    drawn = page(nav + [Element(ref="e3", role="textbox", name="Phone number")], text="0 notifications", url=li)
+    assert not pages.unsettled(drawn)                                               # a real form field: drawn
     job = page([Element(ref="e1", role="button", name="Easy Apply")], text="Data Engineer")
     assert not pages.unsettled(job)
     assert not pages.unsettled(page([], text="x" * 250))                         # a real amount of text
     assert not pages.unsettled(page([], text="Thank you for applying!"))         # alarm text is never waited on
-    assert not pages.unsettled(page([], text="", captcha=True))
+    assert pages.unsettled(page([], text="", captcha=True))                        # nothing drawn at all
 
 
 def test_settle_rereads_until_rendered_and_gives_up_after_the_budget():
@@ -113,15 +119,6 @@ def test_the_real_linkedin_capture_was_taken_too_early():
 
 
 # ------------------------------------------------------------------ live findings, 2026-09-23 (DISCOVERY.md)
-
-def test_link_wrapping_a_same_label_button_is_one_entry():
-    link, btn = Element(ref="e1", role="link", name="Apply"), Element(ref="e2", role="button", name="Apply")
-    assert pages.single_entry([link, btn]) is btn
-    assert pages.single_entry([Element(ref="e3", role="link", name="Apply for this Job"),
-                               Element(ref="e4", role="button", name="Apply for this Job")]).ref == "e4"
-    assert pages.single_entry([link, Element(ref="e5", role="button", name="Apply on company website")]) is None
-    assert pages.single_entry([btn, Element(ref="e6", role="button", name="Apply")]) is None      # two buttons
-
 
 def test_only_form_looking_iframes_are_followed():
     def p(*srcs):
@@ -145,7 +142,7 @@ def test_linkedin_alert_switch_is_site_chrome():
     li = page([Element(ref="e1", role="switch", name="Set alert for similar jobs as Junior C++ Software Engineer"),
                Element(ref="e2", role="button", name="Easy Apply to this job")],
               url="https://www.linkedin.com/jobs/view/4460337345/")
-    assert not pages.has_fields(li) and pages.classify(li).kind == "ats_entry"
+    assert not pages.has_fields(li) and pages.classify(li).kind == "navigate"
 
 
 def test_enrich_adds_file_group_labels_and_shown_combo_values():

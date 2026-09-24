@@ -1,4 +1,4 @@
-"""Loads config.toml (strict: unknown keys are an error) and the OpenRouter key from .env."""
+"""Loads config.toml (strict: unknown keys are an error) and the keys from .env."""
 from __future__ import annotations
 
 import os
@@ -7,11 +7,14 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 TOOL_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = TOOL_DIR / "config.toml"
 DEFAULT_ENV = TOOL_DIR / ".env"
+# Who serves the chat models (the answer engine and the text helper): both speak OpenAI's chat/completions, and
+# both take the same `response_format` and `reasoning` fields (Vercel docs, checked 2026-09-24).
+CHAT_BASES = {"openrouter": "https://openrouter.ai/api/v1", "vercel": "https://ai-gateway.vercel.sh/v1"}
 
 
 class _Strict(BaseModel):
@@ -35,10 +38,38 @@ class Browser(_Strict):
     max_pages_per_job: int = 15
 
 
+class ChatModels(_Strict):
+    """One provider's chat models, as that provider names them. Each list is tried in turn (rotation.py): the model
+    that answered last first, the next when one is out."""
+    answer_engine: tuple[str, ...] = ()
+    text_helper: tuple[str, ...] = ()
+
+    @field_validator("answer_engine", "text_helper", mode="before")
+    @classmethod
+    def _one_or_many(cls, v):
+        """A single model ID is a rotation of one."""
+        return (v,) if isinstance(v, str) else v
+
+
 class Models(_Strict):
-    answer_engine: str = ""
-    text_helper: str = "deepseek/deepseek-chat"
-    jev: str = "jev-latest"
+    chat_route: Literal["openrouter", "vercel"] = "openrouter"   # who serves the chat models: the table below
+    openrouter: ChatModels = ChatModels()
+    vercel: ChatModels = ChatModels()
+    jev: str = "typesafe-ai/jev"
+    jev_route: Literal["vercel", "openrouter"] = "vercel"   # who serves Jev: Vercel AI Gateway or OpenRouter
+
+    @property
+    def chat(self) -> ChatModels:
+        """The chat models of the route in use."""
+        return self.vercel if self.chat_route == "vercel" else self.openrouter
+
+    @property
+    def answer_engine(self) -> tuple[str, ...]:
+        return self.chat.answer_engine
+
+    @property
+    def text_helper(self) -> tuple[str, ...]:
+        return self.chat.text_helper
 
 
 class Policy(_Strict):
@@ -71,8 +102,11 @@ class Config(_Strict):
         out = []
         if not self.paths.base:
             out.append("paths.base is empty")
-        if not self.models.answer_engine:
-            out.append("models.answer_engine is empty (set an OpenRouter slug)")
+        route = self.models.chat_route
+        for name in ("answer_engine", "text_helper"):
+            if not getattr(self.models.chat, name):
+                out.append(f"models.{route}.{name} is empty (models.chat_route is {route!r}: list one or more "
+                           f"model IDs as {route} names them)")
         for name in ("applications", "profile", "tracker"):
             if not self.path(name).exists():
                 out.append(f"paths.{name} not found: {self.path(name)}")
@@ -87,9 +121,33 @@ def load(path: Path = DEFAULT_CONFIG) -> Config:
     return Config(**data, source=Path(path).resolve())
 
 
+def _env(name: str, env_file: Path) -> str:
+    return ((dotenv_values(env_file).get(name) if env_file.exists() else None) or os.environ.get(name, "")).strip()
+
+
 def api_key(env_file: Path = DEFAULT_ENV) -> str:
-    """The OpenRouter key: .env first, then the process environment."""
-    key = (dotenv_values(env_file).get("OPENROUTER_API_KEY") if env_file.exists() else None) or os.environ.get(
-        "OPENROUTER_API_KEY", ""
-    )
-    return key.strip()
+    """The OpenRouter key (the answer engine and the text helper): .env first, then the process environment."""
+    return _env("OPENROUTER_API_KEY", env_file)
+
+
+def gateway_key(env_file: Path = DEFAULT_ENV) -> str:
+    """The Vercel AI Gateway key (Jev, when models.jev_route is "vercel")."""
+    return _env("AI_GATEWAY_API_KEY", env_file)
+
+
+def jev_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
+    """The key for Jev's route."""
+    return gateway_key(env_file) if cfg.models.jev_route == "vercel" else api_key(env_file)
+
+
+def chat_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
+    """The key for the chat models' route (the answer engine and the text helper)."""
+    return gateway_key(env_file) if cfg.models.chat_route == "vercel" else api_key(env_file)
+
+
+def chat_url(cfg: "Config") -> str:
+    """chat/completions on the chat models' route."""
+    return CHAT_BASES[cfg.models.chat_route] + "/chat/completions"
+
+
+KEY_NAMES = {"openrouter": "OPENROUTER_API_KEY", "vercel": "AI_GATEWAY_API_KEY"}
