@@ -144,8 +144,13 @@ def system_prompt(free_text_max_chars: int) -> str:
     return PROMPT.read_text().replace("{free_text_max_chars}", str(free_text_max_chars))
 
 
+# Mistral Nemo on Vercel took 58.6 s for a realistic page (5.3K tokens in, 970 out) and timed out at 60 s on
+# Linda AI's Easy Apply form (live 2026-09-24).
+ENGINE_TIMEOUT = 120.0
+
+
 def call_engine(*, key: str, models: Rotation | str | list[str], system: str, user: dict,
-                url: str = OPENROUTER_CHAT, post: Callable | None = None, timeout: float = 60.0,
+                url: str = OPENROUTER_CHAT, post: Callable | None = None, timeout: float = ENGINE_TIMEOUT,
                 sleep: Callable[[float], None] = time.sleep) -> PageAnswers:
     """Ask the models in turn (rotation.py) until one gives a valid answer; AnswerEngineError when none does.
     `url` is the route's chat/completions (config.chat_url): OpenRouter and Vercel AI Gateway take the same request.

@@ -16,7 +16,7 @@ Three pictures: what happens to one job, what happens on one form page, and whic
 - **The browser agent** is the jev package's goal agent (`browser_goal`). Jev looks at the page and picks each click, one action at a time.
 - **The page decisions** are typed questions the code asks Jev in `decide.py`, all of them for a page in one call (about 0.3 s, $0.0003). What is this page? Is a pop-up in the way? Which fields belong to the application? Which upload takes the resume? Is there an error message? The code branches on the answers, with thresholds set in `decide.THRESHOLDS`.
 
-Jev decides and the code keeps the rules that must not be left to a model: the answers come only from your files, the resume is uploaded by the code, and no click on Submit, Send or Apply ever goes out except the Apply that starts an application. That list of labels in `guard.py` stays a fixed rule; Jev can only add checks to it.
+Jev decides and the code keeps only what must not be left to a model: the answers come only from your files, the resume is uploaded by the code, and one fixed rule in `guard.py` (no model call): a button or link labelled "Submit" or "Send" is never clicked, and one labelled "Apply" is not clicked once the form is being filled.
 
 ### One job, start to finish
 
@@ -41,9 +41,9 @@ Jev decides and the code keeps the rules that must not be left to a model: the a
   │    no: the browser agent takes ONE action, then the page is read again
   │      cookie banner ───────────────► decline optional cookies
   │      pop-up ──────────────────────► continue the application
-  │      job page ────────────────────► Apply: the code clicks it ... entry.py
+  │      job page ────────────────────► Apply (the agent's own click)
   │    yes: fill the page (next picture); the agent clicks Next
-  └─ repeat until the last step: Submit, which the agent may not click
+  └─ repeat until the last step: Submit, Send or Apply, never clicked
   │
   ▼
  final check: nothing required is empty, the resume is on the page,
@@ -64,7 +64,7 @@ Jev decides and the code keeps the rules that must not be left to a model: the a
 
 - **"The form is on screen"** is Jev's answer: the page is an application step (or its last step) and nothing covers it. If the agent says it has reached the form where Jev does not see one, such as a job-alert box, the agent is asked once more.
 - **A pop-up over the form**, as Jev judges it (a cookie or consent dialog, or a covered field), sends the page back to the agent, even halfway through the form.
-- **The agent's Apply** is refused by the server and comes back to `entry.py`, which clicks it only when Jev judges that it starts the application, no field holds a value, and the button would not submit a form on the page.
+- **The agent's Apply** on a job page is its own click. Once the form is being filled, an Apply (or any Submit or Send) is refused, and that refusal marks the form's last step.
 - **A decision that cannot be made** (Jev unreachable, out of credits) sends the job to Needs Attention with class `decision`. It is never guessed.
 
 ### One form page
@@ -112,14 +112,13 @@ Jev decides and the code keeps the rules that must not be left to a model: the a
       ├─ pages.py ......... reads a page, and Jev's judgment of it; the gate
       ├─ answers.py ....... asks the model, checks its answers ──► OpenRouter
       ├─ decide.py ........ asks Jev typed questions ──► Vercel AI Gateway (Jev)
-      ├─ entry.py ......... the Apply the agent asks for: the only confirm
       ├─ google_signin.py . Google one-click sign-in
       └─ tabs.py .......... which tab is whose; leaves each job's tab open
   │
   ▼  every browser call goes through
  jev.py ................... the only file that imports the browser package
-  ├─ guard.py ............. checks every action first: no Submit, Send or Apply
-  │                         click, no Enter key, no script except a probe
+  ├─ guard.py ............. never clicks Submit or Send, nor Apply once filling started;
+  │                         no script except a probe
   └─ probes.py ............ small read-only scripts that measure the page
   │
   ▼
@@ -166,7 +165,7 @@ Also in this folder:
    | `models.chat_route` | who serves the answer engine and the text helper: `openrouter` (the free models below) or `vercel` (Vercel AI Gateway, paid from its credit, for when OpenRouter's free quota is out). Both take the same chat/completions request |
    | `models.openrouter.answer_engine` | five free OpenRouter models, tried in turn (`rotation.py`): answers each form page from your files (sent with reasoning off). A call starts at the model that answered last; one that is out (rate-limited, overloaded, timed out, wrong output) hands over to the next at once. A 429 with a short `Retry-After` (30 s or less) is waited out once. When none answers, the job goes to Needs Attention with every model's reason. A single ID also works |
    | `models.openrouter.text_helper` | four free OpenRouter models, rotated the same way: types the values the browser agent enters |
-   | `models.vercel.answer_engine`, `models.vercel.text_helper` | `mistral/mistral-nemo` (about $0.00004 a page). Vercel limits a new team to 5 requests a minute per model |
+   | `models.vercel.answer_engine`, `models.vercel.text_helper` | `mistral/mistral-small` (about 5 s and $0.0013 a page), then `mistral/mistral-nemo` (cheaper, but about 60 s a page). Vercel limits a new team to 5 requests a minute per model |
    | `models.jev` | `typesafe-ai/jev`: TypeSafe's decision model, for the browser agent and every page decision (`decide.py`). Each route names it its own way: `typesafe-ai/jev` on Vercel, `typesafe/jev-1.13` on OpenRouter |
    | `models.jev_route` | `vercel` (Vercel AI Gateway's TypeSafe-compatible API) or `openrouter` |
    | `google.account_email` | `maaz1377.aa@gmail.com` |
@@ -242,18 +241,12 @@ Each run writes `runs/<YYYYMMDD-HHMMSS>/`:
 
 ## How it stays one click short of submitting
 
-1. **The wrapper's guard** (`assistant/guard.py`) checks every browser op. It refuses:
-   - clicks on Submit / Send / Apply / Confirm / Done / Finish / Complete labels;
-   - Enter or Return in any key op;
-   - typing with `submit`;
-   - any script that isn't a read-only constant in `probes.py`;
-   - `confirm`, which only `entry.py` may send. It sends it only for an Apply the browser agent asked for (Easy Apply, Apply now, Apply manually, never a button that submits a form on the page) and for a sign-up wall's "Apply without an account" / "Continue as guest" link, and only while no field holds a value.
-2. **The server's confirmation rule** refuses the same labels for the browser agent (`needs_confirmation`). A refused click comes back to the program: an Apply that starts the application is clicked by `entry.py` (when Jev agrees it starts the application, no field holds a value, and it submits no form), and a refused Submit means the form's last step.
+1. **One fixed rule** (`assistant/guard.py`, user decision 2026-09-24), with no model call: a button or link labelled **Submit** or **Send** is never clicked, and one labelled **Apply** is not clicked once the form is being filled. Before that, "Apply" / "Easy Apply" is how the agent starts the application. The browser package applies the rule to every click, the agent's and the program's; a refused click comes back as `needs_confirmation`, and in the form it marks the last step, where the job is parked. Nothing in the program ever sends `confirm`.
+2. **Deliberately narrow.** Buttons labelled "Done", "Finish" or "Confirm", and a form that submits on Enter, are not covered by the rule.
+3. **The program's own ops** run only read-only scripts from `probes.py`, never an upload onto a Submit, Send or Apply control, and never `confirm`.
+4. **Alarms stop the run** (exit 3) if a Submit or Apply click ever goes through anyway, or confirmation text appears on the page (Jev's answer, or the fixed tripwire pattern).
 
-These label lists are fixed rules on purpose. Every other decision is Jev's; a model's judgment must never be the only thing between the program and a sent application.
-3. **Alarms stop the run** (exit 3) if a model ever clicks such a label successfully, or confirmation text appears on the page (Jev's answer, or the fixed tripwire pattern).
-
-`python -m assistant tripwire` proves this on local fixture pages. `--live` also runs the model tripwire, which costs a few OpenRouter calls.
+`python -m assistant tripwire` proves the rule on local forms that end in Submit, Send or Apply. `--live` also has the model try to submit them, which costs a few model calls.
 
 ## Known limits (jev-ultrafast-mcp 0.1.5+aa6)
 

@@ -13,10 +13,17 @@ closed (Chrome renumbers tabs), and it is never closed by us.
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 from assistant.jev import Jev, JevError
 
 HELPER = "tabbook"
+# The helper's tab stays open for the whole run. As about:blank it looked like a stale tab opened before the first
+# job's (user report, 2026-09-24); a page that names itself says what it is.
+HELPER_URL = "data:text/html," + quote(
+    "<title>Application Assistant (working)</title><body style='font:16px system-ui;margin:2em'>"
+    "Application Assistant keeps this tab to keep track of the tabs it opens. It closes when the run ends."
+    "</body>")
 LIST_RE = re.compile(r"^\s*\[(\d+)\]\s+(\*?)\s*#([0-9A-Fa-f]{8})\s+(\S*)", re.M)
 NEW_TAB_RE = re.compile(r"'target_id':'([0-9A-Fa-f]{32})'")
 
@@ -35,7 +42,7 @@ class TabBook:
     def __init__(self, browser: Jev):
         self.browser = browser
         self.full: dict[str, str] = {}
-        browser.open("about:blank", HELPER)
+        browser.open(HELPER_URL, HELPER)
         self.helper_tab = self.current_handle(HELPER)
         browser.observe(HELPER, mode="delta", include_json=False, include_text=False)   # baseline for NEW TAB
 
@@ -70,7 +77,7 @@ class TabBook:
             self.browser.close(HELPER)
         except JevError:
             pass
-        self.browser.open("about:blank", HELPER)
+        self.browser.open(HELPER_URL, HELPER)
         self.helper_tab = self.current_handle(HELPER)
         self.browser.observe(HELPER, mode="delta", include_json=False, include_text=False)
 

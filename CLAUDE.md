@@ -81,17 +81,19 @@ Tests (markers are defined in `pyproject.toml`; there is no linter configured):
 - **Navigate:** the package's goal agent (`browser_goal`, one action per goal) gets from the posting to the form, past cookie banners, pop-ups, job pages and start dialogs.
 - **Form:** each step is filled, then the agent clicks Next.
 
-A click the server refuses as submit-like (`needs_confirmation`) comes back to our code. An Apply that starts the application goes to `entry.confirm_click`; a refused Submit means the last step.
+The never-submit rule (`guard.never_click`) refuses "Submit" and "Send" everywhere and "Apply" once `fill_page` has started (`guard.FORM.started`, reset per job in `run_pages`). The package applies it to every click through `jev.guard_clicks`, which replaces its `confirm_reason`. A refused click comes back as `needs_confirmation`: in the form it means the last step; in navigation a refused Submit on a page with fields means the form is here. Before filling, "Apply" / "Easy Apply" is the agent's own click.
 
 **Three kinds of model calls:**
-- **The answer engine** (`answers.py`): one OpenRouter chat call per form page. It gets the page's questions plus `Profile.md`, `job.md` and the resume text. `check_answers` then verifies every answer deterministically (the quote is in a source file, the option is on the page, a computed total adds up); an answer that fails is dropped, never guessed. Filling itself is mostly direct `browser_act` ops (toggle, select, type); a page goal handles only custom widgets.
-- **Jev page decisions** (`decide.py` + `pages.judge`): one System One call per `Page` snapshot, cached on the Page. It answers every judgment: the page kind, covered, still loading, the application's fields, the resume upload, validation messages, the Submit button, Google steps. `answers.judge_answers` and `judge_questions` ask Jev about the questions themselves. Thresholds live in `decide.THRESHOLDS`. A `DecisionError` sends the job to Needs Attention (class `decision`); there is no rule-based fallback.
+- **The answer engine** (`answers.py`): one OpenRouter chat call per form page. It gets the page's questions plus `Profile.md`, `job.md` and the resume text. `check_answers` then verifies every answer deterministically (the quote is in a source file, the option is on the page, a computed total adds up); an answer that fails is dropped, never guessed. The code carries out Jev's fill plan with direct `browser_act` ops (toggle, select, type, with the answer engine's exact text); a page goal handles only custom widgets.
+- **Jev page decisions** (`decide.py` + `pages.judge`): one judgment per `Page` snapshot, cached on the Page, sent as System One requests of `decide.BATCH` (4) questions, 4 in flight (TypeSafe fails a whole request when one question fails, so big requests rarely get through). It answers every judgment: the page kind, covered, still loading, the application's fields, the resume upload, validation messages, the Submit button, Google steps. `answers.judge_answers` and `judge_questions` ask Jev about the questions themselves. Filling is Jev's too: `fill.plan_fill` asks, per answer, how it goes in (type/select/check/widget), which field and which option, and the code only checks the pick can be carried out; `fill.mismatches` (the read-back) asks Jev whether each field now "holds" its answer; an unsure resume pick is asked again narrowly (`decide.narrow`), then settled by the answer engine's ref. Thresholds live in `decide.THRESHOLDS`. A `DecisionError` sends the job to Needs Attention (class `decision`); there is no rule-based fallback.
 - **The browser agent:** the package's goal agent; Jev picks its actions, and a chat "text helper" writes the typed values. It is configured through the environment by `jev.env_values`/`agent_route` and uses the same route as `decide.py`.
 
 **`jev.py` is the only door to the browser package** (`jev_ultrafast_mcp`, called in-process, no MCP client):
 - `apply_env()` must run before `load()`, because the package reads its config once, at import.
 - Calls run one at a time on a single worker thread. A call that hangs past its timeout writes the report and does `os._exit(3)`.
 - Every `browser_act` op passes `guard.check` first.
+- Everything the package returns passes `clean_text` (lone UTF-16 surrogates from JS-cut page text), and `load()` wraps two package internals: `policy.text_for` (model rotation) and `policy._post` (clean request bodies). `contract_check` verifies both hooks still apply.
+- `Jev.goal` asks again, after each `decide.RETRY_WAITS` step, when the decision model was unavailable before any step, and then raises `DecisionError`.
 - Eval results are capped at 200 characters, so every read-only probe in `probes.py` trims itself to 190 and reports counts.
 
 **Tabs** (`tabs.TabBook`): Chrome runs in `chrome://inspect` remote-debugging mode, which has no `/json/list`. The package lists tabs by 8-character handles, but switching and closing need full target IDs, which a helper session learns from its `NEW TAB` notices. The package's exit hook closes each session's current tab, so `release()` moves the session to a scratch tab first; the job's tab stays open for the user.
@@ -99,8 +101,9 @@ A click the server refuses as submit-like (`needs_confirmation`) comes back to o
 ## Safety invariants (enforced by tests; keep them)
 
 - Only `jev.py` imports the package or calls `browser_act` (AST tests in `test_jev.py` and `test_guard.py`).
-- Only `entry.py` may send `confirm: true`, and only with the `ENTRY` token, for entry or guest labels.
-- `guard.py`'s never-submit label lists (Submit / Send / Apply / Confirm / Done / Finish / Complete, Enter keys, `submit` on type, any eval that isn't a `probes.py` constant) stay **deterministic**. The same list feeds the server's `JEVMCP_CONFIRM_PATTERNS`. Jev may add checks, never replace these.
+- Nothing sends `confirm: true` (`guard.check` rejects it; `test_nothing_sends_confirm`).
+- The never-submit rule is `guard.never_click`, and it is deliberately narrow (user decision 2026-09-24): "Submit" and "Send" always, "Apply" once the form is being filled, no model call. "Done", "Finish", "Confirm" and Enter-submitting forms are outside it. Don't widen it, or replace it with per-click model calls, without the user: they chose this to save API usage. `contract_check` fails if the package stops calling `confirm_reason` before a click.
+- Our own ops: `eval` only runs `probes.py` constants (model text never becomes JavaScript), and an upload never targets a Submit/Send/Apply control.
 - The confirmation-text tripwire (`pages.ALARM_RE`) stays beside Jev's "submitted" answer. An alarm stops the run with exit 3.
 - Probes must stay read-only (checked by `test_probes_are_read_only`).
 

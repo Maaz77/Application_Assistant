@@ -1,7 +1,6 @@
 import pytest
 
 from assistant import tabs
-from assistant.entry import confirm_click
 from assistant.pages import read_page
 
 pytestmark = pytest.mark.browser
@@ -19,14 +18,6 @@ def test_probes_fit_the_200_char_cap(new_browser, fixture_server):
     assert r["MAXLENGTHS"]["min"] == 20 and r["MAXLENGTHS"]["items"][0] == ["Phone", 20]
     assert r["IFRAME_SRCS"] == {"n": 0, "more": False, "items": [], "long": 0}
     assert captcha is False
-
-
-def test_entry_submits_lists_only_apply_buttons_that_submit_a_form_with_fields(new_browser, fixture_server):
-    with new_browser() as browser:
-        browser.open(fixture_server.url("entry_submits.html"), "p")
-        r = browser.probe("p", "ENTRY_SUBMITS")["ENTRY_SUBMITS"]
-    # not the "APPLY NOW" link, not the stand-alone button, not the job-alert "Submit", not a form of hidden inputs
-    assert r == {"n": 1, "more": False, "items": ["Apply now!"]}
 
 
 def _child(url: str, value: str, mode: str) -> str:
@@ -72,7 +63,8 @@ def test_hand_off_to_new_tab_leaves_baseline_alone(new_browser, fixture_server, 
         baseline = book.handles()
         browser.open(fixture_server.url("f10.html"), "job2")
         known = book.handles()
-        confirm_click(browser, "job2", "Apply", lambda: read_page(browser, "job2"), lambda _: None)
+        p = read_page(browser, "job2")
+        browser.act([{"op": "click", "ref": next(e.ref for e in p.elements if e.name == "Apply")}], "job2", p.table)
         new = book.hand_off("job2", baseline, known)
         assert new is not None
         _, table = browser.table("job2")

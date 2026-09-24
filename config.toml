@@ -14,7 +14,7 @@ max_actions = 2000
 max_pages_per_job = 15
 
 [models]                           # model IDs, as each route names them
-chat_route = "openrouter"                 # who serves the answer engine and the text helper: "openrouter" (free
+chat_route = "vercel"                     # who serves the answer engine and the text helper: "openrouter" (free
                                           # models below) or "vercel" (paid, for when OpenRouter's free quota is out)
 jev = "typesafe-ai/jev"                   # TypeSafe's decision model: the browser agent and every page decision
 jev_route = "vercel"                      # Jev through Vercel AI Gateway (AI_GATEWAY_API_KEY), or "openrouter"
@@ -38,8 +38,10 @@ text_helper = [                    # types the values the browser agent enters
 ]
 
 [models.vercel]                    # AI_GATEWAY_API_KEY (Vercel AI Gateway, paid from its credit)
-answer_engine = ["mistral/mistral-nemo"]  # about $0.00004 a page; strict JSON output works (2026-09-24)
-text_helper = ["mistral/mistral-nemo"]
+# A realistic page (5.3K tokens in), 2026-09-24: Small 5.2 s and $0.0013; Nemo 58.6 s and $0.00013. Both answer in
+# strict JSON. Vercel allows a new team 5 requests a minute per model, so two models also double that.
+answer_engine = ["mistral/mistral-small", "mistral/mistral-nemo"]
+text_helper = ["mistral/mistral-small", "mistral/mistral-nemo"]
 
 [policy]
 prefill = "keep-if-silent"         # or "strict"

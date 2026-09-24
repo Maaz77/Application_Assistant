@@ -251,16 +251,30 @@ def test_answer_engine_failure_is_a_needs_attention_blocker(tmp_path):
     assert ei.value.cls == "answer_engine" and ei.value.stage == "fill"
 
 
-def test_custom_combobox_read_back_uses_new_page_text():
+def test_the_read_back_is_one_jev_question_per_field_on_the_fresh_page():
+    """Jev judges whether each field holds its answer (2026-09-24): no rules per kind of control in the program."""
+    from assistant import decide
+    from assistant.answers import Question
     from assistant.fill import mismatches
     from assistant.jev import Element, Table
     from assistant.pages import Page
-    from assistant.answers import Question
-    q = Question.model_validate(Q("Work model", "Hybrid", kind="choice", ref="e1"))
-    el = [Element(ref="e1", role="combobox", name="Work model")]
+    asked = []
+
+    class Jev:
+        def ask(self, topic, state, questions):
+            asked.append((topic, state, questions))
+            return {k: decide.Answer("choice", choice="holds" if q["instructions"]["answer"] == "Hybrid" else "empty",
+                                     confidence=0.9) for k, q in questions.items()}
+    decide.use(Jev())
+    hybrid = Question.model_validate(Q("Work model", "Hybrid", kind="choice", ref="e1"))
+    phone = Question.model_validate(Q("Phone", "351 935 8813", ref="e2"))
+    el = [Element(ref="e1", role="combobox", name="Work model"), Element(ref="e2", role="textbox", name="Phone")]
     after = Page(url="u", title="t", text="Work model Hybrid", table=Table(url="u", elements=el))
-    assert mismatches([q], after, before_text="Work model Select an option") == []
-    assert mismatches([q], after, before_text="Work model Remote Hybrid On-site") == [q]   # was already visible
+    assert mismatches([hybrid, phone], after) == [phone]
+    topic, state, questions = asked[0]
+    assert topic == "readback" and [c["ref"] for c in state["controls"]] == ["e1", "e2"]
+    assert questions["held_0"]["instructions"]["answer"] == "Hybrid" and questions["held_0"]["instructions"]["ref"] == "e1"
+    assert mismatches([], after) == [] and len(asked) == 1
 
 
 def _wanderer(fake, times):
@@ -431,16 +445,54 @@ def test_a_refused_typed_value_gets_one_goal_for_that_field_only(tmp_path):
 
 def test_read_only_fields_and_custom_widgets_still_go_to_the_goal(tmp_path):
     from assistant.answers import Question
-    from assistant.fill import direct_op
+    from assistant.fill import plan_fill
     from assistant.jev import Element, Table
     from assistant.pages import Page
     t = Table(url="u", elements=[Element(ref="e1", role="textbox", name="City", editable=True),
                                  Element(ref="e2", role="textbox", name="Start date"),          # read-only
                                  Element(ref="e3", role="combobox", name="Work model", editable=True)])
     p = Page(url="u", title="t", text="", table=t)
-    op = lambda ref: direct_op(Question.model_validate(Q("x", "v", ref=ref)), p)
-    assert op("e1") == {"op": "type", "ref": "e1", "text": "v", "clear": True, "submit": False}
-    assert op("e2") is None and op("e3") is None
+    plan = plan_fill([Question.model_validate(Q("x", "v", ref=ref)) for ref in ("e1", "e2", "e3")], p)
+    assert plan == [{"op": "type", "ref": "e1", "text": "v", "clear": True, "submit": False}, None, None]
+
+
+def test_the_fill_plan_is_jevs_pick_and_the_code_only_checks_it_can_be_done():
+    """Jev picks how and where (2026-09-24); the code refuses a pick the page does not allow (typing into a
+    read-only field, checking something that is not a radio or checkbox) and sends it to the page goal instead."""
+    from assistant import decide
+    from assistant.answers import Question
+    from assistant.fill import plan_fill
+    from assistant.jev import Element, Option, Table
+    from assistant.pages import Page
+    els = [Element(ref="e1", role="textbox", name="Phone", editable=True),
+           Element(ref="e2", role="textbox", name="Start date"),                       # read-only
+           Element(ref="e3", role="radio", name="Relocate?", label="Yes"),
+           Element(ref="e4", role="combobox", name="Based in Ireland?", options=[Option(ref="e4:1", label="No")])]
+    p = Page(url="u", title="t", text="", table=Table(url="u", elements=els))
+    picks = {"Phone": ("type", "e1", "none"), "Start date": ("type", "e2", "none"),
+             "Relocate?": ("check", "none", "e3"), "Based in Ireland?": ("select", "e4", "e4:1"),
+             "Nonsense": ("check", "none", "e1")}
+    asked = []
+
+    class Jev:
+        def ask(self, topic, state, questions):
+            asked.append((topic, questions))
+            out = {}
+            for k, q in questions.items():
+                how, field, option = picks[q["instructions"]["question"]]
+                c = how if k.startswith("op_") else field if k.startswith("field_") else option
+                out[k] = decide.Answer("choice", choice=c, confidence=0.9)
+            return out
+    decide.use(Jev())
+    qs = [Question.model_validate(Q(name, "x")) for name in picks]
+    plan = plan_fill(qs, p)
+    assert plan[0] == {"op": "type", "ref": "e1", "text": "x", "clear": True, "submit": False}
+    assert plan[1] is None                                                        # read-only: to the page goal
+    assert plan[2] == {"op": "toggle", "ref": "e3", "state": True}
+    assert plan[3] == {"op": "select", "ref": "e4", "value": "No"}
+    assert plan[4] is None                                                        # a textbox cannot be checked
+    topic, questions = asked[0]
+    assert topic == "fill" and set(questions["option_0"]["criteria"]) == {"e3", "e4:1", "none"}
 
 
 def test_a_resume_question_is_covered_once_the_resume_is_in_place(tmp_path):
@@ -506,8 +558,7 @@ def test_a_safety_reminder_after_easy_apply_is_passed_with_continue_applying(tmp
     parked = run_pages(ctx_for(fake, STEPS_ANSWERS, tmp_path))
     assert parked.pages == 3 and fake.cur == "s3" and fake.sent == []
     assert "Review job post" not in fake.clicked and "Continue applying" in fake.clicked
-    confirms = [op for n, a in fake.log if n == "browser_act" for op in a["ops"] if op.get("confirm")]
-    assert len(confirms) == 1                                         # only Easy Apply, by entry.confirm_click
+    assert not any(op.get("confirm") for n, a in fake.log if n == "browser_act" for op in a["ops"])
 
 
 def test_a_cookie_pop_up_over_the_form_is_declined_and_the_form_submit_never_confirmed(tmp_path):
@@ -540,22 +591,20 @@ def test_a_cookie_pop_up_over_the_form_is_declined_and_the_form_submit_never_con
     assert not any(op.get("confirm") for n, a in fake.log if n == "browser_act" for op in a["ops"])
 
 
-def test_the_agents_apply_is_refused_when_it_submits_a_form_or_a_field_holds_a_value(tmp_path):
-    from assistant.entry import EntryRefused, confirm_click
+def test_the_never_submit_rule_on_the_server_refuses_submit_always_and_apply_while_filling():
+    """The package applies jev.never_click to every click (FakeMCP does the same): Submit is refused on any page,
+    Apply only once the form is being filled."""
+    from assistant import jev
     from assistant.pages import read_page
     site = {"t": FakePage("https://careers.example/jobs/1", "Job", "Apply", [
-        El("textbox", "City"), El("button", "Apply now!", submits=True), El("link", "Apply for this job")])}
+        El("textbox", "City"), El("button", "Apply now!", submits=True), El("button", "Submit application", submits=True)])}
     fake = FakeMCP(site, "t")
-    read = lambda: read_page(fake, "s")
-    with pytest.raises(EntryRefused, match="submits the form"):
-        confirm_click(fake, "s", "Apply now!", read, lambda _: None)
-    with pytest.raises(EntryRefused, match="does not start"):
-        confirm_click(fake, "s", "Submit application", read, lambda _: None)
-    site["t"].els[0].value = "Milan"
-    with pytest.raises(EntryRefused, match="already holds a value"):
-        confirm_click(fake, "s", "Apply for this job", read, lambda _: None)
+    p = read_page(fake, "s")
+    click = lambda ref: fake.act([{"op": "click", "ref": ref}], "s", p.table, stop_on_error=False)
+    assert "needs_confirmation" in click("e3")                     # Submit, even before filling
+    jev.FORM.started = True
+    assert "needs_confirmation" in click("e2")                     # Apply, once filling started
     assert fake.sent == []
-    assert not any(op.get("confirm") for n, a in fake.log if n == "browser_act" for op in a["ops"])
 
 
 def test_a_job_alert_box_is_not_taken_for_the_application_form(tmp_path):
@@ -604,22 +653,21 @@ def test_a_radio_group_redrawn_after_the_toggle_is_read_back_by_its_label(tmp_pa
     assert not [a for n, a in fake.log if n == "browser_open"]         # never reopened: the answer was seen as set
 
 
-def test_the_agents_entry_click_is_retried_while_the_posting_re_renders(tmp_path):
+def test_the_agents_entry_click_is_tried_again_while_the_posting_re_renders(tmp_path):
     """Genesys: the posting was still re-rendering — `detached`, then `page_changed` — and the old code gave the
-    job up after one retry, three seconds in."""
+    job up after one retry, three seconds in. A click the page changed under counts as movement: look again."""
     site = {"j": FakePage(LI_JOB, "Job", "Software Engineer",
                           [El("link", "Apply on company website", goto="p1")]), **single_page()}
     fake = FakeMCP(site, "j")
-    orig, n = fake._browser_act, {"clicks": 0}
+    orig, n = fake._click, {"clicks": 0}
 
-    def act(ops, **kw):
-        if ops and ops[0].get("confirm"):
+    def click(e, confirm=False):
+        if e.name == "Apply on company website":
             n["clicks"] += 1
             if n["clicks"] < 3:
-                return "0/1 ops ok  (stopped early)\n  x click e1  " + (
-                    "detached: detached" if n["clicks"] == 1 else "page_changed: page_changed")
-        return orig(ops, **kw)
-    fake._browser_act = act
+                return "detached" if n["clicks"] == 1 else "page_changed"
+        return orig(e, confirm)
+    fake._click = click
     parked = run_pages(ctx_for(fake, SINGLE_ANSWERS, tmp_path))
     assert parked.pages == 1 and n["clicks"] == 3 and fake.cur == "p1"
 
@@ -644,3 +692,58 @@ def test_an_advance_goal_that_only_scrolled_is_asked_again(tmp_path):
     fake._browser_goal = goal
     parked = run_pages(ctx_for(fake, STEPS_ANSWERS, tmp_path))
     assert parked.pages == 3 and first["n"] == 1
+
+
+def test_an_answer_naming_a_select_option_by_its_ref_is_set_directly_and_read_back():
+    """Toast (Greenhouse), live 2026-09-24: the answer named option "e31:3" of a native <select>; no element has that
+    ref, so the select went to a page goal and the read-back failed although "No" was selected."""
+    from assistant.answers import Question
+    from assistant.fill import mismatches, plan_fill
+    from assistant.jev import Element, Option, Table
+    from assistant.pages import Page
+
+    def page(current):
+        sel = Element(ref="e31", role="combobox", name="Are you currently based in Ireland? (required) 8ab4c6f4",
+                      current=current, options=[Option(ref="e31:1", label=""), Option(ref="e31:2", label="Yes"),
+                                                Option(ref="e31:3", label="No", selected=current == "No")])
+        return Page(url="https://x.test", title="t", text="", table=Table(url="https://x.test", elements=[sel]))
+    base = dict(id="a", question="Are you currently based in Ireland? (required)", kind="choice", options=None,
+                answer="No", required=True, source="profile", quote="x", relies_on=None)
+    for q in (Question(**base, ref="e31", option_ref="e31:3"), Question(**base, ref="e31:3", option_ref=None)):
+        assert plan_fill([q], page(None)) == [{"op": "select", "ref": "e31", "value": "No"}]  # RuleDecider
+        assert mismatches([q], page("No")) == [] and mismatches([q], page(None)) == [q]      # RuleDecider
+
+
+def test_an_unsure_resume_pick_is_asked_again_narrowly_then_settled_by_the_answer_engine():
+    """Several uploads and Jev unsure (The Flex, live 2026-09-24): no fixed-threshold stop. Jev is asked again over its
+    two likeliest picks; still unsure, the answer engine's pick settles it if it is one of those two."""
+    from assistant import decide
+    from assistant.fill import resume_input
+    from assistant.jev import Element, Table
+    from assistant.pages import Page, Judgment
+    els = [Element(ref="e16", role="file", name=""), Element(ref="e29", role="file", name="Resume"),
+           Element(ref="e30", role="file", name="Cover letter")]
+
+    def page():
+        p = Page(url="u", title="t", text="", table=Table(url="u", elements=els))
+        p.judgment = Judgment(kind="application_form", kind_confidence=1, submitted=False, applied=False,
+                              covered=False, loading=False, validation=False, registration=False, account="none",
+                              submit_button=False, app_fields=set(), resume_ref="e29", resume_confidence=0.4,
+                              resume_probabilities={"e29": 0.4, "e16": 0.35, "e30": 0.2, "none": 0.05},
+                              cover_letters=[], google_ref=None, google_step=None, form_iframe=None)
+        return p
+    asked = []
+
+    class Unsure:
+        def __init__(self, pick, conf):
+            self.pick, self.conf = pick, conf
+
+        def ask(self, topic, state, questions):
+            asked.append(set(questions["resume_input"]["criteria"]))
+            return {"resume_input": decide.Answer("choice", choice=self.pick, confidence=self.conf)}
+    decide.use(Unsure("e29", 0.9))
+    assert resume_input(page()) == "e29" and asked[-1] == {"e29", "e16", "none"}     # the two likeliest, and none
+    decide.use(Unsure("e29", 0.45))
+    assert resume_input(page(), engine_pick="e16") == "e16"                          # the LLM settles a close call
+    with pytest.raises(NeedsAttention, match="unclear which one takes the resume"):
+        resume_input(page(), engine_pick="e30")                                     # not a finalist: no guess

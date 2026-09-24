@@ -38,10 +38,27 @@ def test_request_shape_answers_and_log(tmp_path):
     assert line["topic"] == "page" and line["answers"]["x"] == {"p": 0.9} and "sk-secret" not in json.dumps(line)
 
 
-def test_many_questions_are_split_into_batches():
-    post, calls = fake_post((200, None))
-    qs = {f"q{i}": decide.noul(f"Q{i}?") for i in range(decide.BATCH + 5)}
-    assert len(decide.Decider("k", "m", post=post).ask("page", "s", qs)) == decide.BATCH + 5 and len(calls) == 2
+def test_many_questions_are_split_into_small_batches_that_retry_on_their_own():
+    """TypeSafe fails a whole request when one question fails (Vercel, live 2026-09-24): small batches, each
+    retried alone, all answered in the end."""
+    import threading
+    lock, calls, failed = threading.Lock(), [], set()
+
+    def post(url, body, headers, timeout):
+        first = next(iter(body["questions"]))
+        with lock:
+            calls.append(first)
+            if first == "q4" and first not in failed:            # the second batch fails once
+                failed.add(first)
+                return 503, {"error": {"message": "Service temporarily unavailable"}}
+        return 200, {"answers": {k: {"type": "noul", "noul": 0.9} for k in body["questions"]}}
+    n = decide.BATCH * 3 + 1
+    qs = {f"q{i}": decide.noul(f"Q{i}?") for i in range(n)}
+    slept = []
+    d = decide.Decider("k", "m", post=post, sleep=slept.append)
+    got = d.ask("page", "s", qs)
+    assert set(got) == set(qs) and all(a.yes(0.5) for a in got.values())
+    assert len(calls) == 4 + 1 and calls.count("q4") == 2 and slept == [decide.RETRY_WAITS[0]] and d.calls == 4
 
 
 def test_transient_errors_are_retried_with_backoff_then_a_decision_error():

@@ -3,7 +3,8 @@
 The browser agent (the package's browser_goal) finds its way: from the posting to the application form past
 pop-ups, cookie banners and job pages, and from one form step to the next. Code keeps what must not be left to a
 model: the answers (answers.py, checked against the files), the resume upload, the blockers, the final-step gate,
-and every click the server refuses as submit-like — an entry label is clicked by entry.py, never anything else."""
+and the one never-submit rule (jev.never_click): no "Submit" click, and no "Apply" click once the form is being
+filled. A refused click is never made; in the form it means the last step."""
 from __future__ import annotations
 
 import time
@@ -15,13 +16,13 @@ from pathlib import Path
 from urllib.parse import urlparse
 from typing import Callable
 
-from assistant import pages, tabs
+from assistant import decide, pages, tabs
 from assistant.answers import (LONG_TEXT, AnswerEngineError, PageAnswers, Question, judge_questions,
                                uncovered_optional, uncovered_required)
 from assistant.decide import DecisionError
 from assistant.blockers import Attempts, NeedsAttention, OpenQuestion, Parked, RestartFromEntry, StopRun
-from assistant.entry import EntryRefused, confirm_click, guest_click
-from assistant.guard import is_strong_transmit, is_transmit, label_of
+from assistant import jev
+from assistant.guard import label_of
 from assistant.jev import Jev, JevError, Table
 from assistant.pages import Page
 
@@ -79,14 +80,14 @@ def goal_clicks(g: GoalResult, table: Table) -> list[tuple[str, str]]:
 
 
 def check_goal_alarm(g: GoalResult, table: Table) -> None:
-    """§4.6: a successful click on a TRANSMIT label ends the run."""
+    """§4.6: a click the never-submit rule refuses that went through anyway ends the run (the rule is not in place)."""
     for label, result in goal_clicks(g, table):
-        if result == "ok" and is_transmit(label):
+        if result == "ok" and jev.never_click(label):
             raise StopRun(f"ALARM: a goal clicked {label!r}")
 
 
-def blocked_transmit(g: GoalResult, table: Table) -> str | None:
-    """The label the server refused (needs_confirmation), if any."""
+def blocked_click(g: GoalResult, table: Table) -> str | None:
+    """The label the server refused (needs_confirmation: jev.never_click), if any."""
     for label, result in goal_clicks(g, table):
         if result.startswith("needs_confirmation"):
             return label
@@ -151,21 +152,37 @@ def _field_fingerprint(p: Page) -> tuple:
 RESUME_CONFIDENCE = 0.5     # below this, Jev cannot tell which of several uploads is the resume
 
 
-def resume_input(p: Page) -> str | None:
+def resume_input(p: Page, engine_pick: str | None = None) -> str | None:
     """The control that uploads the resume (a file input, or LinkedIn's "Upload resume" button that opens the file
-    chooser, aa6), as Jev picks it. Several uploads and no clear pick → a blocker (C25)."""
+    chooser, aa6), as Jev picks it. Several uploads and Jev unsure: Jev is asked again over its two likeliest picks;
+    still unsure, the answer engine's pick (`engine_pick`, an LLM's ref for the resume question) settles it when it is
+    one of those two. Only when neither settles it is it a blocker (C25)."""
     j = pages.judge(p)
-    files = [e for e in p.elements if e.role == "file"]
     if j.resume_ref is None:
         return None
-    if len(files) > 1 and j.resume_confidence < RESUME_CONFIDENCE:
-        raise NeedsAttention("broken_form", "several file inputs and it is unclear which one takes the resume")
-    return j.resume_ref
+    files = [e for e in p.elements if e.role == "file"]
+    if len(files) <= 1 or j.resume_confidence >= RESUME_CONFIDENCE:
+        return j.resume_ref
+    probs = j.resume_probabilities or {j.resume_ref: j.resume_confidence}
+    again = decide.narrow("page", pages.page_state(p), "resume_input", pages.page_questions(p)["resume_input"], probs)
+    if again.choice not in (None, "none") and (again.confidence or 0.0) >= RESUME_CONFIDENCE:
+        return again.choice
+    finalists = set(sorted(probs, key=probs.get, reverse=True)[:2]) - {"none"}
+    if engine_pick in finalists:
+        return engine_pick
+    raise NeedsAttention("broken_form", "several file inputs and it is unclear which one takes the resume")
 
 
-def upload_resume(ctx: JobCtx, p: Page) -> bool:
+def _engine_resume_pick(pa: PageAnswers | None, p: Page) -> str | None:
+    """The answer engine's ref for the resume upload, when it names exactly one of the page's file inputs."""
+    files = {e.ref for e in p.elements if e.role == "file"}
+    picks = {q.ref for q in (pa.questions if pa else []) if q.kind == "file" and q.resume_upload and q.ref in files}
+    return picks.pop() if len(picks) == 1 else None
+
+
+def upload_resume(ctx: JobCtx, p: Page, pa: PageAnswers | None = None) -> bool:
     """Upload the tailored resume on this page if it has a resume input. True if the resume is now in place."""
-    ref = resume_input(p)
+    ref = resume_input(p, _engine_resume_pick(pa, p))
     if ref is None:
         return False
     el = next(e for e in p.elements if e.ref == ref)
@@ -218,8 +235,8 @@ def type_long(ctx: JobCtx, p: Page, q: Question) -> None:
 
 
 def _goal_items(pa: PageAnswers, p: Page) -> list[Question]:
-    """Answers still to set: non-null, not wrapper-typed long text, differing from the current value. Most are then
-    set directly (direct_op); the rest go to the one page goal."""
+    """Answers still to set: non-null, not wrapper-typed long text, differing from the current value. Jev plans how
+    each goes in (plan_fill); the code sets most, a page goal the rest."""
     by_ref = {e.ref: e for e in p.elements}
     items = []
     for q in pa.questions:
@@ -238,28 +255,81 @@ def _goal_items(pa: PageAnswers, p: Page) -> list[Question]:
 TYPEABLE = {"textbox", "searchbox", "spinbutton"}
 
 
-def direct_op(q: Question, p: Page) -> dict | None:
-    """User decisions 2026-09-23: controls with a known ref are set by the wrapper, no model —
-    `toggle` for a radio/checkbox option_ref, `select` for a native <select> (a combobox with options), and
-    `type` for a text answer into a plain field the observer marks editable (textbox, searchbox, number input;
-    not read-only, not a custom combobox). The page goal is left for custom widgets."""
+OPTION_REF_RE = re.compile(r"^(e\d+):\d+$")     # an option of a native <select>, as the table lists it ("e31:3")
+
+
+TOGGLES = {"radio", "checkbox", "switch"}
+LISTS = {"combobox", "listbox"}
+FILL_OPS = {
+    "type": "Type the answer into the field: a text box, a text area or a number field.",
+    "select": "Choose the answer in a dropdown list whose options are listed on the page.",
+    "check": "Check the radio button or checkbox that is the answer.",
+    "widget": "Anything else, which needs clicks: a dropdown with no listed options, a date picker, an autocomplete.",
+}
+MAX_CHOICES = 250          # Jev takes up to 255 options per choice
+
+
+def _field_choices(p: Page) -> dict[str, str]:
+    return dict(list({e.ref: (e.name or e.role)[:90] for e in p.elements
+                      if e.role in TYPEABLE | LISTS}.items())[:MAX_CHOICES])
+
+
+def _option_choices(p: Page) -> dict[str, str]:
+    out = {}
+    for e in p.elements:
+        if e.role in TOGGLES:
+            out[e.ref] = f"{e.name[:70]}: {e.label[:40]}" if e.label and e.label != e.name else e.name[:90]
+        elif e.role in LISTS:
+            out.update({o.ref: f"{e.name[:70]}: {o.label[:40]}" for o in e.options if o.ref and o.label})
+    return dict(list(out.items())[:MAX_CHOICES])
+
+
+def plan_fill(items: list[Question], p: Page) -> list[dict | None]:
+    """How and where each answer goes in, as Jev decides, in one round (jev-ultrafast's speculative fan-out: the
+    operation, and a target for each kind of operation). The code then only checks that the pick can be carried out
+    and acts with the answer engine's own text, so no rule chooses by the kind of control (it replaces direct_op,
+    2026-09-24). None: a page goal sets that answer (custom widgets)."""
+    if not items:
+        return []
+    fields, options = _field_choices(p), _option_choices(p)
+    qs: dict[str, dict] = {}
+    for i, q in enumerate(items):
+        about = {"question": q.question, "answer": q.answer}
+        about.update({k: v for k, v in (("answer_engine_ref", q.ref), ("answer_engine_option_ref", q.option_ref)) if v})
+        qs[f"op_{i}"] = decide.choice({**about, "ask": "How does `answer` go into the form for `question`?"}, FILL_OPS)
+        if fields:
+            qs[f"field_{i}"] = decide.choice({**about, "ask": "Which field is the one for `question`?"},
+                                             {**fields, "none": "None of these fields."})
+        if options:
+            qs[f"option_{i}"] = decide.choice({**about, "ask": "Which option is `answer` for `question`?"},
+                                              {**options, "none": "None of these options."})
+    a = decide.current().ask("fill", pages.page_state(p), qs)
     by_ref = {e.ref: e for e in p.elements}
-    opt = by_ref.get(q.option_ref or "")
-    if opt is not None and opt.role in {"radio", "checkbox", "switch"}:
-        return {"op": "toggle", "ref": opt.ref, "state": True}
-    el = by_ref.get(q.ref or "")
-    if el is not None and el.role in {"combobox", "listbox"} and el.options:
-        if any(pages.norm_label(o.label) == pages.norm_label(q.answer) for o in el.options):
-            return {"op": "select", "ref": el.ref, "value": q.answer}
-    if el is not None and el.role in TYPEABLE and el.editable and q.kind != "file" and q.answer is not None:
-        return {"op": "type", "ref": el.ref, "text": q.answer, "clear": True, "submit": False}
+
+    def chosen(key: str) -> str | None:
+        return a[key].choice if key in a and a[key].choice != "none" else None
+    return [_carry_out(q, a[f"op_{i}"].choice, chosen(f"field_{i}"), chosen(f"option_{i}"), by_ref)
+            for i, q in enumerate(items)]
+
+
+def _carry_out(q: Question, how: str | None, field: str | None, option: str | None, by_ref: dict) -> dict | None:
+    """The browser op for Jev's pick, when the page allows it; else None (a page goal)."""
+    f = by_ref.get(field or "")
+    if how == "type" and f is not None and f.role in TYPEABLE and f.editable:
+        return {"op": "type", "ref": f.ref, "text": q.answer, "clear": True, "submit": False}
+    if how == "select":
+        m = OPTION_REF_RE.match(option or "")
+        base = by_ref.get(m.group(1)) if m else (f if f is not None and f.options else None)
+        if base is not None and base.options:
+            label = next((o.label for o in base.options if o.ref == option and o.label), None) or next(
+                (o.label for o in base.options if pages.norm_label(o.label) == pages.norm_label(q.answer)), None)
+            if label:
+                return {"op": "select", "ref": base.ref, "value": label}
+    if how == "check":
+        t = by_ref.get(option or "")
+        if t is not None and t.role in TOGGLES:
+            return {"op": "toggle", "ref": t.ref, "state": True}
     return None
-
-
-def set_direct(ctx: JobCtx, p: Page, qs: list[Question]) -> None:
-    ops = [direct_op(q, p) for q in qs]
-    if ops:
-        ctx.browser.act(ops, ctx.session, p.table, stop_on_error=False)
 
 
 def _other_resume_card(q: Question, p: Page, ctx: JobCtx) -> bool:
@@ -297,50 +367,35 @@ def run_goal(ctx: JobCtx, items: list[Question], p: Page) -> GoalResult:
     return g
 
 
-def _key(s: str | None) -> str:
-    return re.sub(r"[^a-z0-9]+", "", pages.norm_label(s))
+HELD = {"holds": "The answer, maybe formatted by the page: other spacing or punctuation, a country code or area code "
+                 "added in front of the same number, other letter case.",
+        "different": "A different answer.",
+        "empty": "Nothing, or a placeholder such as 'Select…'."}
 
 
-def _option_now(q: Question, p: Page):
-    """The option a toggle set, found again after a re-render renumbered it: LinkedIn redraws its radio group on
-    every change (live 2026-09-23: e221 became e231, checked), so the old ref reads as "not set". The one option
-    named like the question whose own label is the answer, else the one named like the answer."""
-    kinds = {"radio", "checkbox", "switch"}
-    hits = [e for e in p.elements if e.role in kinds and _key(e.name) == _key(q.question) and e.label
-            and _key(e.label) == _key(q.answer)]
-    if not hits:
-        hits = [e for e in p.elements if e.role in kinds and _key(e.name) == _key(q.answer)]
-    return hits[0] if len(hits) == 1 else None
+def _held_question(q: Question) -> dict:
+    field = {"question": q.question, "answer": q.answer}
+    field.update({k: v for k, v in (("ref", q.ref), ("option_ref", q.option_ref)) if v})
+    return decide.choice({**field, "ask": "What does the form's field for `question` hold now, compared with `answer`?"},
+                         HELD)
 
 
-def _holds(q: Question, p: Page, before_text: str) -> bool:
-    by_ref = {e.ref: e for e in p.elements}
-    if q.option_ref:
-        opt = by_ref.get(q.option_ref) or _option_now(q, p)
-        return bool(opt and opt.checked)
-    want = pages.norm_label(q.answer)
-    el = by_ref.get(q.ref or "") or next((e for e in p.elements
-                                          if pages.norm_label(e.name) == pages.norm_label(q.question)), None)
-    if el is None:
-        # a radio group without refs: the radio named like the answer, if it is the only one
-        radios = [e for e in p.elements if e.role == "radio" and pages.norm_label(e.name) == want]
-        return len(radios) == 1 and bool(radios[0].checked)
-    if pages.norm_label(el.current or el.value) == want:
-        return True
-    # A custom (non-<select>) combobox reports no value (DISCOVERY.md); the picked label shows in the page
-    # text instead. Accept only a label that appeared because of the fill.
-    if el.role == "combobox" and not el.options and not (el.value or "").strip():
-        return want in pages.norm_label(p.text) and want not in pages.norm_label(before_text)
-    return False
-
-
-def mismatches(items: list[Question], p: Page, before_text: str = "") -> list[Question]:
-    """Read-back: questions whose field does not hold the answer."""
-    return [q for q in items if not _holds(q, p, before_text)]
+def mismatches(items: list[Question], p: Page) -> list[Question]:
+    """Read-back by Jev on the fresh page: the questions whose field does not hold the answer (Jev's top choice is not
+    "holds"). It replaces rules per kind of control (option refs, redrawn radio groups, custom comboboxes that show the
+    pick only as page text). Toast's Greenhouse form, live 2026-09-24: the select held "No" while those rules said it
+    did not, and the phone widget showed the typed "351 935 8813" as "+393519358813". As a yes/no question Jev put the
+    phone at 0.36–0.54; as this choice it picks "holds" at 0.92–0.95."""
+    if not items:
+        return []
+    a = decide.current().ask("readback", pages.page_state(p),
+                             {f"held_{i}": _held_question(q) for i, q in enumerate(items)})
+    return [q for i, q in enumerate(items) if a[f"held_{i}"].choice != "holds"]
 
 
 def fill_page(ctx: JobCtx, p: Page) -> None:
     ctx.stage = "fill"
+    jev.FORM.started = True          # from here on "Apply" is never clicked either (jev.never_click)
     try:
         pa = ctx.answer_fn(p)
     except AnswerEngineError as exc:
@@ -355,7 +410,7 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
             raise NeedsAttention("broken_form", f"required cover-letter file: {q.question!r}")   # C15
     for label in pages.judge(p).cover_letters:
         raise NeedsAttention("broken_form", f"required cover-letter file: {label!r}")
-    resume_in_place = upload_resume(ctx, p)                                # 1
+    resume_in_place = upload_resume(ctx, p, pa)                            # 1
     for q in pa.questions:                                                       # 2
         if q.answer is not None and _wrapper_types(q):
             type_long(ctx, p, q)
@@ -365,9 +420,11 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
         if q.source == "linkedin-prefill" and q.answer is not None:
             ctx.prefills.append((q.question, q.answer))
     items = [q for q in _goal_items(pa, p) if not _other_resume_card(q, p, ctx)]
-    direct = [q for q in items if direct_op(q, p)]
-    goal_items = [q for q in items if q not in direct]
-    set_direct(ctx, p, direct)                                             # 3a: no model
+    plan = plan_fill(items, p)                                                   # 3: Jev picks how and where
+    direct = [op for op in plan if op]
+    goal_items = [q for q, op in zip(items, plan) if op is None]
+    if direct:                                                                   # 3a: the code acts
+        ctx.browser.act(direct, ctx.session, p.table, stop_on_error=False)
     if goal_items:                                                               # 3b: one goal
         run_goal(ctx, goal_items, p)
     ctx.filled_count += len(items)
@@ -383,18 +440,21 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
                              questions=[_open_q(q) for q in missing])
     if items:                                                                    # read-back
         q = ctx.read()
-        bad = mismatches(items, q, p.text)
+        bad = mismatches(items, q)
         if bad:
-            # One retry: a toggle or select again (idempotent); everything else — including a directly typed
-            # value the page rewrote or refused (masks, date widgets) — gets one goal for that field alone.
-            again = [b for b in bad if (direct_op(b, q) or {}).get("op") in ("toggle", "select")]
-            set_direct(ctx, q, again)
-            for b in bad:
-                if b not in again:
+            # One retry, planned again on the fresh page: a toggle or select again (idempotent); everything else,
+            # including a typed value the page rewrote or refused (masks, date widgets), gets one goal for that
+            # field alone.
+            replan = plan_fill(bad, q)
+            again = [op for op in replan if op and op["op"] in ("toggle", "select")]
+            if again:
+                ctx.browser.act(again, ctx.session, q.table, stop_on_error=False)
+            for b, op in zip(bad, replan):
+                if not (op and op["op"] in ("toggle", "select")):
                     run_goal(ctx, [b], q)
                     q = ctx.read()
             q = ctx.read()
-            bad = mismatches(bad, q, p.text)
+            bad = mismatches(bad, q)
             if bad:
                 ctx.attempts.fail("broken_form", "field would not accept its value: "
                                   + ", ".join(repr(b.question) for b in bad))
@@ -415,7 +475,7 @@ def log_answers(ctx: JobCtx, p: Page, pa: PageAnswers) -> None:
     ctx.answers_log.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(ctx.answers_log.read_text()) if ctx.answers_log.exists() else []
     data += [{"page": ctx.pages + 1, "url": p.url, "model": pa.model, "question": q.question, "answer": q.answer,
-              "source": q.source, "quote": q.quote, "relies_on": q.relies_on, "note": q.note} for q in pa.questions]
+              "ref": q.ref, "option_ref": q.option_ref, "source": q.source, "quote": q.quote, "relies_on": q.relies_on, "note": q.note} for q in pa.questions]
     ctx.answers_log.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
@@ -459,8 +519,8 @@ def navigate(ctx: JobCtx, p: Page, hint: str = "") -> str:
     """One agent action from `p` towards the application form (NAVIGATE_GOAL, max_steps=1: the page is looked at
     again after every action, so the agent can never run through a form we have not filled). Returns "form" (the
     agent says the form is on screen, or starts answering it), "moved" (it, or our entry click, changed the page)
-    or "stuck". A click the server refused as submit-like is made by entry.confirm_click when it starts the
-    application; a refused Apply that belongs to a form already on the page means the form is here."""
+    or "stuck". Before the form is being filled, "Apply" / "Easy Apply" is the agent's own click (jev.never_click
+    refuses only "Submit" here); a refused Submit on a page with fields means the form is here."""
     ctx.stage = "navigate"
     ctx.nav_rounds += 1
     if ctx.nav_rounds > NAVIGATE_ROUNDS:
@@ -472,19 +532,16 @@ def navigate(ctx: JobCtx, p: Page, hint: str = "") -> str:
         raise NeedsAttention("navigation", "the browser agent is not available: no decision-model key")
     g = parse_goal(out)
     check_goal_alarm(g, p.table)
-    blocked = blocked_transmit(g, p.table)
+    blocked = blocked_click(g, p.table)
     if blocked:
-        try:
-            confirm_click(ctx.browser, ctx.session, blocked, ctx.read, ctx.sleep)
-        except EntryRefused as exc:
-            if pages.has_fields(ctx.read()):
-                return "form"
-            raise NeedsAttention("navigation", f"the browser agent chose {blocked!r}, which the program does "
-                                               f"not click: {exc}") from exc
-        follow_new_tab(ctx, known, ENTRY_TAB_WAIT, p)       # a dialog or the company site may open a moment later
+        if pages.has_fields(ctx.read()):
+            return "form"
+        raise NeedsAttention("navigation", f"the browser agent chose {blocked!r}, which the program never clicks")
+    # An Apply may open the company site in a new tab, or LinkedIn's dialog, a few seconds later.
+    if follow_new_tab(ctx, known, ENTRY_TAB_WAIT if acted(g) else 0, p):
         return "moved"
-    if follow_new_tab(ctx, known, 0):                         # the agent's own click opened a tab
-        return "moved"
+    if any(STALE.search(line) for line in g.trace):
+        return "moved"               # the page changed under the click (Genesys re-rendered its posting): look again
     if g.done or any((m := TRACE_RE.match(line)) and m.group(1) in ("TYPE_TEXT", "SELECT", "TOGGLE")
                      for line in g.trace):
         return "form"                                         # it says so, or it began to answer the form
@@ -494,17 +551,17 @@ def navigate(ctx: JobCtx, p: Page, hint: str = "") -> str:
 def advance(ctx: JobCtx, p: Page) -> str:
     """'moved' | 'final' | 'stuck'. The agent clicks this step's Next / Continue / Review (NEXT_STEP_GOAL), one
     action per goal so it can never run past a step we have not filled; a goal that only scrolled or waited is
-    asked again. The server refusing a strong transmit label (Submit, Send, Apply) means this is the last step."""
+    asked again. A click refused by the never-submit rule (Submit, or Apply while filling) means this is the last
+    step."""
     ctx.stage = "advance"
     before = _field_fingerprint(p)
     known = ctx.book.handles()
     for _ in range(ADVANCE_TRIES):
         g = parse_goal(ctx.browser.goal(NEXT_STEP_GOAL, ctx.session, max_steps=1))
         check_goal_alarm(g, p.table)
-        blocked = blocked_transmit(g, p.table)
-        if blocked and is_strong_transmit(blocked):
+        if blocked_click(g, p.table):
             return "final"
-        if acted(g) or blocked or g.status in ("done", "blocked"):
+        if acted(g) or g.status in ("done", "blocked"):
             break
     if follow_new_tab(ctx, known, CLICK_TAB_WAIT, p):  # e.g. LinkedIn's "Continue" to the company site
         return "moved"
@@ -524,6 +581,7 @@ def run_pages(ctx: JobCtx) -> Parked:
     that is covered by a pop-up, or shows neither fields nor a way forward, goes back to the agent.
     Raises NeedsAttention / StopRun / RestartFromEntry. Never clicks a transmit label (the guard would refuse)."""
     ctx.nav_rounds = 0
+    jev.FORM.started = False         # a new job starts at its posting, where "Apply" starts the application
     stage, hint, stuck = "navigate", "", 0
     filled, gate_retry, iframe_hops, guard_rounds, final_hint = False, False, 0, 0, False
     try:
@@ -622,14 +680,26 @@ def _attempt2(ctx: JobCtx, p: Page, cls: str, detail: str) -> None:
         ctx.sleep(5)
         _reload(ctx)
     elif cls == "signup":
-        try:
-            guest_click(ctx.browser, ctx.session, p)
-        except EntryRefused as exc:
-            raise NeedsAttention("signup", f"{detail}; guest link not usable: {exc}") from exc
+        why = guest_refused(p)
+        if why:
+            raise NeedsAttention("signup", f"{detail}; guest link not usable: {why}")
+        ctx.browser.act([{"op": "click", "ref": pages.guest_link(p).ref},
+                         {"op": "wait_for_load", "timeout_ms": 20000}], ctx.session, p.table, stop_on_error=False)
     elif cls == "broken_form":
         _reload(ctx)
     elif cls == "load_failure":
         raise RestartFromEntry(detail)
+
+
+def guest_refused(p: Page) -> str | None:
+    """Why the guest link of a sign-up wall is not clicked (user decision 2026-09-23), or None: it must be a
+    sign-up wall (Jev) with an "apply without an account" / "continue as guest" link."""
+    j = pages.judge(p)
+    if not (j.kind == "account_wall" and j.account == "create_account"):
+        return "not a sign-up wall"
+    if pages.guest_link(p) is None:
+        return "no 'apply without an account' / 'continue as guest' link"
+    return None
 
 
 def _reload(ctx: JobCtx) -> None:

@@ -144,3 +144,46 @@ def test_resume_and_cover_letter_questions():
     judge_questions(pa, Page(url="https://acme.io/apply", title="Apply", text="", table=Table(url="u")))
     assert [q.resume_upload for q in pa.questions] == [True, False, False]
     assert [q.cover_letter for q in pa.questions] == [False, True, False]
+
+
+def test_read_back_on_toasts_filled_greenhouse_form():
+    """Toast, live 2026-09-24: "No" was selected in e31 (named by its option ref e31:3) and the phone widget showed
+    the typed "351 935 8813" as "+393519358813". The old rules failed the first; exact matching would fail the second."""
+    from assistant.answers import Question
+    from assistant.fill import mismatches
+    p = captured("run-20260924-toast-filled")
+    base = dict(id="x", kind="choice", options=None, required=True, source="profile", quote="x", relies_on=None)
+    q = lambda question, answer, ref, option_ref=None: Question(**base, question=question, answer=answer, ref=ref,
+                                                                 option_ref=option_ref)
+    based_no = q("Are you currently based in Ireland? (required)", "No", "e31", "e31:3")
+    based_yes = q("Are you currently based in Ireland? (required)", "Yes", "e31", "e31:2")
+    phone = q("Phone (required)", "351 935 8813", "e25")
+    email = q("Email (required)", "abbaszadehmohammadamin@yahoo.com", "e23")
+    location = q("Location (required)", "Dublin, Ireland", "e26")
+    assert mismatches([based_no, based_yes, phone, email, location], p) == [based_yes, location]
+
+
+def _q(question, answer, ref=None, option_ref=None):
+    from assistant.answers import Question
+    return Question(id="x", kind="text", options=None, required=True, source="profile", quote="x", relies_on=None,
+                    question=question, answer=answer, ref=ref, option_ref=option_ref)
+
+
+def test_fill_plan_on_toasts_greenhouse_form():
+    """Jev picks the operation and the field, with or without the answer engine's refs as hints (2026-09-24)."""
+    from assistant.fill import plan_fill
+    p = captured("run-20260924-toast-filled")
+    plan = plan_fill([_q("Legal First Name (required)", "Amin", "e21"),
+                      _q("Are you currently based in Ireland? (required)", "No", "e31", "e31:3"),
+                      _q("Are you currently based in Ireland? (required)", "No"),
+                      _q("Website", "https://maaz77.github.io")], p)
+    assert [(op or {}).get("op") for op in plan] == ["type", "select", "select", "type"]
+    assert [op["ref"] for op in plan] == ["e21", "e31", "e31", "e30"] and plan[1]["value"] == plan[2]["value"] == "No"
+
+
+def test_fill_plan_on_a_linkedin_radio_step():
+    from assistant.fill import plan_fill
+    p = captured("run-20260923-dmi")
+    plan = plan_fill([_q("Are you currently a resident of Ireland?", "No"),
+                      _q("Do you require a visa or work permit to work in Ireland?", "Yes")], p)
+    assert plan == [{"op": "toggle", "ref": "e221", "state": True}, {"op": "toggle", "ref": "e222", "state": True}]

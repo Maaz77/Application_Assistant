@@ -1,4 +1,5 @@
 """T9: --dry-run on a temp workspace prints the right queue and writes nothing; CLI plumbing."""
+import re
 import hashlib
 import shutil
 from pathlib import Path
@@ -60,6 +61,7 @@ def test_dry_run_limit_and_job(workspace, capsys):
 
 def test_run_without_key_fails_preflight_with_exit_1(workspace, monkeypatch, capsys):
     base, cfg = workspace
+    cfg.write_text(re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "openrouter"', cfg.read_text()))
     monkeypatch.setattr(cli.config_mod, "api_key", lambda *a: "")
     assert cli.main(["--config", str(cfg), "run"]) == 1
     assert "OPENROUTER_API_KEY is missing" in capsys.readouterr().out
@@ -67,7 +69,7 @@ def test_run_without_key_fails_preflight_with_exit_1(workspace, monkeypatch, cap
 
 def test_a_key_both_routes_use_is_reported_once(workspace, monkeypatch, capsys):
     base, cfg = workspace
-    cfg.write_text(cfg.read_text().replace('chat_route = "openrouter"', 'chat_route = "vercel"'))
+    cfg.write_text(re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "vercel"', cfg.read_text()))
     monkeypatch.setattr(cli.config_mod, "gateway_key", lambda *a: "")
     assert cli.main(["--config", str(cfg), "run"]) == 1
     out = capsys.readouterr().out

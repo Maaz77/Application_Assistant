@@ -1,8 +1,8 @@
 """Pages: what the program reads (read_page: the element table and the read-only probes) and what it decides
 about a page. Facts stay facts — refs, values, URLs, the probes' counts, the resume's file name. Every judgment
 about what a page *is* comes from TypeSafe's Jev (decide.py): one call per page snapshot, made the first time a
-question about it is asked, then cached on the Page (judge). The one exception is the safety floor: guard.py's
-never-submit label list, and the confirmation-text tripwire below, stay rules; Jev can add to them, never lift them.
+question about it is asked, then cached on the Page (judge). The confirmation-text tripwire below stays a rule
+beside Jev's "submitted" answer. The never-submit rule itself is jev.never_click.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from assistant import decide, guard
+from assistant import decide
 from assistant.decide import THRESHOLDS as T
 from assistant import probes as probes_mod
 from assistant.jev import Jev, Element, Table, split_json
@@ -156,6 +156,7 @@ class Judgment:
     app_fields: set[str]        # refs of fields that belong to the application
     resume_ref: str | None      # the control that uploads the resume
     resume_confidence: float
+    resume_probabilities: dict[str, float]
     cover_letters: list[str]    # required-empty upload labels that ask for a cover letter
     google_ref: str | None      # the control that signs in with Google
     google_step: str | None     # on accounts.google.com
@@ -171,6 +172,8 @@ def _describe(e: Element) -> dict:
         d["value"] = str(shown)[:60]
     if e.checked is not None:
         d["checked"] = e.checked
+    if e.role in {"textbox", "searchbox", "spinbutton"} and not e.editable:
+        d["read_only"] = True
     if e.occluded:
         d["covered"] = True
     if e.options:
@@ -230,10 +233,14 @@ def page_questions(p: Page) -> dict[str, dict]:
     }
     for e in fields(p):
         qs[f"field_{e.ref}"] = _field_question(e)
-    if any(e.role == "file" for e in p.elements) or controls:
+    # File inputs when the page has any: an "Upload File" button beside the "Resume" input is the same field, and
+    # offering both split Jev's answer (The Flex on Ashby: the right input at confidence 0.4, live 2026-09-24).
+    # Buttons only when there is no file input (LinkedIn's "Upload resume" opens the file chooser, aa6).
+    uploads = [e for e in controls if e.role == "file"] or [e for e in controls if e.role == "button"]
+    if uploads:
         qs["resume_input"] = decide.choice(
             "Which control uploads the candidate's resume (CV)?",
-            {**{e.ref: _describe(e)["name"] or e.role for e in controls if e.role in {"file", "button"}},
+            {**{e.ref: _describe(e)["name"] or e.role for e in uploads},
              "none": "No control on this page uploads a resume."})
     for i, (label, kind, *_) in enumerate(p.required_empty.get("items", [])):
         if kind == "file":
@@ -273,6 +280,7 @@ def judge(p: Page) -> Judgment:
         app_fields={e.ref for e in fields(p) if a[f"field_{e.ref}"].yes(T["app_field"])},
         resume_ref=pick("resume_input"), resume_confidence=(a["resume_input"].confidence or 0.0)
         if "resume_input" in a else 0.0,
+        resume_probabilities=dict(a["resume_input"].probabilities) if "resume_input" in a else {},
         cover_letters=[label for i, (label, kind_, *_) in enumerate(p.required_empty.get("items", []))
                        if kind_ == "file" and a[f"cover_{i}"].yes(T["cover_letter"])],
         google_ref=pick("google_button"), google_step=pick("google_step"),
@@ -439,9 +447,12 @@ def blocker(p: Page) -> Blocker | None:
     return None
 
 
+GUEST_RE = re.compile(r"apply without an account|continue as guest", re.I)   # §6.3 signup, attempt 2
+
+
 def guest_link(p: Page) -> Element | None:
-    """The guest link a sign-up wall offers; the label list is the guard's (it unlocks `confirm`)."""
-    return next((e for e in buttons(p) if guard.is_guest(e.name)), None)
+    """The guest link a sign-up wall offers."""
+    return next((e for e in buttons(p) if GUEST_RE.search(e.name or "")), None)
 
 
 def iframe_form_src(p: Page) -> str | None:

@@ -10,10 +10,12 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from assistant import config, probes
-from assistant.guard import is_entry, is_transmit
+from assistant import config, jev, probes
 from assistant.fill import NOT_THE_FORM
 from assistant.jev import Jev
+
+
+ENTRY = re.compile(r"^\s*(easy apply|apply)\b", re.I)     # what the stand-in agent clicks to start
 
 
 @dataclass
@@ -30,7 +32,7 @@ class El:
     context: str = ""
     refuse_typing: bool = False      # a masked/rewriting input: direct typing does not stick, a goal must set it
     readonly: bool = False           # like the observer: a read-only field is not `editable`
-    submits: bool = False            # a button that submits a form with fields (the ENTRY_SUBMITS probe lists it)
+    submits: bool = False            # a button that sends the form: a click on it is recorded in `sent`
     occluded: bool = False           # covered by a pop-up
     ref: str | None = None           # a fixed ref (a redrawn element gets a new one); default: its position
     label: str = ""                  # a radio's own option text when its name is the question (LinkedIn)
@@ -114,9 +116,6 @@ class FakeMCP(Jev):
         if js == probes.MAXLENGTHS:
             ml = [[e.name, e.maxlength] for e in self.page.els if e.maxlength]
             return {"n": len(ml), "more": False, "items": ml, "min": min((m for _, m in ml), default=None)}
-        if js == probes.ENTRY_SUBMITS:
-            subs = [e.name for e in self.page.els if e.submits]
-            return {"n": len(subs), "more": False, "items": subs}
         if js == probes.IFRAME_SRCS:
             return {"n": len(self.page.iframes), "more": False, "items": self.page.iframes, "long": 0}
         return None
@@ -154,8 +153,8 @@ class FakeMCP(Jev):
         return "closed default"
 
     def _click(self, e: El, confirm: bool = False) -> str | None:
-        if is_transmit(e.name) and not confirm:
-            return "needs_confirmation"                         # the server rule (B1)
+        if jev.never_click(e.name, e.role) and not confirm:
+            return "needs_confirmation"                         # the never-submit rule, as the package applies it
         if e.submits:
             self.sent.append(e.name)                            # a form went out: must never happen
         if e.role == "radio":
@@ -224,7 +223,7 @@ class FakeMCP(Jev):
                     e.value = a
                     trace.append(f"  {step}. TYPE_TEXT {ref} {q} → ok (1ms model / 1ms browser)")
             if self.goal_clicks_submit:
-                sub = next((r, e) for r, e in self.refs() if is_transmit(e.name))
+                sub = next((r, e) for r, e in self.refs() if jev.SUBMIT_RE.search(e.name))
                 self.sent.append(sub[1].name)
                 trace.append(f"  {step + 1}. CLICK {sub[0]} {sub[1].name} → ok (1ms model / 1ms browser)")
         elif goal.startswith("Bring this job application"):     # the navigate goal (prompts/navigate_goal.md)
@@ -246,7 +245,7 @@ class FakeMCP(Jev):
 
     def _navigate(self, trace: list[str], goal: str) -> tuple[str, int]:
         """A stand-in for the agent: decline a cookie banner, continue past a pop-up, then say "done" when the
-        form is here, or click the page's Apply (the server refuses it: needs_confirmation). Told that the page's
+        form is here, or click the page's Apply (allowed until the form is being filled). Told that the page's
         fields are not the form (fill.NOT_THE_FORM), it looks for the Apply instead."""
         step = 0
         for pattern in (DECLINE, re.compile(r"^\s*continue applying\b", re.I)):
@@ -264,12 +263,12 @@ class FakeMCP(Jev):
         if here:
             trace.append(f"  {step + 1}. DONE (conf 0.95)")
             return "done", step
-        entry = next(((r, e) for r, e in self.refs() if e.role in {"button", "link"} and is_entry(e.name)), None)
+        entry = next(((r, e) for r, e in self.refs() if e.role in {"button", "link"} and ENTRY.search(e.name)), None)
         if entry:
             step += 1
             err = self._click(entry[1])
             trace.append(f"  {step}. CLICK {entry[0]} {entry[1].name} → {err or 'ok'} (1ms model / 1ms browser)")
-            return (f"failed:{err}" if err else "done"), step
+            return (f"failed:{err}" if err else "stopped: hit max_steps=1"), step
         trace.append(f"  {step + 1}. BLOCKED (conf 0.6)")
         return "blocked", step
 

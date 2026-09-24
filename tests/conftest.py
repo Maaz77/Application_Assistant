@@ -35,6 +35,7 @@ def decider(request):
     live_model test with a key in .env — the real Jev on OpenRouter."""
     from assistant import decide
     from tests.rule_decider import RuleDecider
+    jev.FORM.started = False                  # the never-submit rule's stage: each test starts before any form
     cfg = config.load()
     live = "live_model" in request.keywords and config.jev_key(cfg)
     d = decide.for_config(cfg) if live else RuleDecider()

@@ -51,15 +51,49 @@ def text_helper_differences(server) -> list[str]:
     return out
 
 
+def request_differences(server) -> list[str]:
+    """jev.clean_requests wraps policy._post(url, key, body); it covers every request only while that is the
+    package's one place that sends, and policy.py calls it by its global name."""
+    import pathlib
+    out = []
+    original = getattr(server.policy._post, "__wrapped__", None)
+    if original is None:
+        out.append("policy._post is not wrapped by jev.clean_requests")
+    elif list(inspect.signature(original).parameters) != ["url", "key", "body"]:
+        out.append(f"policy._post{inspect.signature(original)} no longer takes (url, key, body)")
+    pkg = pathlib.Path(inspect.getfile(server)).parent
+    senders = [f.name for f in pkg.glob("*.py") if ".post(" in f.read_text() or "httpx.post" in f.read_text()]
+    if senders != ["policy.py"] or inspect.getsource(server.policy).count(".post(") != 1:
+        out.append(f"the package sends requests outside policy._post ({senders}): bodies may not be cleaned")
+    return out
+
+
+def click_rule_differences(server) -> list[str]:
+    """jev.guard_clicks replaces the package's confirm_reason(cfg, name, role), the check made before every click;
+    it applies only while browser.py looks it up on its module at call time."""
+    import importlib
+    browser = importlib.import_module(server.__name__.rpartition(".")[0] + ".browser")
+    out = []
+    original = getattr(browser.confirm_reason, "__wrapped__", None)
+    if original is None:
+        out.append("browser.confirm_reason is not replaced by jev.guard_clicks: the never-submit rule is off")
+    elif list(inspect.signature(original).parameters) != ["cfg", "name", "role"]:
+        out.append(f"confirm_reason{inspect.signature(original)} no longer takes (cfg, name, role)")
+    if "blocked = confirm_reason(self.cfg, target_label" not in inspect.getsource(browser):
+        out.append("browser.py no longer checks confirm_reason before a click: the never-submit rule is off")
+    return out
+
+
 def main() -> int:
     from assistant import config, jev
     cfg = config.load()
     jev.apply_env(cfg, config.chat_key(cfg))
-    diffs = differences(jev.server_signatures()) + text_helper_differences(jev.load())
+    diffs = (differences(jev.server_signatures()) + text_helper_differences(jev.load())
+             + request_differences(jev.load()) + click_rule_differences(jev.load()))
     for d in diffs:
         print("✗", d)
     if not diffs:
-        print(f"✓ {len(EXPECTED)} browser_* signatures match spec §3; the text helper rotation is in place")
+        print(f"✓ {len(EXPECTED)} browser_* signatures match spec §3; text helper rotation, request cleaning and the click rule are in place")
     return 1 if diffs else 0
 
 

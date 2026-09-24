@@ -55,7 +55,7 @@ def test_stray_typesafe_key_and_package_vars_are_removed():
         assert os.environ.get("TYPESAFE_API_KEY") in (None, config.gateway_key()) != "stray"
         assert "JEVMCP_ALLOW_DOMAINS" not in os.environ
         assert "TEXT_MODEL_EXTRA" not in os.environ
-        assert os.environ["OPENROUTER_API_KEY"] == os.environ["TEXT_MODEL_API_KEY"] == "k-123"
+        assert os.environ["TEXT_MODEL_API_KEY"] == "k-123"      # the chat route's key, whichever route is set
         d = jev.Jev(config.load(), "k-123").doctor()
         print(json.dumps([d["allow_domains"], d["typesafe_turbo"], d["text_model"], d["js_eval"], d["uploads"],
                           d["mode"]]))
@@ -142,3 +142,52 @@ def test_load_refuses_an_unpatched_package():
             print("refused:", e)
     """)
     assert r.returncode == 0 and "refused: jev-ultrafast-mcp 0.1.5 is installed" in r.stdout, r.stderr
+
+
+def test_a_lone_surrogate_from_the_page_never_reaches_a_log():
+    """Genesys, live 2026-09-24: page text cut in JavaScript left "\\ud835" alone; writing calls.jsonl raised
+    UnicodeEncodeError and ended the run."""
+    import json
+    assert jev.clean_text("Styled \ud835 cut") == "Styled ? cut" and jev.clean_text("plain 𝐀") == "plain 𝐀"
+    json.dumps(jev.clean_text("x\udc00y"), ensure_ascii=False).encode("utf-8")
+
+
+def test_the_package_s_requests_are_cleaned_before_httpx_encodes_them():
+    """Genesys and Mastercard, live 2026-09-24: browser_goal sent page text with a lone surrogate and httpx
+    raised UnicodeEncodeError on every step."""
+    import json
+    import types
+    sent = []
+
+    def _post(url, key, body):
+        sent.append(json.dumps(body, ensure_ascii=False).encode("utf-8"))
+        return {"ok": True}
+    policy = types.SimpleNamespace(_post=_post)
+    jev.clean_requests(policy)
+    jev.clean_requests(policy)                                   # wrapping again never nests
+    assert policy._post("u", "k", {"state": {"text": "Job \ud835 title", "items": ["a\udc00"]}}) == {"ok": True}
+    assert json.loads(sent[0]) == {"state": {"text": "Job ? title", "items": ["a?"]}}
+    assert policy._post.__wrapped__ is _post
+
+
+def test_a_goal_the_decision_model_could_not_serve_is_asked_again_then_is_a_decision_error():
+    """Mastercard, live 2026-09-24: Vercel's Jev answered 503 through the package's ~1.5 s of retries on both
+    navigate goals, and the job was reported as "no way forward"."""
+    from assistant.decide import RETRY_WAITS, DecisionError
+    out503 = "goal: x\nstatus: turbo_unavailable: Decision model returned HTTP 503; no action executed.\nsteps: 0\n"
+    done = "goal: x\nstatus: done\nsteps: 1\n"
+    replies, slept = [out503, out503, done], []
+
+    class Srv:
+        def browser_goal(self, **kw):
+            return replies.pop(0)
+    b = jev.Jev(None, "", server=Srv(), sleep=slept.append)
+    assert b.goal("x", "s", max_steps=1) == done and slept == list(RETRY_WAITS[:2])
+    replies[:] = [out503] * (len(RETRY_WAITS) + 1)
+    with pytest.raises(DecisionError, match="HTTP 503"):
+        b.goal("x", "s", max_steps=1)
+    acted = "goal: x\nstatus: turbo_unavailable: Decision model returned HTTP 503; no action executed.\nsteps: 2\n"
+    replies[:] = [acted]
+    assert b.goal("x", "s") == acted                     # it already acted: its caller reads the page again
+    replies[:] = ["goal: x\nstatus: turbo_unavailable: no decision-model key\nsteps: 0\n"]
+    assert "no decision-model key" in b.goal("x", "s")   # a setup problem is not retried

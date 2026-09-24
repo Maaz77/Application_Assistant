@@ -79,11 +79,14 @@ def test_f13_validation_after_advance(new_browser, fixture_server):
 
 
 def test_guest_link_click_on_real_signup_page(new_browser, fixture_server):
-    from assistant.entry import guest_click
+    """The sign-up wall's guest link is a plain click before the form (fill._attempt2 makes it)."""
+    from assistant.fill import guest_refused
     with new_browser() as browser:
         browser.open(fixture_server.url("f16_signup.html"), "g")
         p = read_page(browser, "g")
-        out = guest_click(browser, "g", p)
+        assert guest_refused(p) is None
+        out = browser.act([{"op": "click", "ref": pages.guest_link(p).ref},
+                           {"op": "wait_for_load", "timeout_ms": 20000}], "g", p.table, stop_on_error=False)
         after = read_page(browser, "g")
         browser.close("g")
     assert "needs_confirmation" not in out and after.title == "f01 single page"

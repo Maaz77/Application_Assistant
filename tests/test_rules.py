@@ -1,9 +1,7 @@
-"""T8 rule tests: entry click (§4.2), Google one-click (§6.2), blockers and attempt 2 (§6.3)."""
+"""T8 rule tests: the never-submit rule on the page loop, Google one-click (§6.2), blockers and attempt 2 (§6.3)."""
 import pytest
 
 from assistant.blockers import Attempts, NeedsAttention
-from assistant.entry import EntryRefused, confirm_click
-from assistant.pages import read_page
 from assistant.fill import run_pages
 from assistant.google_signin import sign_in
 from assistant.jev import Element, Table
@@ -18,33 +16,28 @@ def T(url, *els):
     return Table(url=url, elements=list(els))
 
 
-def _confirm(fake, label):
-    return confirm_click(fake, "s", label, lambda: read_page(fake, "s"), lambda _: None)
-
-
 def _confirms(fake):
     return [op for n, a in fake.log if n == "browser_act" for op in a["ops"] if op.get("confirm")]
 
 
-def test_confirm_click_rules():
-    fake = FakeMCP({"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply to Data Engineer at Acme"),
-                                                               El("button", "Save")])}, "j")
-    _confirm(fake, "Easy Apply to Data Engineer at Acme")
-    assert _confirms(fake) == [{"op": "click", "ref": "e1", "confirm": True}]
-    with pytest.raises(EntryRefused, match="does not start"):
-        _confirm(fake, "Save")
-    fake.site["j"].els.insert(0, El("textbox", "q", value="x"))
-    with pytest.raises(EntryRefused, match="already holds a value"):
-        _confirm(fake, "Easy Apply to Data Engineer at Acme")
+def test_the_agents_apply_on_a_job_page_is_its_own_click(tmp_path):
+    """Before the form is being filled, "Apply" / "Easy Apply" is clicked by the agent like any button (user decision
+    2026-09-24): no confirm, no extra checks."""
+    fake = FakeMCP({"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply to Data Engineer at Acme",
+                                                                     goto="p1"), El("button", "Save")]),
+                    **single_page()}, "j")
+    parked = run_pages(ctx_for(fake, SINGLE_ANSWERS, tmp_path))
+    assert parked.pages == 1 and fake.sent == [] and _confirms(fake) == []
 
 
-def test_confirm_click_is_the_only_confirm_and_never_a_submit():
-    fake = FakeMCP({"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply"),
-                                                               El("button", "Submit application")])}, "j")
-    _confirm(fake, "Easy Apply")
-    with pytest.raises(EntryRefused):
-        _confirm(fake, "Submit application")
-    assert len(_confirms(fake)) == 1 and fake.sent == []
+def test_a_forms_own_apply_is_the_last_step_once_filling_started(tmp_path):
+    """Toast's Greenhouse form ends in "Apply now!": once filling started it is refused like Submit, and the job
+    parks on it."""
+    site = single_page()
+    site["p1"].els[-1] = El("button", "Apply now!", submits=True)
+    fake = FakeMCP(site, "p1")
+    parked = run_pages(ctx_for(fake, SINGLE_ANSWERS, tmp_path))
+    assert parked.pages == 1 and fake.sent == [] and _confirms(fake) == []
 
 
 def google_site(chooser_email="maaz1377.aa@gmail.com", google_text="Choose an account", after_text="Apply. Resume"):
@@ -107,32 +100,10 @@ def test_signup_wall_uses_the_guest_link(tmp_path):
     assert parked.pages == 1
 
 
-def test_apply_labelled_guest_link_goes_through_entry_py(tmp_path):
+def test_apply_labelled_guest_link_is_clicked_without_confirm(tmp_path):
     fake = FakeMCP(signup_site("Apply without an account"), "signup")
     parked = run_pages(ctx_for(fake, SINGLE_ANSWERS, tmp_path))
-    assert parked.pages == 1 and fake.sent == []
-    confirms = [op for n, a in fake.log if n == "browser_act" for op in a["ops"] if op.get("confirm")]
-    assert [fake.site["signup"].els[3].name] == ["Apply without an account"] and len(confirms) == 1
-
-
-def test_guest_link_refused_when_a_field_holds_a_value(tmp_path):
-    site = signup_site("Apply without an account")
-    site["signup"].els[0].value = "amin@example.com"             # something typed must never go out with it
-    fake = FakeMCP(site, "signup")
-    with pytest.raises(NeedsAttention, match="already holds a value"):
-        run_pages(ctx_for(fake, SINGLE_ANSWERS, tmp_path))
-    assert not any(op.get("confirm") for n, a in fake.log if n == "browser_act" for op in a["ops"])
-
-
-def test_guard_guest_label_needs_the_entry_token():
-    from assistant.guard import ENTRY, GuardError, check
-    t = T("https://acme.io/register", Element(ref="e1", role="link", name="Apply without an account"),
-          Element(ref="e2", role="button", name="Submit application"))
-    check({"op": "click", "ref": "e1", "confirm": True}, t, ENTRY)
-    with pytest.raises(GuardError):
-        check({"op": "click", "ref": "e1", "confirm": True}, t)
-    with pytest.raises(GuardError):
-        check({"op": "click", "ref": "e2", "confirm": True}, t, ENTRY)   # the token never unlocks Submit
+    assert parked.pages == 1 and fake.sent == [] and _confirms(fake) == []
 
 
 def test_password_wall_without_google_is_credentials(tmp_path):
@@ -148,48 +119,8 @@ def test_ats_job_page_entry_then_form(tmp_path):
     site["ats"] = FakePage("https://acme.io/jobs/42", "Data Engineer", "Data Engineer at Acme", [
         El("link", "Apply", goto="p1")])
     fake = FakeMCP(site, "ats")
-    orig = fake._click
-    # the server lets "Apply" through only with confirm (B1); the page opens the form on that click
-    fake._click = lambda e, confirm=False: (setattr(fake, "cur", e.goto) if e.name == "Apply" and confirm
-                                            else orig(e, confirm))
     parked = run_pages(ctx_for(fake, SINGLE_ANSWERS, tmp_path))
-    assert parked.pages == 1
-    confirms = [op for n, a in fake.log if n == "browser_act" for op in a["ops"] if op.get("confirm")]
-    assert len(confirms) == 1 and confirms[0]["op"] == "click"
-
-
-def test_entry_rules_ignore_site_chrome():
-    """LinkedIn (2026-09-23): nav Search box + footer 'Select language' (always holds en_US) are not form fields."""
-    els = [El("combobox", "Search"), El("button", "Easy Apply to this job"),
-           El("combobox", "Select language", value="en_US", options=["en_US"])]
-    fake = FakeMCP({"j": FakePage(LI, "Job", "Data Engineer", els)}, "j")
-    _confirm(fake, "Easy Apply to this job")
-    fake.site["j"].els.append(El("textbox", "Phone", value="+39 333"))
-    with pytest.raises(EntryRefused, match="already holds a value"):     # a real typed value still blocks it
-        _confirm(fake, "Easy Apply to this job")
-    other = FakeMCP({"j": FakePage(LI, "Job", "x", [El("textbox", "Preferred language", value="Italian"),
-                                                   El("button", "Easy Apply")])}, "j")
-    with pytest.raises(EntryRefused, match="already holds a value"):     # only the site's own picker is ignored
-        _confirm(other, "Easy Apply")
-
-
-def test_confirm_click_retries_while_the_page_re_renders_the_button():
-    """LinkedIn, live 2026-09-23: `x click e16  detached` — React replaced the button between snapshot and click."""
-    fake = FakeMCP({"j": FakePage(LI, "Job", "Data Engineer", [El("button", "Easy Apply to this job")])}, "j")
-    clicks = {"n": 0, "error": "detached: detached"}
-    orig = fake._browser_act
-
-    def act(ops, **kw):
-        if ops and ops[0].get("op") == "click":
-            clicks["n"] += 1
-            if clicks["n"] == 1:
-                return "0/1 ops ok  (stopped early)\n  x click e1  " + clicks["error"]
-        return orig(ops, **kw)
-    fake._browser_act = act
-    assert _confirm(fake, "Easy Apply to this job").startswith("1/1 ops ok") and clicks["n"] == 2
-    clicks.update(n=0, error="occluded: occluded")
-    with pytest.raises(EntryRefused, match="did not go through"):
-        _confirm(fake, "Easy Apply to this job")                           # not a re-render: reported, never retried
+    assert parked.pages == 1 and _confirms(fake) == []
 
 
 def test_long_job_card_links_do_not_make_a_final_step():

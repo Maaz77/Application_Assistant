@@ -103,19 +103,10 @@ RADIO_OPTIONS = {f"RADIO_OPTIONS_{i}": _RADIO.replace("OFFSET", str(i * RADIO_CH
 # The labels of visible Apply-like buttons (entry or guest labels) that would submit a form holding fields. The agent
 # may pick "Apply now!" — Toast's submit button, under a form on the job page itself (live 2026-09-23) — where a
 # link or a stand-alone button starts the application; an entry click must never be a form submission.
-ENTRY_SUBMITS = "(() => {" + _LIB + r"""
-const lab = e => clean(e.getAttribute('aria-label') || byIds(e.getAttribute('aria-labelledby')) || e.innerText || e.value).slice(0, 28);
-const submits = e => { const f = e.form; if (!f) return false;
-  const t = (e.getAttribute('type') || (e.tagName === 'BUTTON' ? 'submit' : '')).toLowerCase();
-  return /^(submit|image)$/.test(t) && [...f.querySelectorAll('input,select,textarea')]
-    .some(x => !/^(hidden|submit|button|image|reset)$/i.test(x.type || '') && shown(x)); };
-const hits = [...document.querySelectorAll('button,input[type=submit],input[type=image]')]
-  .filter(e => shown(e) && /^\s*(easy apply|apply)\b|apply without an account|continue as guest/i.test(lab(e)));
-return fit(hits.filter(submits).map(lab));
-})()"""
+
 
 EVAL_PROBES = {"REQUIRED_EMPTY": REQUIRED_EMPTY, "MAXLENGTHS": MAXLENGTHS, "IFRAME_SRCS": IFRAME_SRCS,
-               "FILE_LABELS": FILE_LABELS, **COMBO_VALUES, **RADIO_OPTIONS, "ENTRY_SUBMITS": ENTRY_SUBMITS}
+               "FILE_LABELS": FILE_LABELS, **COMBO_VALUES, **RADIO_OPTIONS}
 ASSERT_PROBES = {"CAPTCHA_PRESENT": CAPTCHA_PRESENT}
 ALL = {**EVAL_PROBES, **ASSERT_PROBES}
 

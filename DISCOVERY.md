@@ -322,3 +322,59 @@ The user asked to be able to run the answer engine through Vercel AI Gateway onc
 - **Answer quality:** Mistral Nemo and Mistral Small are weaker than the free Qwen on the live fill tests.
   - The f02 fixture's second step has an optional "Years of experience" field. Both Mistral models marked it required and computed the total wrong (the code recomputed 1 from the quoted lines), so `check_answers` dropped the answer and the job went to Needs Attention (`unanswered`).
   - The answers test passed on this route; both fill tests (f02, f08) failed on this.
+
+## Live runs on the seven requeued jobs (2026-09-24, Vercel route, `--no-record`)
+
+OpenRouter's free quota was used up (reset 02:00 CEST), so `chat_route = "vercel"` was used. Every problem found was fixed and re-run:
+
+- **A lone UTF-16 surrogate ended the run.** LinkedIn postings use styled letters (U+1D400…), and the package cuts page text in JavaScript, which counts UTF-16 units. A cut can leave `\ud835` alone.
+  - Writing `calls.jsonl` raised `UnicodeEncodeError`, which ended the run on job 1.
+  - Inside the package, every `browser_goal` failed, because httpx encodes request bodies as UTF-8.
+  - Fix: `jev.clean_text` on everything the package returns, and `jev.clean_requests`, which wraps `policy._post` (the package's one sender, checked by `contract_check`).
+- **Jev on Vercel fails often, and more often the more questions a request carries.** The 503 "Service temporarily unavailable" comes from the provider (`typesafe-ai`, no fallback), and it seems one failing question fails the whole request.
+  - Measured on a captured page: 44 questions per request failed 5 of 6 times, 11 per request 7 of 12, 4 per request 4 of 33.
+  - `decide.BATCH = 4`, 4 batches in flight, each retried on its own with `RETRY_WAITS = (2, 5, 15, 30, 60)`. The same three captured pages then judged 6 of 6, in 0.4–53 s.
+- **The agent's goals got 503 too.** The package retries for only about 1.5 s, and the job was reported as "no way forward".
+  - `Jev.goal` now asks again after each `RETRY_WAITS` step when the decision model was unavailable and no step was taken. Still out, it raises `DecisionError` (class `decision`).
+  - Mastercard got through five 503s this way and reached its apply page.
+- **Mistral Nemo on Vercel is slow.** A realistic page (5.3K tokens in) took 58.6 s against the answer engine's 60 s timeout, and Linda AI and Digital Manufacturing timed out.
+  - Mistral Small took 5.2 s for $0.0013 a page. It is now first in `[models.vercel]`, with Nemo as its fallback, and `ENGINE_TIMEOUT = 120`.
+- **Genesys (Workday):** "Apply Manually" leads to step 1 of 6, "Create Account/Sign In". The job stops with `credentials`, which is correct: accounts and passwords are the user's. Once the user signs in to Genesys's Workday in Chrome, the next run continues from "My Information".
+- **Linda AI's Easy Apply** (a first-run failure): the agent clicked "Continue applying" on LinkedIn's safety reminder, reached the form, filled step 1 (email, country code, phone) with Mistral Small, and clicked Next.
+- **The "stale tab" before the first job** (user report) is the TabBook helper's tab, opened before the first job and kept for the whole run to learn full tab IDs. It now shows a page titled "Application Assistant (working)" instead of about:blank.
+- **Resume upload on Ashby (The Flex, both jobs).** The page has an "Upload file" button (autofill), a file input "Resume", and an "Upload File" button for that same input. Jev picked the input, but split its confidence with the button (0.4 < `RESUME_CONFIDENCE`), so the job went to Needs Attention. The resume question now offers only file inputs when the page has any; buttons are offered only when there is none (LinkedIn's "Upload resume").
+- **Select options named by their own ref (Toast, Greenhouse).** The model answered "Are you currently based in Ireland?" with option `e31:3` ("No") of a native select. No element carries that ref, so the field went to a page goal (SELECT, 5 steps), and the read-back found nothing to check, although the page showed `current: "No"`. The result was "field would not accept its value". `fill._select_option` now resolves `eN:k` to the select and its option label, for the direct `select` op and for the read-back. The answers log now records `ref` and `option_ref`.
+- **Chrome's "Allow remote debugging?"** Runs 6 and 7 (16:57 and 16:58) stopped in preflight after 180 s: nobody clicked Allow. Earlier runs that day connected, so the prompt came back for these connections. It is the user's to click.
+
+## Page work moved from rules to Jev (user decision, 2026-09-24)
+
+The user's aim: as little rule-based browser work and as few rule-based guards as possible. From the research report on Jev browser agents (jev-ultrafast, jkudish/jev-browser, hunch, CUA-S1-FORMS) the order was: the field check, the unsure-answer fallback, filling, then the guards (user choice: Jev alone, no fixed never-submit floor).
+
+1. **Read-back** (`fill.mismatches`): one Jev choice per field on the fresh page, "holds / different / empty". Jev's top choice decides. It replaces the rules per kind of control (`_holds`, `_option_now`, option refs, the combobox page-text rule). On Toast's filled Greenhouse page (captured as `run-20260924-toast-filled`) Jev read "No" in the select at 0.98, and the phone widget's "+393519358813" for the typed "351 935 8813" as "holds" at 0.92–0.95. As a yes/no question, the phone sat at 0.36–0.54 around the threshold.
+2. **Unsure resume pick**: no fixed stop at confidence 0.5. Jev is asked again over its two likeliest picks (`decide.narrow`). If it is still unsure, the answer engine's ref for the resume question settles it, when it is one of the two. On The Flex, offering only file inputs (see above) already gave 0.90–0.95.
+3. **Filling** (`fill.plan_fill`, jev-ultrafast's speculative fan-out): per answer, Jev picks the operation (type / select / check / widget), the field and the option, in one round. The answer engine's refs go in only as hints. The code checks only that the pick can be carried out (typing needs an editable text field, checking needs a radio or checkbox, selecting needs a listed option), then acts with the answer engine's exact text. `direct_op`'s routing by control kind is gone. Live: the right operation and target on Toast (including two answers with no hints) and on Digital Manufacturing's radios, 2.9 s for 6 answers.
+
+`tests/rule_decider.py` answers the new `readback` and `fill` questions with the old rules, so the offline tests keep running.
+
+## Never-submit: one narrow rule, no model calls (user decision, 2026-09-24)
+
+The user first chose Jev alone for the never-submit decision (no fixed floor). Asking Jev on every click would cost a model call per click, so the user replaced that with: handle only buttons labelled "Submit" or "Apply" that come after filling the application form.
+
+- **The rule** is `guard.never_click(name, role)`: a button or link whose label says "Submit" is refused on any page, and one that says "Apply" once `fill_page` has started (`guard.FORM.started`, reset at each job's `run_pages`).
+  - `jev.guard_clicks` replaces the package's `browser.confirm_reason`, which `browser.py` calls before every click, the agent's and ours. So one function covers both, and `JEVMCP_CONFIRM_PATTERNS` is no longer set.
+  - `contract_check` fails if the hook stops applying.
+  - Uploads count as clicks: the package clicks a non-input upload target to open its file chooser.
+- **Removed:**
+  - `entry.py` (`confirm_click`, the `ENTRY` token, Jev's `starts_application`, the no-field-holds-a-value check, the retries);
+  - the `ENTRY_SUBMITS` probe;
+  - the label lists (Send / Confirm / Done / Finish / Complete);
+  - the Enter-key and `type submit` refusals;
+  - the package's default payment and deletion patterns.
+- **How the loop works now:**
+  - Before the form, "Apply" / "Easy Apply" is the agent's own click, followed by a wait for a new tab or dialog.
+  - A click that fails because the page changed under it (Genesys's re-render) counts as movement, not "stuck".
+  - The guest link of a sign-up wall is a plain click.
+  - In the form, a refused click marks the last step.
+- **Not covered, by decision:** "Send application", "Done", "Finish", "Confirm", Enter-submitting forms. An "Apply" that is a form's own submit button *before* filling starts is not refused either: that would be the navigate agent clicking a form's Apply instead of reporting the form (Toast's Greenhouse form ends in "Apply now!").
+- **Tests:** the tripwire walks f01–f03 (Submit application / multi-step Submit / Apply) with the form being filled, and nothing is sent. Live, the real agent was told to submit those forms 11 times per run; it was always refused or stopped, and nothing was sent in two runs. One earlier status check failed once without recurring, and nothing was sent in that run either.
+- **"Send" added** (user decision, same day): "Send" (`\bsend\b`) is refused on every page, like "Submit". A Send button is never needed to start an application; "Sender" and "Sending" don't match. The tripwire now also walks f05 ("Send application"). Live, the agent was told to click it and was refused. Across 9 further live tripwire runs (up to 14 checks each), every attempt was refused and nothing was sent.

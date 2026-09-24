@@ -7,7 +7,6 @@ from pypdf import PdfWriter
 
 from assistant import cli, config as config_mod, pages, tabs
 from assistant.answers import PageAnswers
-from assistant.entry import confirm_click
 from assistant.fill import resume_input
 from assistant.jev import Jev
 from assistant.pages import classify, read_page
@@ -16,6 +15,13 @@ from tests.support import CDP_URL
 
 pytestmark = pytest.mark.browser
 CHROME_NAMES = ("Search", "Select language", "Set alert for similar jobs", "Easy Apply to this job", "Save the job")
+
+
+def click_label(b, session: str, label: str) -> str:
+    """Click a control by its label, as the agent does before the form (Apply is allowed there)."""
+    p = read_page(b, session)
+    ref = next(e.ref for e in p.elements if e.name == label)
+    return b.act([{"op": "click", "ref": ref}], session, p.table)
 
 
 def _read(new_browser, url, *, settle=False):
@@ -67,7 +73,7 @@ def test_modal_dialog_hides_the_page_behind_it(new_browser, fixture_server):
         b.open(fixture_server.url("jobs/view/4012345610-easy-dialog.html"), "dlg")
         before = read_page(b, "dlg")
         assert pages.classify_entry(before) == "open" and not pages.real_fields(before)    # chrome only
-        confirm_click(b, "dlg", "Easy Apply to this job", lambda: read_page(b, "dlg"), lambda _: None)
+        assert click_label(b, "dlg", "Easy Apply to this job").startswith("1/1 ops ok")
         for _ in range(8):                                                     # the dialog opens 1.5 s later
             p = read_page(b, "dlg")
             if pages.real_fields(p):
@@ -128,7 +134,7 @@ def test_only_the_topmost_modal_counts(new_browser, fixture_server):
     with new_browser() as b:
         b.open(fixture_server.url("jobs/view/4012345610-easy-dialog.html"), "top")
         p = read_page(b, "top")
-        confirm_click(b, "top", "Easy Apply to this job", lambda: read_page(b, "top"), time.sleep)
+        click_label(b, "top", "Easy Apply to this job")
         for _ in range(8):
             p = read_page(b, "top")
             if pages.real_fields(p):

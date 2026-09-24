@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 
 from assistant import config
-from assistant.guard import TRANSMIT
 from assistant.jev import env_values, split_json
 
 pytestmark = pytest.mark.unit
@@ -21,7 +20,9 @@ def test_golden_observe_parses():
 
 
 def test_env_values_match_spec_table():
-    env = env_values(config.load(), "k-123")
+    cfg = config.load()
+    cfg = cfg.model_copy(update={"models": cfg.models.model_copy(update={"chat_route": "openrouter"})})
+    env = env_values(cfg, "k-123")
     assert env["OPENROUTER_API_KEY"] == env["TEXT_MODEL_API_KEY"] == "k-123"
     assert env["JEVMCP_MODE"] == "attach" and env["JEVMCP_ALLOW_JS"] == "1"
-    assert all(p in env["JEVMCP_CONFIRM_PATTERNS"].split(",") for p in TRANSMIT)
+    assert "JEVMCP_CONFIRM_PATTERNS" not in env               # clicks are refused by guard.never_click instead

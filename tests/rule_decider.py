@@ -1,7 +1,7 @@
 """RuleDecider: an offline stand-in for Jev in unit and browser tests.
 
-It answers the questions the program asks Jev (pages.page_questions, entry.starts_application, answers.judge_answers,
-answers.judge_questions) with the regex rules the program used before Jev decided (user decision 2026-09-24). The
+It answers the questions the program asks Jev (pages.page_questions, answers.judge_answers,
+answers.judge_questions, fill.plan_fill, fill.mismatches) with the regex rules the program used before Jev decided (user decision 2026-09-24). The
 program never uses these rules; tests do, so the loop can run without a network. Live tests use the real Jev.
 
 A test can pin a page's kind by URL (`kinds`), where the rules cannot know (a job-alert box, say).
@@ -12,7 +12,24 @@ import re
 from typing import Any
 
 from assistant.decide import Answer
-from assistant.guard import is_entry, is_guest, is_transmit
+
+# The label lists of the old guard (before 2026-09-24): the rules still recognise pages by their buttons.
+TRANSMIT = [r"\bsubmit", r"\bsend\b", r"\bapply\b", r"\bconfirm\b", r"\bdone\b", r"\bfinish", r"\bcomplete\b"]
+ENTRY_RE = r"^\s*(easy apply|apply)\b"
+GUEST_RE = r"apply without an account|continue as guest"
+
+
+def is_transmit(label: str) -> bool:
+    return any(re.search(p, label or "", re.I) for p in TRANSMIT)
+
+
+def is_entry(label: str) -> bool:
+    return bool(re.search(ENTRY_RE, label or "", re.I))
+
+
+def is_guest(label: str) -> bool:
+    return bool(re.search(GUEST_RE, label or "", re.I))
+
 
 ADVANCE_RE = r"^\s*(next|continue|review|save and continue|save & continue)\b"
 
@@ -64,6 +81,10 @@ def yes(v: bool) -> Answer:
 
 def pick(c: str, confidence: float = 0.9) -> Answer:
     return Answer("choice", choice=c, confidence=confidence, probabilities={c: confidence})
+
+
+def held(v: bool) -> Answer:
+    return pick("holds" if v else "different")
 
 
 class RuleDecider:
@@ -180,11 +201,6 @@ class RuleDecider:
             return pick(files[0]["ref"], 0.3)             # several uploads, none named: the program must not guess
         return pick("none")
 
-    # ---------------------------------------------------------------- entry.starts_application
-    def _entry(self, qid: str, q: dict, s: Any) -> Answer:
-        label = q["instructions"]["control"]
-        return yes(is_entry(label) or is_guest(label))
-
     # ---------------------------------------------------------------- answers.judge_answers / judge_questions
     def _answers(self, qid: str, q: dict, s: Any) -> Answer:
         ins = q["instructions"]
@@ -208,6 +224,64 @@ class RuleDecider:
         if qid.startswith("cover_"):
             return yes(bool(re.search(r"cover", ins["upload"], re.I)) and not RESUME_RE.search(ins["upload"]))
         raise KeyError(qid)
+
+    # ---------------------------------------------------------------- fill.plan_fill
+    def _fill(self, qid: str, q: dict, s: dict) -> Answer:
+        """The routing the program used before Jev planned the fill (direct_op, 2026-09-23/24): the answer engine's
+        ref decides the target, the kind of control decides the operation."""
+        ins, crit = q["instructions"], q["criteria"]
+        key = lambda x: re.sub(r"[^a-z0-9]+", "", (x or "").lower())
+        by_ref = {c["ref"]: c for c in s["controls"]}
+        ref, oref, answer = ins.get("answer_engine_ref"), ins.get("answer_engine_option_ref"), ins["answer"]
+        el = by_ref.get(ref or "")
+        sel = next((r for r in (oref, ref) if r and re.match(r"^e\d+:\d+$", r) and r.split(":")[0] in by_ref), None)
+        listed = el is not None and el["role"] in {"combobox", "listbox"} and any(
+            key(o) == key(answer) for o in el.get("options") or [])
+        if qid.startswith("op_"):
+            if sel or listed:
+                return pick("select")
+            if oref and (by_ref.get(oref) or {}).get("role") in {"radio", "checkbox", "switch"}:
+                return pick("check")
+            if el is not None and el["role"] in {"textbox", "searchbox", "spinbutton"} and not el.get("read_only"):
+                return pick("type")
+            return pick("widget")
+        if qid.startswith("field_"):
+            base = sel.split(":")[0] if sel else ref
+            return pick(base if base in crit else "none")
+        if qid.startswith("option_"):
+            if sel in crit or (oref and oref in crit):
+                return pick(sel if sel in crit else oref)
+            hit = next((k for k, v in crit.items() if ref and k.startswith(f"{ref}:") and key(v).endswith(key(answer))),
+                       None)
+            return pick(hit or "none")
+        raise KeyError(qid)
+
+    # ---------------------------------------------------------------- fill.mismatches (the read-back)
+    def _readback(self, qid: str, q: dict, s: dict) -> Answer:
+        """The read-back rules the program used before Jev read fields back (2026-09-24), on the page state."""
+        ins, controls = q["instructions"], s["controls"]
+        key = lambda x: re.sub(r"[^a-z0-9]+", "", (x or "").lower())
+        answer, question = key(ins["answer"]), key(ins["question"])
+        by_ref = {c["ref"]: c for c in controls}
+        for ref in (ins.get("option_ref"), ins.get("ref")):          # a <select> option named by its own ref
+            m = re.match(r"^(e\d+):\d+$", ref or "")
+            if m and m.group(1) in by_ref:
+                return held(key(by_ref[m.group(1)].get("value")) == answer)
+        toggles = [c for c in controls if c["role"] in {"radio", "checkbox", "switch"}]
+        if ins.get("option_ref"):                                     # a redraw may renumber the option
+            hits = [by_ref[ins["option_ref"]]] if ins["option_ref"] in by_ref else (
+                [c for c in toggles if key(c["name"]) == question and key(c.get("option")) == answer]
+                or [c for c in toggles if key(c["name"]) == answer])
+            return held(len(hits) == 1 and bool(hits[0].get("checked")))
+        el = by_ref.get(ins.get("ref") or "") or next((c for c in controls if key(c["name"]) == question), None)
+        if el is None:
+            radios = [c for c in toggles if c["role"] == "radio" and key(c["name"]) == answer]
+            return held(len(radios) == 1 and bool(radios[0].get("checked")))
+        if key(el.get("value")) == answer:
+            return held(True)
+        if el["role"] == "combobox" and not el.get("options") and not el.get("value"):
+            return held(answer in key(s["text"]))                     # a custom combobox shows its pick as text
+        return held(False)
 
     def _preflight(self, qid: str, q: dict, s: Any) -> Answer:
         return yes(True)

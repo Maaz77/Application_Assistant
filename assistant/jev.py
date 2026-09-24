@@ -2,7 +2,8 @@
 
 Order matters: the package reads its config and builds its browser manager when `server` is imported
 (server.py l.61–63), so apply_env() must run first. Only the public `server.browser_*` functions are called; the
-one change to the package's inside is the text helper's model rotation (rotate_text_helper).
+three changes to the package's inside are wraps: the text helper's model rotation (rotate_text_helper), clean
+request bodies (clean_requests), and the never-submit click rule (guard_clicks).
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import dataclasses
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -21,9 +23,10 @@ from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict
 
 from assistant import guard, probes
+from assistant.guard import FORM, SUBMIT_RE, never_click  # noqa: F401 - the rule the package applies
+from assistant.decide import RETRY_WAITS, DecisionError
 from assistant import config
 from assistant.config import CHAT_BASES, Config
-from assistant.guard import TRANSMIT
 from assistant.rotation import NoModelAvailable, Rotation
 
 STRIPPED_PREFIXES = ("JEVMCP_", "TYPESAFE_", "TEXT_MODEL_", "OPENROUTER_")
@@ -37,6 +40,14 @@ EXIT_STOPPED = 3
 # Result prefixes the package uses for failures (server._error and friends).
 ERROR_PREFIXES = ("browser_unavailable:", "blocked_by_policy:", "stale:", "browser_error:",
                   "turbo_unavailable:", "error(")
+
+
+# A goal whose decision model was briefly out and that took no step can simply be asked again. The package retries
+# a 503 for only ~1.5 s; Vercel's Jev answered 503 through that on both of Mastercard's goals (live 2026-09-24),
+# and the job was reported as "no way forward".
+TRANSIENT_GOAL_RE = re.compile(r"^status: turbo_unavailable: Decision model (returned HTTP (429|5\d\d)|unreachable|"
+                               r"returned a body that is not JSON|unavailable)", re.M)
+NO_STEPS_RE = re.compile(r"^steps: 0$", re.M)
 
 
 class JevError(RuntimeError):
@@ -92,12 +103,7 @@ def split_json(text: str) -> tuple[str, Table]:
 
 def env_values(cfg: Config, key: str, cdp_url: str | None = None) -> dict[str, str]:
     """The §3 table. `key` is the chat route's key (config.chat_key): the text helper goes where the answer engine
-    goes. Importing jev_ultrafast_mcp.config is safe: it does not load the server."""
-    from jev_ultrafast_mcp.config import DEFAULT_DENY_PATTERNS
-
-    patterns = list(DEFAULT_DENY_PATTERNS) + TRANSMIT
-    for p in patterns:
-        assert "," not in p and ";" not in p, f"confirm pattern would be split: {p!r}"
+    goes. Clicks are refused by never_click (guard_clicks), not by JEVMCP_CONFIRM_PATTERNS."""
     return {
         "JEVMCP_MODE": "attach",
         "JEVMCP_CDP_URL": cdp_url or cfg.browser.cdp_url,
@@ -105,7 +111,6 @@ def env_values(cfg: Config, key: str, cdp_url: str | None = None) -> dict[str, s
         "JEVMCP_MAX_ACTIONS": str(cfg.browser.max_actions),
         "JEVMCP_ALLOW_UPLOADS": "1",
         "JEVMCP_ALLOW_JS": "1",
-        "JEVMCP_CONFIRM_PATTERNS": ",".join(patterns),
         **agent_route(cfg, key),
         "TYPESAFE_MODEL": cfg.models.jev,
         # the package's OpenRouter key pays for Jev on jev_route = "openrouter"
@@ -126,6 +131,56 @@ def agent_route(cfg: Config, key: str) -> dict[str, str]:
         return {"TYPESAFE_BASE_URL": decide.ENDPOINTS["vercel"], "TYPESAFE_API_KEY": config.gateway_key()}
     return {"TYPESAFE_BASE_URL": "https://openrouter.ai/api/alpha/decisions"}
 
+
+def clean_text(text: str) -> str:
+    """Replace lone UTF-16 surrogates with "?". The package cuts page text in JavaScript, which counts UTF-16
+    units, so a cut can split a pair such as LinkedIn's styled letters (U+1D400…: "\\ud835" + low half). A lone
+    half cannot be encoded as UTF-8: writing calls.jsonl raised UnicodeEncodeError and ended the run (Genesys,
+    live 2026-09-24). Everything the package returns passes here, so no later log, prompt or request sees one."""
+    return _SURROGATE.sub("?", text)
+
+
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+# ------------------------------------------------------------------ the never-submit rule
+
+def guard_clicks(browser_module) -> None:
+    """Every click, the agent's and ours, goes through the package's `confirm_reason(cfg, name, role)` before it is
+    made (browser.py, looked up at call time; checked by contract_check). It is replaced by never_click: a refused
+    click comes back as needs_confirmation, and nothing in this program sends "confirm"."""
+    original = getattr(browser_module.confirm_reason, "__wrapped__", browser_module.confirm_reason)
+
+    def confirm_reason(cfg, name, role):
+        return never_click(name, role)
+
+    confirm_reason.__wrapped__ = original
+    browser_module.confirm_reason = confirm_reason
+
+
+def clean_json(value: Any) -> Any:
+    """clean_text on every string in a JSON-shaped value."""
+    if isinstance(value, str):
+        return clean_text(value)
+    if isinstance(value, dict):
+        return {clean_json(k): clean_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [clean_json(v) for v in value]
+    return value
+
+
+def clean_requests(policy) -> None:
+    """Every request the package sends (Jev's decisions, option picks, the text helper) goes through
+    `policy._post(url, key, body)`, and httpx encodes the body as UTF-8: a page whose text was cut inside a
+    surrogate pair made every browser_goal fail with UnicodeEncodeError (Genesys and Mastercard, live 2026-09-24).
+    Wrap it so the body is cleaned first. Calls inside policy.py look `_post` up at call time (contract_check)."""
+    original = getattr(policy._post, "__wrapped__", policy._post)
+
+    def _post(url, key, body):
+        return original(url, key, clean_json(body))
+
+    _post.__wrapped__ = original
+    policy._post = _post
 
 _server = None
 _applied: dict[str, str] | None = None
@@ -183,6 +238,9 @@ def load():
         from jev_ultrafast_mcp import server
         _server = server
         rotate_text_helper(server.policy, _text_helpers)
+        clean_requests(server.policy)
+        from jev_ultrafast_mcp import browser as package_browser
+        guard_clicks(package_browser)
         # Importing the server turns on INFO logging, and httpx then prints every request ("HTTP Request: POST
         # https://openrouter.ai/…") into the run's output (live run 2026-09-23). Keep only its warnings.
         for name in ("httpx", "httpcore"):
@@ -218,8 +276,10 @@ class Jev:
 
     def __init__(self, cfg: Config, key: str, *, calls_log: Path | None = None,
                  on_timeout: Callable[[str], None] | None = None, server: Any = None,
-                 timeouts: tuple[float, float] = (DEFAULT_TIMEOUT, GOAL_TIMEOUT)):
+                 timeouts: tuple[float, float] = (DEFAULT_TIMEOUT, GOAL_TIMEOUT),
+                 sleep: Callable[[float], None] = time.sleep):
         self.cfg, self._key, self.calls_log = cfg, key, calls_log
+        self.sleep = sleep
         self.on_timeout = on_timeout            # writes the report before os._exit(3)
         self._server = server                   # a stub in tests; else the real package (load())
         self.timeouts = timeouts
@@ -267,7 +327,7 @@ class Jev:
                 os._exit(EXIT_STOPPED)
         except Exception as exc:  # noqa: BLE001 - a raising function is reported like an error result
             text = f"error({type(exc).__name__}): {exc}"
-        text = text if isinstance(text, str) else str(text)
+        text = clean_text(text if isinstance(text, str) else str(text))
         self._log(name, kwargs, text, int((time.monotonic() - t0) * 1000))
         return text
 
@@ -293,10 +353,10 @@ class Jev:
     def table(self, session: str) -> tuple[str, Table]:
         return split_json(self.observe(session))
 
-    def act(self, ops: list[dict], session: str, table: Table, *, token: object = None, **kw) -> str:
+    def act(self, ops: list[dict], session: str, table: Table, **kw) -> str:
         """The only path to browser_act: every op passes guard.check against `table` first (§4.1)."""
         for op in ops:
-            guard.check(op, table, token)
+            guard.check(op, table)
         return self.checked("browser_act", ops=ops, session=session, **kw)
 
     def probe(self, session: str, *names: str) -> dict[str, dict]:
@@ -318,9 +378,20 @@ class Jev:
         return self.assert_([{"type": "js", "expr": probes.CAPTCHA_PRESENT}], session).startswith("PASS")
 
     def goal(self, goal: str, session: str, *, max_steps: int = 20, verify: list[dict] | None = None) -> str:
-        # verbose=True: the trace is the only place a needs_confirmation label shows (B1). No url= (0.1.5).
-        return self.call("browser_goal", goal=goal, session=session, max_steps=max_steps, verify=verify,
-                         verbose=True)
+        """browser_goal. A goal the decision model could not serve (429/5xx, unreachable) before any step is
+        asked again after each of decide.RETRY_WAITS; still out, it is a DecisionError (the job goes to Needs
+        Attention as `decision`), never a page with "no way forward"."""
+        for wait in (*RETRY_WAITS, None):
+            # verbose=True: the trace is the only place a needs_confirmation label shows (B1). No url= (0.1.5).
+            out = self.call("browser_goal", goal=goal, session=session, max_steps=max_steps, verify=verify,
+                            verbose=True)
+            m = TRANSIENT_GOAL_RE.search(out)
+            if not (m and NO_STEPS_RE.search(out)):
+                return out
+            if wait is None:
+                raise DecisionError(f"the browser agent's decision model is unavailable: {m.group(0)[8:]}")
+            self.sleep(wait)
+        raise AssertionError("unreachable")
 
     def tabs(self, session: str, action: str = "list", *, target_id: str = "", url: str = "about:blank",
              index: int = -1) -> str:
