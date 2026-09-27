@@ -93,7 +93,6 @@ class RuleDecider:
         self.asked: list[tuple[str, list[str]]] = []
         self.calls = 0
         self.cost = 0.0
-        self.log = None
 
     def ask(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
         self.asked.append((topic, list(questions)))

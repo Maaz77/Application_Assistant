@@ -60,4 +60,4 @@ def test_parked_live(new_browser, fixture_server, chat_key, cfg, resume, tmp_pat
         assert parked.what.startswith("field would not accept its value: 'Earliest start date'"), parked.what
         return
     assert not isinstance(parked, NeedsAttention), parked
-    assert parked.title and (tmp_path / "shots" / f"{page}.jpg").exists()
+    assert parked.title and (tmp_path / "shots" / "screenshot.jpg").exists()

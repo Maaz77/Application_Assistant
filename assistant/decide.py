@@ -8,7 +8,7 @@ All questions of one call are answered in parallel and independently against the
 everything it may need about one page in one call. The thresholds live in code (THRESHOLDS below), never in a
 prompt. Docs: https://docs.typesafe.ai · https://openrouter.ai/docs/guides/community/typesafe-sdk
 
-One Decider per run (use()); every call is logged to decisions.jsonl next to calls.jsonl. A failed call raises
+One Decider per run (use()); every call is logged to jev_inference_logs.json (inference_log). A failed call raises
 DecisionError: a job that cannot get a decision goes to Needs-Attention, it is never decided by a guess.
 """
 from __future__ import annotations
@@ -18,7 +18,6 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable
 
 import httpx
@@ -149,9 +148,9 @@ def _cost(data: Any) -> float:
 class Decider:
     """ask(topic, state, questions) → {question id: Answer}. `post` is injectable for tests."""
 
-    def __init__(self, key: str, model: str, *, route: str = "openrouter", log: Path | None = None,
+    def __init__(self, key: str, model: str, *, route: str = "openrouter",
                  post: Callable | None = None, sleep: Callable[[float], None] = time.sleep):
-        self.key, self.model, self.log = key, model, log
+        self.key, self.model = key, model
         self.url = ENDPOINTS[route]
         self.post = post or _httpx_post
         self.sleep = sleep
@@ -177,45 +176,29 @@ class Decider:
     def _one(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
         body = {"model": self.model, "state": state, "questions": questions}
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
-        t0 = time.monotonic()
         for wait in (*RETRY_WAITS, None):
             status, data = self.post(self.url, body, headers, TIMEOUT)
             inference_log.log_jev(body, data, None if status else "request error")   # §6.3: every attempt
             if status == 200 or wait is None or not (status == 0 or status == 429 or status >= 500):
                 break
             self.sleep(wait)
-        ms = int((time.monotonic() - t0) * 1000)
         if status != 200:
-            self._log(topic, questions, None, ms, f"HTTP {status}: {str(data)[:200]}")
             raise DecisionError(f"decision model HTTP {status}: {_error(data)}")
         raw = (data or {}).get("answers") or {}
         missing = [k for k in questions if k not in raw]
         if missing:
-            self._log(topic, questions, raw, ms, f"no answer for {missing}")
             raise DecisionError(f"decision model left {len(missing)} question(s) unanswered: {missing[:3]}")
         answers = {k: Answer.parse(raw[k]) for k in questions}
         with self._lock:
             self.calls += 1
             self.cost += _cost(data)
-        self._log(topic, questions, raw, ms, None, (data or {}).get("usage"))
         return answers
 
-    def _log(self, topic, questions, answers, ms, error, usage=None) -> None:
-        if not self.log:
-            return
-        compact = {k: ({"p": v.get("noul")} if v.get("type") == "noul" else
-                       {"c": v.get("choice"), "conf": v.get("confidence")}) for k, v in (answers or {}).items()}
-        line = {"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "topic": topic, "ms": ms, "questions": list(questions),
-                "answers": compact, "usage": usage, "error": error}
-        self.log.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock, open(self.log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(line, ensure_ascii=False) + "\n")
 
-
-def for_config(cfg, log: Path | None = None) -> Decider:
+def for_config(cfg) -> Decider:
     """The run's Decider: config models.jev on models.jev_route, with that route's key from .env."""
     from assistant import config
-    return Decider(config.jev_key(cfg), cfg.models.jev, route=cfg.models.jev_route, log=log)
+    return Decider(config.jev_key(cfg), cfg.models.jev, route=cfg.models.jev_route)
 
 
 _current: Decider | None = None

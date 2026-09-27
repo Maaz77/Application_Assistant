@@ -24,8 +24,10 @@ BASELINE = Path(__file__).parent / "golden" / "p0_baseline"
 
 
 def _canon(s: str) -> str:
-    """Fold the P0 rename so the pre-rename baseline still matches post-rename output."""
-    return re.sub(r"(?i)answer[ _-]?engine", "LLMINFERENCE", s)
+    """Fold what P0 deliberately changes so the pre-P0 baseline still matches: the component rename, and the
+    screenshot artifact's filename (T4 moved it to <job>/screenshot.jpg — an output sink, not call behaviour)."""
+    s = re.sub(r"(?i)answer[ _-]?engine", "LLMINFERENCE", s)
+    return re.sub(r'/shots/[^"]*\.jpg', "/shots/<SHOT>", s)
 
 
 def _compact(a) -> dict:

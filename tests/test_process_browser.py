@@ -62,7 +62,7 @@ def test_process_parks_and_releases(fixture_server, chrome, tmp_path, monkeypatc
         parked = cli.process(Job.from_dir(d), browser=browser, book=book, cfg=cfg, key="", profile="", run_dir=tmp_path / "run",
                                    today=date(2026, 9, 23))
         book.close()
-    assert (tmp_path / "run/shots" / f"{d.name}.jpg").exists()
+    assert (tmp_path / "run" / d.name / "screenshot.jpg").exists()
     after = chrome.tabs()
     assert fixture_server.posts() == []
     if job_page.endswith("easy-li"):                  # Easy Apply: same tab, parked on the dialog's last step

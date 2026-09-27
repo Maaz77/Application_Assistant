@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from assistant import config as config_mod
 from assistant import decide
+from assistant import inference_log
 from assistant import jev as jevlib
 from assistant import pages, records, tabs
 from assistant.llm_inference import Policy, Sources, answer_page, resume_text
@@ -143,7 +144,7 @@ def process(job: records.Job, *, browser: Jev, book: tabs.TabBook, cfg: config_m
 
     ctx = JobCtx(browser=browser, session=S, book=book, resume_pdf=pdf, answer_fn=engine, baseline=baseline,
                  google_email=cfg.google.account_email, max_pages=cfg.browser.max_pages_per_job,
-                 answers_log=run_dir / "answers" / f"{job.folder}.json", shots_dir=run_dir / "shots",
+                 answers_log=run_dir / job.folder / "answers.json", shots_dir=run_dir / job.folder,
                  folder=job.folder)
     opened = False
     try:
@@ -231,6 +232,7 @@ def run(cfg: config_mod.Config, args) -> int:
         return EXIT_PREFLIGHT
     started = datetime.now()
     run_dir = RUNS / started.strftime("%Y%m%d-%H%M%S")
+    inference_log.start_run(run_dir)                   # scope _run until a job starts (§6.1); preflight logs here
     report = Report(started)
 
     def on_timeout(msg: str) -> None:                  # §3: write the report, then the caller os._exit(3)s
@@ -249,8 +251,7 @@ def run(cfg: config_mod.Config, args) -> int:
         print(f"✗ preflight: {exc}")
         return EXIT_PREFLIGHT
     try:
-        browser.calls_log = run_dir / "calls.jsonl"
-        decide.current().log = run_dir / "decisions.jsonl"
+        browser.calls_log = run_dir / "_run" / "browser_actions.jsonl"   # preflight/queue calls; repointed per job
         book = tabs.TabBook(browser)                   # before any job tab exists (full IDs, §4.5)
         tracker.backup(run_dir / "tracker-backup.numbers")
         if not args.no_record:
@@ -262,30 +263,34 @@ def run(cfg: config_mod.Config, args) -> int:
         profile = cfg.path("profile").read_text()
         engines = Rotation(cfg.models.llm_inference)   # one for the run: each page starts at the last model that answered
         for job in q.jobs:
-            t0 = time.monotonic()
-            result = JobResult(job.company, job.title, job.linkedin_url, job.folder, 0,
-                               date=started.strftime("%Y-%m-%d"))
-            try:
-                result.parked = process(job, browser=browser, book=book, cfg=cfg, key=key, profile=profile, run_dir=run_dir,
-                                        today=started.date(), warn=report.warnings.append, engines=engines)
-            except NeedsAttention as na:
-                result.attention = na
-            result.seconds = time.monotonic() - t0
-            if not args.no_record:
-                if result.parked:
-                    dst = recorder.record(job, PENDING_REVIEW, records.parked_note(result.parked, datetime.now()),
-                                          None)
-                else:
-                    na = result.attention
-                    dst = recorder.record(job, NEEDS_ATTENTION, records.needs_attention_note(na, datetime.now()),
-                                          f"Needs Attention: {na.cls} — {na.what}"[:240])
-                result.folder = str(dst.relative_to(cfg.base_dir()))
-            report.results.append(result)
-            print(result.terminal_line())
+            with inference_log.scope(job.folder):      # §6.1: this job's logs land in run_dir/<job folder>/
+                browser.calls_log = run_dir / job.folder / "browser_actions.jsonl"
+                t0 = time.monotonic()
+                result = JobResult(job.company, job.title, job.linkedin_url, job.folder, 0,
+                                   date=started.strftime("%Y-%m-%d"))
+                try:
+                    result.parked = process(job, browser=browser, book=book, cfg=cfg, key=key, profile=profile,
+                                            run_dir=run_dir, today=started.date(), warn=report.warnings.append,
+                                            engines=engines)
+                except NeedsAttention as na:
+                    result.attention = na
+                result.seconds = time.monotonic() - t0
+                if not args.no_record:
+                    if result.parked:
+                        dst = recorder.record(job, PENDING_REVIEW, records.parked_note(result.parked, datetime.now()),
+                                              None)
+                    else:
+                        na = result.attention
+                        dst = recorder.record(job, NEEDS_ATTENTION, records.needs_attention_note(na, datetime.now()),
+                                              f"Needs Attention: {na.cls} — {na.what}"[:240])
+                    result.folder = str(dst.relative_to(cfg.base_dir()))
+                report.results.append(result)
+                print(result.terminal_line())
     except StopRun as exc:
         report.stopped = str(exc)
         print(f"■ run stopped: {exc}")
     finally:
+        browser.calls_log = run_dir / "_run" / "browser_actions.jsonl"   # tab cleanup is run-level, not a job's
         try:
             book.close()
         except (NameError, JevError):

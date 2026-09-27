@@ -712,7 +712,7 @@ def _park(ctx: JobCtx) -> Parked:
     shot = ""
     if ctx.shots_dir:
         ctx.shots_dir.mkdir(parents=True, exist_ok=True)
-        shot = str(ctx.shots_dir / f"{ctx.folder}.jpg")
+        shot = str(ctx.shots_dir / "screenshot.jpg")
         ctx.browser.act([{"op": "screenshot", "path": shot, "full": True}], ctx.session, p.table,
                           observe_after=False, stop_on_error=False)
     return Parked(url=p.url, title=p.title, pages=ctx.pages + 1, generated=ctx.generated, prefills=ctx.prefills,

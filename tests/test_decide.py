@@ -24,9 +24,9 @@ def fake_post(*replies):
     return post, calls
 
 
-def test_request_shape_answers_and_log(tmp_path):
+def test_request_shape_answers_and_cost():
     post, calls = fake_post((200, None))
-    d = decide.Decider("sk-secret", "typesafe/jev-1.13", log=tmp_path / "decisions.jsonl", post=post)
+    d = decide.Decider("sk-secret", "typesafe/jev-1.13", post=post)
     a = d.ask("page", {"url": "u"}, {"x": decide.noul("Is it?", true="yes", false="no"),
                                     "k": decide.choice("Which?", {"a": "A", "b": None})})
     url, body, headers = calls[0]
@@ -34,8 +34,6 @@ def test_request_shape_answers_and_log(tmp_path):
     assert body["questions"]["x"] == {"type": "noul", "instructions": "Is it?", "criteria": {"true": "yes", "false": "no"}}
     assert a["x"].yes(0.5) and not a["x"].yes(0.95) and a["k"].choice == "a" and a["k"].confidence == 0.8
     assert headers["Authorization"] == "Bearer sk-secret" and d.calls == 1 and d.cost == pytest.approx(0.00002)
-    line = json.loads((tmp_path / "decisions.jsonl").read_text())
-    assert line["topic"] == "page" and line["answers"]["x"] == {"p": 0.9} and "sk-secret" not in json.dumps(line)
 
 
 def test_many_questions_are_split_into_small_batches_that_retry_on_their_own():
