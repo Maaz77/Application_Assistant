@@ -30,7 +30,7 @@ def test_request_shape_answers_and_cost():
     a = d.ask("page", {"url": "u"}, {"x": decide.noul("Is it?", true="yes", false="no"),
                                     "k": decide.choice("Which?", {"a": "A", "b": None})})
     url, body, headers = calls[0]
-    assert url == "https://openrouter.ai/api/v1/systemone" and body["model"] == "typesafe/jev-1.13"
+    assert url == "https://openrouter.ai/api/alpha/decisions" and body["model"] == "typesafe/jev-1.13"
     assert body["questions"]["x"] == {"type": "noul", "instructions": "Is it?", "criteria": {"true": "yes", "false": "no"}}
     assert a["x"].yes(0.5) and not a["x"].yes(0.95) and a["k"].choice == "a" and a["k"].confidence == 0.8
     assert headers["Authorization"] == "Bearer sk-secret" and d.calls == 1 and d.cost == pytest.approx(0.00002)
@@ -115,21 +115,22 @@ def test_the_decider_follows_the_config(monkeypatch):
     from assistant import config
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw")
     cfg = config.load()
-    vercel = cfg.model_copy(update={"models": cfg.models.model_copy(update={"jev": "typesafe-ai/jev",
-                                                                            "jev_route": "vercel"})})
+    vercel = cfg.model_copy(update={"models": cfg.models.model_copy(update={
+        "jev_route": "vercel", "vercel": cfg.models.vercel.model_copy(update={"jev": "typesafe-ai/jev"})})})
     d = decide.for_config(vercel)
     assert d.url.startswith("https://ai-gateway.vercel.sh/") and d.model == "typesafe-ai/jev"
-    orouter = cfg.model_copy(update={"models": cfg.models.model_copy(update={"jev": "typesafe/jev-1.13",
-                                                                             "jev_route": "openrouter"})})
-    assert decide.for_config(orouter).url == "https://openrouter.ai/api/v1/systemone"
+    orouter = cfg.model_copy(update={"models": cfg.models.model_copy(update={
+        "jev_route": "openrouter", "openrouter": cfg.models.openrouter.model_copy(update={"jev": "respan/span-01-lite:free"})})})
+    ora = decide.for_config(orouter)
+    assert ora.url == "https://openrouter.ai/api/alpha/decisions" and ora.model == "respan/span-01-lite:free"
 
 
 def test_the_browser_agent_follows_the_same_route(monkeypatch):
     from assistant import config, jev
     monkeypatch.setattr(config, "gateway_key", lambda *a: "gw-key")
     cfg = config.load()
-    vercel = cfg.model_copy(update={"models": cfg.models.model_copy(update={"jev": "typesafe-ai/jev",
-                                                                            "jev_route": "vercel"})})
+    vercel = cfg.model_copy(update={"models": cfg.models.model_copy(update={
+        "jev_route": "vercel", "vercel": cfg.models.vercel.model_copy(update={"jev": "typesafe-ai/jev"})})})
     env = jev.env_values(vercel, "or-key")
     assert env["TYPESAFE_BASE_URL"] == "https://ai-gateway.vercel.sh/typesafe/v1/systemone"
     assert env["TYPESAFE_API_KEY"] == "gw-key" and env["TYPESAFE_MODEL"] == "typesafe-ai/jev"

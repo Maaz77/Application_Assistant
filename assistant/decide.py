@@ -24,11 +24,11 @@ import httpx
 
 from assistant import inference_log
 
-# Jev's System One endpoint per route (TypeSafe's request and answer shapes on both). Model IDs differ per route:
-# Vercel AI Gateway serves "typesafe-ai/jev", OpenRouter "typesafe/jev-1.13" (config models.jev).
+# Jev's System One endpoint per route (TypeSafe's request and answer shapes on both). The model ID per route is
+# config models.<route>.jev: Vercel AI Gateway serves "typesafe-ai/jev"; OpenRouter's alpha/decisions API serves a
+# TypeSafe-compatible System One model, e.g. "respan/span-01-lite:free" (2026-09-28).
 ENDPOINTS = {"vercel": "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
-             "openrouter": "https://openrouter.ai/api/v1/systemone"}
-SYSTEMONE = ENDPOINTS["openrouter"]
+             "openrouter": "https://openrouter.ai/api/alpha/decisions"}
 TIMEOUT = 30.0
 # Questions per request. TypeSafe fails a whole request when any one question fails, so a big request rarely gets
 # through: on Vercel, 2026-09-24, 44 questions per request failed 5 of 6 times, 11 per request 7 of 12, 4 per

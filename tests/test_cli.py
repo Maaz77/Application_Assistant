@@ -69,7 +69,8 @@ def test_run_without_key_fails_preflight_with_exit_1(workspace, monkeypatch, cap
 
 def test_a_key_both_routes_use_is_reported_once(workspace, monkeypatch, capsys):
     base, cfg = workspace
-    cfg.write_text(re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "vercel"', cfg.read_text()))
+    text = re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "vercel"', cfg.read_text())
+    cfg.write_text(re.sub(r'(?m)^jev_route = "\w+"', 'jev_route = "vercel"', text))   # both routes share the key
     monkeypatch.setattr(cli.config_mod, "gateway_key", lambda *a: "")
     assert cli.main(["--config", str(cfg), "run"]) == 1
     out = capsys.readouterr().out

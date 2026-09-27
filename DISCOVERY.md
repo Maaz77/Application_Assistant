@@ -403,3 +403,17 @@ One `mistral/mistral-small` call to `https://ai-gateway.vercel.sh/v1/chat/comple
 00_common §T3.3 asks whether the vendored package retries by calling `_post` again (each attempt visible to our wrapper) or inside `_post` (only the last visible). Evidence: `jev_ultrafast_mcp/policy.py` `_post(url, key, body)` is `for attempt in range(3): ... if status in {429, 529, 503} and attempt < 2: sleep; continue`. So it retries **inside** `_post` and returns only the last attempt's body (or raises `TurboUnavailable`).
 
 Consequence for the logs: `jev.clean_requests` wraps the whole `_post`, so for the package's own calls (the goal agent's Jev decisions, option picks and the text helper) `jev_inference_logs.json` / `llm_inference_logs.json` record **one entry per `_post` call — the last attempt only**, not the intermediate 429/503 retries. Our own senders (`decide.Decider._one`, `llm_inference._ask_model`) log every attempt, because their retry loops live in our code. A failed `_post` raises rather than returning an error body, so the wrapper catches it, logs the attempt with the exception text in place of the response, and re-raises.
+
+## Jev moved to OpenRouter System One; per-route Jev model (user decision, 2026-09-28)
+
+Vercel AI Gateway's Jev now returns **HTTP 403** for the account: "Free tier users do not have access to this model. Upgrade to paid credits…". Preflight stops there (`the decision model (Jev) does not answer: decision model HTTP 403`), so no live run could proceed.
+
+The user supplied a TypeSafe-compatible System One model on OpenRouter — `respan/span-01-lite:free`, reached at `https://openrouter.ai/api/alpha/decisions` (same request/answer shapes: `state`, `questions` typed noul/choice/score; `answers[…]["noul"|"choice"|"probabilities"]`). Changes:
+
+- **Endpoint fix.** `decide.ENDPOINTS["openrouter"]` was `https://openrouter.ai/api/v1/systemone`, which is not the System One route; corrected to `https://openrouter.ai/api/alpha/decisions` (already what `jev.agent_route` and the package's no-key hint use). Removed the unused `decide.SYSTEMONE` constant.
+- **Per-route Jev model, like llm_inference.** `ChatModels` gains a `jev` field, so each `[models.<route>]` table names that route's Jev model; `Models.jev` is now a property selecting by `models.jev_route` (parallel to `chat`/`chat_route`). config.toml: `[models.openrouter].jev = "respan/span-01-lite:free"`, `[models.vercel].jev = "typesafe-ai/jev"`, and `jev_route = "openrouter"`. `config.problems()` now also flags an empty Jev model for the active route.
+- **Key.** On `jev_route = "openrouter"`, Jev uses `OPENROUTER_API_KEY` (via `config.jev_key`), so `.env` must have it.
+
+Deviations, recorded per 00_common §3/§5.2:
+- **P0 is "no behaviour change"**, but this changes the decision model, route and endpoint. It is a user-directed fix to unblock the P0 live gate, kept minimal (config + one endpoint string + the offline tests that pinned the old endpoint/model). T6 is unaffected (it runs offline on RuleDecider; the LLM inference request bodies it snapshots do not involve Jev).
+- **D14** named Jev `typesafe/jev-1.13` on OpenRouter and "no `:free` models". The user overrode both. Caveat from earlier findings: OpenRouter free models are rate-limited (≈50 requests/day/account) and can answer 429/overloaded, so this route may be flaky under load; a paid System One model would be steadier.

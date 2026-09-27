@@ -39,10 +39,12 @@ class Browser(_Strict):
 
 
 class ChatModels(_Strict):
-    """One provider's chat models, as that provider names them. Each list is tried in turn (rotation.py): the model
-    that answered last first, the next when one is out."""
+    """The models one provider serves for us, as that provider names them. The chat lists are tried in turn
+    (rotation.py): the model that answered last first, the next when one is out. `jev` is that provider's TypeSafe
+    System One decision model (a single ID; chosen by models.jev_route, the chat lists by models.chat_route)."""
     llm_inference: tuple[str, ...] = ()
     text_helper: tuple[str, ...] = ()
+    jev: str = ""
 
     @field_validator("llm_inference", "text_helper", mode="before")
     @classmethod
@@ -55,7 +57,6 @@ class Models(_Strict):
     chat_route: Literal["openrouter", "vercel"] = "openrouter"   # who serves the chat models: the table below
     openrouter: ChatModels = ChatModels()
     vercel: ChatModels = ChatModels()
-    jev: str = "typesafe-ai/jev"
     jev_route: Literal["vercel", "openrouter"] = "vercel"   # who serves Jev: Vercel AI Gateway or OpenRouter
 
     @model_validator(mode="before")
@@ -73,6 +74,11 @@ class Models(_Strict):
     def chat(self) -> ChatModels:
         """The chat models of the route in use."""
         return self.vercel if self.chat_route == "vercel" else self.openrouter
+
+    @property
+    def jev(self) -> str:
+        """Jev's decision model on models.jev_route (models.<jev_route>.jev)."""
+        return (self.vercel if self.jev_route == "vercel" else self.openrouter).jev
 
     @property
     def llm_inference(self) -> tuple[str, ...]:
@@ -118,6 +124,9 @@ class Config(_Strict):
             if not getattr(self.models.chat, name):
                 out.append(f"models.{route}.{name} is empty (models.chat_route is {route!r}: list one or more "
                            f"model IDs as {route} names them)")
+        if not self.models.jev:
+            out.append(f"models.{self.models.jev_route}.jev is empty (models.jev_route is "
+                       f"{self.models.jev_route!r}: set Jev's decision model for that route)")
         for name in ("applications", "profile", "tracker"):
             if not self.path(name).exists():
                 out.append(f"paths.{name} not found: {self.path(name)}")
