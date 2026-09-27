@@ -1,0 +1,1 @@
+{"nodes": [{"id": "tests_golden_act_eval_undefined", "label": "golden: browser_act eval op returning null/undefined", "file_type": "document", "source_file": "tests/golden/act_eval_undefined.txt", "source_location": null, "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}
