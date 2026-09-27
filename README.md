@@ -73,7 +73,7 @@ Jev decides and the code keeps only what must not be left to a model: the answer
  the page's questions + Profile.md + job.md + the resume's text
   │
   ▼
- the answer engine: one model call, reasoning off ................... answers.py
+ the LLM inference: one model call, reasoning off ................... answers.py
  for each question: an answer, its source, and a quote that proves it
   │
   ▼
@@ -127,7 +127,7 @@ Jev decides and the code keeps only what must not be left to a model: the answer
 ```
 
 Also in this folder:
-- `prompts/`: what the models are told. `answer_engine.md` is used by `answers.py`; `navigate_goal.md`, `next_step_goal.md` and `page_goal.md` are the browser agent's goals.
+- `prompts/`: what the models are told. `llm_inference.md` is used by `answers.py`; `navigate_goal.md`, `next_step_goal.md` and `page_goal.md` are the browser agent's goals.
 - `vendor/`: the patched browser package, and the patch itself.
 - `tests/`: see [Tests](#tests).
 - `runs/`: one folder per run, see [Running](#running).
@@ -153,19 +153,19 @@ Also in this folder:
    The changes are in `vendor/jev_ultrafast_mcp-0.1.5+aa6.patch`, and preflight refuses to run on the stock package. Once Poetry works again, `poetry install` does the same from `pyproject.toml`.
 
 2. **Keys.** Create `.env` in this folder with two lines. It is git-ignored.
-   - `OPENROUTER_API_KEY=<key>`: the answer engine and the text helper when `models.chat_route = "openrouter"`.
+   - `OPENROUTER_API_KEY=<key>`: the LLM inference and the text helper when `models.chat_route = "openrouter"`.
    - `AI_GATEWAY_API_KEY=<key>`: Jev through Vercel AI Gateway (`models.jev_route = "vercel"`), and the chat models when `models.chat_route = "vercel"`. Vercel serves requests only once a card is on file for the team, which also unlocks its free credits. With `jev_route = "openrouter"` the OpenRouter key pays for Jev instead.
- Keep some credit on the account: each form page costs one answer-engine call (about $0.001), plus the browser agent's decisions (about $0.00002 each) and the text helper's typed values. `tests/test_model_access.py` shows the key, the account's credit and whether a model answers. An account that has never bought credits gets 50 free-model requests a day across all free models, and rotation cannot get past that: HTTP 429 "free-models-per-day" from every model. $10 of credit raises it to 1,000 a day.
+ Keep some credit on the account: each form page costs one LLM inference call (about $0.001), plus the browser agent's decisions (about $0.00002 each) and the text helper's typed values. `tests/test_model_access.py` shows the key, the account's credit and whether a model answers. An account that has never bought credits gets 50 free-model requests a day across all free models, and rotation cannot get past that: HTTP 429 "free-models-per-day" from every model. $10 of credit raises it to 1,000 a day.
 
 3. **Config.** `config.toml` is already filled in:
 
    | Key | Value |
    |---|---|
    | `paths.base` | the repo root |
-   | `models.chat_route` | who serves the answer engine and the text helper: `openrouter` (the free models below) or `vercel` (Vercel AI Gateway, paid from its credit, for when OpenRouter's free quota is out). Both take the same chat/completions request |
-   | `models.openrouter.answer_engine` | five free OpenRouter models, tried in turn (`rotation.py`): answers each form page from your files (sent with reasoning off). A call starts at the model that answered last; one that is out (rate-limited, overloaded, timed out, wrong output) hands over to the next at once. A 429 with a short `Retry-After` (30 s or less) is waited out once. When none answers, the job goes to Needs Attention with every model's reason. A single ID also works |
+   | `models.chat_route` | who serves the LLM inference and the text helper: `openrouter` (the free models below) or `vercel` (Vercel AI Gateway, paid from its credit, for when OpenRouter's free quota is out). Both take the same chat/completions request |
+   | `models.openrouter.llm_inference` | five free OpenRouter models, tried in turn (`rotation.py`): answers each form page from your files (sent with reasoning off). A call starts at the model that answered last; one that is out (rate-limited, overloaded, timed out, wrong output) hands over to the next at once. A 429 with a short `Retry-After` (30 s or less) is waited out once. When none answers, the job goes to Needs Attention with every model's reason. A single ID also works |
    | `models.openrouter.text_helper` | four free OpenRouter models, rotated the same way: types the values the browser agent enters |
-   | `models.vercel.answer_engine`, `models.vercel.text_helper` | `mistral/mistral-small` (about 5 s and $0.0013 a page), then `mistral/mistral-nemo` (cheaper, but about 60 s a page). Vercel limits a new team to 5 requests a minute per model |
+   | `models.vercel.llm_inference`, `models.vercel.text_helper` | `mistral/mistral-small` (about 5 s and $0.0013 a page), then `mistral/mistral-nemo` (cheaper, but about 60 s a page). Vercel limits a new team to 5 requests a minute per model |
    | `models.jev` | `typesafe-ai/jev`: TypeSafe's decision model, for the browser agent and every page decision (`decide.py`). Each route names it its own way: `typesafe-ai/jev` on Vercel, `typesafe/jev-1.13` on OpenRouter |
    | `models.jev_route` | `vercel` (Vercel AI Gateway's TypeSafe-compatible API) or `openrouter` |
    | `google.account_email` | `maaz1377.aa@gmail.com` |

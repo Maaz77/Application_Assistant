@@ -73,7 +73,7 @@ def test_a_key_both_routes_use_is_reported_once(workspace, monkeypatch, capsys):
     monkeypatch.setattr(cli.config_mod, "gateway_key", lambda *a: "")
     assert cli.main(["--config", str(cfg), "run"]) == 1
     out = capsys.readouterr().out
-    assert out.count("AI_GATEWAY_API_KEY is missing") == 1 and "the answer engine and text helper and Jev" in out
+    assert out.count("AI_GATEWAY_API_KEY is missing") == 1 and "the LLM inference and text helper and Jev" in out
 
 
 def test_bad_config_is_exit_1(tmp_path, capsys):

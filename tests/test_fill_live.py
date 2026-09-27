@@ -1,11 +1,11 @@
-"""T6 live_model: f02 and f08 filled end-to-end with the real answer engine and parked, zero POSTs."""
+"""T6 live_model: f02 and f08 filled end-to-end with the real LLM inference and parked, zero POSTs."""
 import os
 from datetime import date
 
 import pytest
 from pypdf import PdfWriter
 
-from assistant.answers import Policy, Sources, answer_page
+from assistant.llm_inference import Policy, Sources, answer_page
 from assistant.blockers import NeedsAttention
 from assistant import config, tabs
 from assistant.fill import JobCtx, run_pages
@@ -37,7 +37,7 @@ def resume(tmp_path):
 
 @pytest.mark.parametrize("page", ["f02.html", "f08.html"])
 def test_parked_live(new_browser, fixture_server, chat_key, cfg, resume, tmp_path, chrome, page):
-    model = os.environ.get("AA_ANSWER_MODEL") or cfg.models.answer_engine
+    model = os.environ.get("AA_ANSWER_MODEL") or cfg.models.llm_inference
     src = Sources(PROFILE, "Acme, Milan. Data Engineer.", "Amin Abbaszadeh\nMilan, Italy")
 
     def engine(p):

@@ -14,7 +14,7 @@ max_actions = 2000
 max_pages_per_job = 15
 
 [models]                           # model IDs, as each route names them
-chat_route = "vercel"                     # who serves the answer engine and the text helper: "openrouter" (free
+chat_route = "vercel"                     # who serves the LLM inference and the text helper: "openrouter" (free
                                           # models below) or "vercel" (paid, for when OpenRouter's free quota is out)
 jev = "typesafe-ai/jev"                   # TypeSafe's decision model: the browser agent and every page decision
 jev_route = "vercel"                      # Jev through Vercel AI Gateway (AI_GATEWAY_API_KEY), or "openrouter"
@@ -23,7 +23,7 @@ jev_route = "vercel"                      # Jev through Vercel AI Gateway (AI_GA
 # overloaded, wrong output) hands over to the next; when none answers the job goes to Needs Attention.
 [models.openrouter]                # OPENROUTER_API_KEY. Free tier: 50 requests a day across all free models
 # Each one supports structured outputs and answered the engine's real request shape on 2026-09-24.
-answer_engine = [
+llm_inference = [
   "qwen/qwen3.8-27b:free",
   "dots-studio/dots-3-note-preview:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
@@ -40,7 +40,7 @@ text_helper = [                    # types the values the browser agent enters
 [models.vercel]                    # AI_GATEWAY_API_KEY (Vercel AI Gateway, paid from its credit)
 # A realistic page (5.3K tokens in), 2026-09-24: Small 5.2 s and $0.0013; Nemo 58.6 s and $0.00013. Both answer in
 # strict JSON. Vercel allows a new team 5 requests a minute per model, so two models also double that.
-answer_engine = ["mistral/mistral-small", "mistral/mistral-nemo"]
+llm_inference = ["mistral/mistral-small", "mistral/mistral-nemo"]
 text_helper = ["mistral/mistral-small", "mistral/mistral-nemo"]
 
 [policy]

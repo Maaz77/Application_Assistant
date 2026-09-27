@@ -1,7 +1,7 @@
 """Loop unit tests on FakeMCP: fill, upload, typing, goal, read-back, advance, final step, gate, blockers."""
 import pytest
 
-from assistant.answers import PageAnswers
+from assistant.llm_inference import PageAnswers
 from assistant.blockers import NeedsAttention, StopRun
 from assistant.fill import NEXT_STEP_GOAL, JobCtx, parse_goal, run_pages
 from tests.fake_mcp import El, FakeBook, FakeMCP, FakePage
@@ -17,7 +17,7 @@ def Q(question, answer, *, kind="text", ref=None, option_ref=None, source="profi
 
 
 def engine(by_title: dict):
-    """Canned answer engine: page title → list of question dicts (refs resolved by name at call time)."""
+    """Canned LLM inference: page title → list of question dicts (refs resolved by name at call time)."""
     def fn(page):
         names = {e.name: e.ref for e in page.elements}
         qs = []
@@ -239,22 +239,22 @@ def test_parse_goal_formats():
     assert parse_goal("no status here").status == "failed:no_status"
 
 
-def test_answer_engine_failure_is_a_needs_attention_blocker(tmp_path):
-    from assistant.answers import AnswerEngineError
+def test_llm_inference_failure_is_a_needs_attention_blocker(tmp_path):
+    from assistant.llm_inference import LLMInferenceError
 
     def broken(page):
-        raise AnswerEngineError("answer engine output invalid")
+        raise LLMInferenceError("LLM inference output invalid")
     ctx = ctx_for(FakeMCP(single_page(), "p1"), {}, tmp_path)
     ctx.answer_fn = broken
     with pytest.raises(NeedsAttention) as ei:
         run_pages(ctx)
-    assert ei.value.cls == "answer_engine" and ei.value.stage == "fill"
+    assert ei.value.cls == "llm_inference" and ei.value.stage == "fill"
 
 
 def test_the_read_back_is_one_jev_question_per_field_on_the_fresh_page():
     """Jev judges whether each field holds its answer (2026-09-24): no rules per kind of control in the program."""
     from assistant import decide
-    from assistant.answers import Question
+    from assistant.llm_inference import Question
     from assistant.fill import mismatches
     from assistant.jev import Element, Table
     from assistant.pages import Page
@@ -391,7 +391,7 @@ def test_follow_new_tab_waits_for_the_page_to_change_not_just_for_a_field(tmp_pa
 
 
 def test_an_engine_answer_for_an_older_resume_card_is_dropped(tmp_path):
-    from assistant.answers import Question
+    from assistant.llm_inference import Question
     from assistant.fill import _other_resume_card, resume_input
     site = {"r": FakePage("https://www.linkedin.com/jobs/view/1/", "Apply", "Resume* Select or upload a resume", [
         El("radio", "Amin_Old-Company_Old-Role.pdf", checked=True), El("radio", PDF, checked=False),
@@ -444,7 +444,7 @@ def test_a_refused_typed_value_gets_one_goal_for_that_field_only(tmp_path):
 
 
 def test_read_only_fields_and_custom_widgets_still_go_to_the_goal(tmp_path):
-    from assistant.answers import Question
+    from assistant.llm_inference import Question
     from assistant.fill import plan_fill
     from assistant.jev import Element, Table
     from assistant.pages import Page
@@ -460,7 +460,7 @@ def test_the_fill_plan_is_jevs_pick_and_the_code_only_checks_it_can_be_done():
     """Jev picks how and where (2026-09-24); the code refuses a pick the page does not allow (typing into a
     read-only field, checking something that is not a radio or checkbox) and sends it to the page goal instead."""
     from assistant import decide
-    from assistant.answers import Question
+    from assistant.llm_inference import Question
     from assistant.fill import plan_fill
     from assistant.jev import Element, Option, Table
     from assistant.pages import Page
@@ -509,7 +509,7 @@ def test_a_resume_question_is_covered_once_the_resume_is_in_place(tmp_path):
 
 
 def test_is_resume_question_is_the_deciders_verdict():
-    from assistant.answers import judge_questions
+    from assistant.llm_inference import judge_questions
     from assistant.fill import is_resume_question
     from assistant.jev import Table
     from assistant.pages import Page
@@ -697,7 +697,7 @@ def test_an_advance_goal_that_only_scrolled_is_asked_again(tmp_path):
 def test_an_answer_naming_a_select_option_by_its_ref_is_set_directly_and_read_back():
     """Toast (Greenhouse), live 2026-09-24: the answer named option "e31:3" of a native <select>; no element has that
     ref, so the select went to a page goal and the read-back failed although "No" was selected."""
-    from assistant.answers import Question
+    from assistant.llm_inference import Question
     from assistant.fill import mismatches, plan_fill
     from assistant.jev import Element, Option, Table
     from assistant.pages import Page
@@ -714,9 +714,9 @@ def test_an_answer_naming_a_select_option_by_its_ref_is_set_directly_and_read_ba
         assert mismatches([q], page("No")) == [] and mismatches([q], page(None)) == [q]      # RuleDecider
 
 
-def test_an_unsure_resume_pick_is_asked_again_narrowly_then_settled_by_the_answer_engine():
+def test_an_unsure_resume_pick_is_asked_again_narrowly_then_settled_by_the_llm_inference():
     """Several uploads and Jev unsure (The Flex, live 2026-09-24): no fixed-threshold stop. Jev is asked again over its
-    two likeliest picks; still unsure, the answer engine's pick settles it if it is one of those two."""
+    two likeliest picks; still unsure, the LLM inference's pick settles it if it is one of those two."""
     from assistant import decide
     from assistant.fill import resume_input
     from assistant.jev import Element, Table

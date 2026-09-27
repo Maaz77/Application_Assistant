@@ -79,7 +79,7 @@ class Secret(str):
 
 @pytest.fixture(scope="session")
 def chat_key(cfg):
-    """The key for models.chat_route: the answer engine and the text helper."""
+    """The key for models.chat_route: the LLM inference and the text helper."""
     key = config.chat_key(cfg)
     if not key:
         pytest.skip(f"no {config.KEY_NAMES[cfg.models.chat_route]} in .env")

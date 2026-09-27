@@ -2,8 +2,8 @@
 
 Runs a fixed set of offline flows (FakeMCP + RuleDecider) and snapshots the three streams that P0's edits could
 drift: the ordered Jev decisions (topic, question ids, answers used), the browser calls (function and arguments),
-and the answer-engine model request bodies. The first run writes tests/golden/p0_baseline/; later runs assert the
-streams are unchanged, after normalising the "answer engine" → "LLM inference" rename so T1 does not trip T6.
+and the LLM inference model request bodies. The first run writes tests/golden/p0_baseline/; later runs assert the
+streams are unchanged, after normalising the P0 component rename (see _canon) so T1 does not trip T6.
 """
 import json
 import re
@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from assistant import answers as A, decide
-from assistant.answers import Policy
+from assistant import llm_inference as A, decide
+from assistant.llm_inference import Policy
 from assistant.fill import run_pages
 from tests import test_fill_loop as F
 from tests.fake_mcp import FakeMCP
@@ -52,7 +52,7 @@ def _run_flows(tmp_path):
     decisions, bodies, calls = [], [], []
     decide.use(_Rec(RuleDecider(), decisions))
 
-    # A) the answer engine: capture the model request body. An empty answer set keeps the response deterministic;
+    # A) the LLM inference: capture the model request body. An empty answer set keeps the response deterministic;
     # the request body (what the rename must not change) does not depend on it.
     def capture(url, body, headers, timeout):
         bodies.append(body)

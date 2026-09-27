@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 TOOL_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = TOOL_DIR / "config.toml"
 DEFAULT_ENV = TOOL_DIR / ".env"
-# Who serves the chat models (the answer engine and the text helper): both speak OpenAI's chat/completions, and
+# Who serves the chat models (the LLM inference and the text helper): both speak OpenAI's chat/completions, and
 # both take the same `response_format` and `reasoning` fields (Vercel docs, checked 2026-09-24).
 CHAT_BASES = {"openrouter": "https://openrouter.ai/api/v1", "vercel": "https://ai-gateway.vercel.sh/v1"}
 
@@ -41,10 +41,10 @@ class Browser(_Strict):
 class ChatModels(_Strict):
     """One provider's chat models, as that provider names them. Each list is tried in turn (rotation.py): the model
     that answered last first, the next when one is out."""
-    answer_engine: tuple[str, ...] = ()
+    llm_inference: tuple[str, ...] = ()
     text_helper: tuple[str, ...] = ()
 
-    @field_validator("answer_engine", "text_helper", mode="before")
+    @field_validator("llm_inference", "text_helper", mode="before")
     @classmethod
     def _one_or_many(cls, v):
         """A single model ID is a rotation of one."""
@@ -58,14 +58,25 @@ class Models(_Strict):
     jev: str = "typesafe-ai/jev"
     jev_route: Literal["vercel", "openrouter"] = "vercel"   # who serves Jev: Vercel AI Gateway or OpenRouter
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_renamed_key(cls, data):
+        """The P0 rename (2026-09-27): point an old config at its new key instead of a generic 'extra' error."""
+        old = "answer_engine"  # rename-guard: the pre-P0 key name, kept only to detect and redirect it
+        if isinstance(data, dict):
+            for route in ("openrouter", "vercel"):
+                if isinstance(data.get(route), dict) and old in data[route]:
+                    raise ValueError(f"models.{route}.{old} was renamed to models.{route}.llm_inference")
+        return data
+
     @property
     def chat(self) -> ChatModels:
         """The chat models of the route in use."""
         return self.vercel if self.chat_route == "vercel" else self.openrouter
 
     @property
-    def answer_engine(self) -> tuple[str, ...]:
-        return self.chat.answer_engine
+    def llm_inference(self) -> tuple[str, ...]:
+        return self.chat.llm_inference
 
     @property
     def text_helper(self) -> tuple[str, ...]:
@@ -103,7 +114,7 @@ class Config(_Strict):
         if not self.paths.base:
             out.append("paths.base is empty")
         route = self.models.chat_route
-        for name in ("answer_engine", "text_helper"):
+        for name in ("llm_inference", "text_helper"):
             if not getattr(self.models.chat, name):
                 out.append(f"models.{route}.{name} is empty (models.chat_route is {route!r}: list one or more "
                            f"model IDs as {route} names them)")
@@ -126,7 +137,7 @@ def _env(name: str, env_file: Path) -> str:
 
 
 def api_key(env_file: Path = DEFAULT_ENV) -> str:
-    """The OpenRouter key (the answer engine and the text helper): .env first, then the process environment."""
+    """The OpenRouter key (the LLM inference and the text helper): .env first, then the process environment."""
     return _env("OPENROUTER_API_KEY", env_file)
 
 
@@ -141,7 +152,7 @@ def jev_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
 
 
 def chat_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
-    """The key for the chat models' route (the answer engine and the text helper)."""
+    """The key for the chat models' route (the LLM inference and the text helper)."""
     return gateway_key(env_file) if cfg.models.chat_route == "vercel" else api_key(env_file)
 
 

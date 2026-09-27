@@ -102,7 +102,7 @@ def split_json(text: str) -> tuple[str, Table]:
 # ------------------------------------------------------------------ environment and import
 
 def env_values(cfg: Config, key: str, cdp_url: str | None = None) -> dict[str, str]:
-    """The §3 table. `key` is the chat route's key (config.chat_key): the text helper goes where the answer engine
+    """The §3 table. `key` is the chat route's key (config.chat_key): the text helper goes where the LLM inference
     goes. Clicks are refused by never_click (guard_clicks), not by JEVMCP_CONFIRM_PATTERNS."""
     return {
         "JEVMCP_MODE": "attach",

@@ -227,12 +227,12 @@ class RuleDecider:
 
     # ---------------------------------------------------------------- fill.plan_fill
     def _fill(self, qid: str, q: dict, s: dict) -> Answer:
-        """The routing the program used before Jev planned the fill (direct_op, 2026-09-23/24): the answer engine's
+        """The routing the program used before Jev planned the fill (direct_op, 2026-09-23/24): the LLM inference's
         ref decides the target, the kind of control decides the operation."""
         ins, crit = q["instructions"], q["criteria"]
         key = lambda x: re.sub(r"[^a-z0-9]+", "", (x or "").lower())
         by_ref = {c["ref"]: c for c in s["controls"]}
-        ref, oref, answer = ins.get("answer_engine_ref"), ins.get("answer_engine_option_ref"), ins["answer"]
+        ref, oref, answer = ins.get("llm_inference_ref"), ins.get("llm_inference_option_ref"), ins["answer"]
         el = by_ref.get(ref or "")
         sel = next((r for r in (oref, ref) if r and re.match(r"^e\d+:\d+$", r) and r.split(":")[0] in by_ref), None)
         listed = el is not None and el["role"] in {"combobox", "listbox"} and any(

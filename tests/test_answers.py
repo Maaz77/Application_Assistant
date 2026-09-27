@@ -3,8 +3,8 @@ from datetime import date
 
 import pytest
 
-from assistant import answers as A
-from assistant.answers import PageAnswers, Policy, Sources, check_answers, total_months
+from assistant import llm_inference as A
+from assistant.llm_inference import PageAnswers, Policy, Sources, check_answers, total_months
 from assistant.jev import Element, Option, Table
 from assistant.pages import Page
 
@@ -174,7 +174,7 @@ def test_when_no_model_answers_the_error_names_each_failure():
     post, calls = canned((429, {"error": {"code": 429, "metadata": {"raw": "rate-limited upstream"}}}),
                          (200, {"error": {"code": 503, "message": "Service temporarily overloaded"}}),
                          (200, '{"questions": [{"id": 1}]}'))
-    with pytest.raises(A.AnswerEngineError) as ei:
+    with pytest.raises(A.LLMInferenceError) as ei:
         A.answer_page(PAGE, SRC, key="k", models=["a", "b", "c"], policy=Policy(), today=TODAY, post=post)
     msg = str(ei.value)
     assert "none of 3 models answered" in msg and len(calls) == 3
@@ -192,12 +192,12 @@ def test_a_timeout_moves_on_but_a_rejected_key_stops_at_once():
     assert A.answer_page(PAGE, SRC, key="k", models=["slow", "fast"], policy=Policy(), today=TODAY,
                          post=timing_out).model == "fast"
     post, calls = canned((401, {"error": {"code": 401, "message": "No auth credentials found"}}))
-    with pytest.raises(A.AnswerEngineError, match="rejected the key") as ei:
+    with pytest.raises(A.LLMInferenceError, match="rejected the key") as ei:
         A.answer_page(PAGE, SRC, key="k", models=["a", "b"], policy=Policy(), today=TODAY, post=post)
     assert len(calls) == 1 and not isinstance(ei.value, A.ModelUnavailable)
 
 
-def test_the_answer_engine_posts_to_the_routes_url():
+def test_the_llm_inference_posts_to_the_routes_url():
     """Vercel AI Gateway takes the same chat/completions request; its 401 names the host, not OpenRouter."""
     seen = []
 
@@ -209,7 +209,7 @@ def test_the_answer_engine_posts_to_the_routes_url():
                   post=post)
     assert seen == [(vercel, "Bearer gw")]
     post401, _ = canned((401, {"error": {"message": "Authentication failed.", "type": "authentication_error"}}))
-    with pytest.raises(A.AnswerEngineError, match="ai-gateway.vercel.sh rejected the key"):
+    with pytest.raises(A.LLMInferenceError, match="ai-gateway.vercel.sh rejected the key"):
         A.answer_page(PAGE, SRC, key="bad", models="m", policy=Policy(), today=TODAY, url=vercel, post=post401)
 
 
@@ -327,9 +327,9 @@ def test_computed_is_only_for_total_years_never_for_a_tool():
     assert other.answer is None
 
 
-def test_the_answer_engine_is_asked_for_no_hidden_reasoning():
+def test_the_llm_inference_is_asked_for_no_hidden_reasoning():
     """The Flex, live 2026-09-23: qwen3.7-flash spent all 8,192 tokens reasoning — an empty answer, then a cut-off
-    one ("answer engine output invalid"). With reasoning off the same 43-field page answered in 21 s."""
+    one ("LLM inference output invalid"). With reasoning off the same 43-field page answered in 21 s."""
     post, calls = canned((200, GOOD))
     A.answer_page(PAGE, SRC, key="k", models="m", policy=Policy(), today=TODAY, post=post)
     assert calls[0]["reasoning"] == {"enabled": False}

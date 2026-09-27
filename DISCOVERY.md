@@ -378,3 +378,18 @@ The user first chose Jev alone for the never-submit decision (no fixed floor). A
 - **Not covered, by decision:** "Send application", "Done", "Finish", "Confirm", Enter-submitting forms. An "Apply" that is a form's own submit button *before* filling starts is not refused either: that would be the navigate agent clicking a form's Apply instead of reporting the form (Toast's Greenhouse form ends in "Apply now!").
 - **Tests:** the tripwire walks f01–f03 (Submit application / multi-step Submit / Apply) with the form being filled, and nothing is sent. Live, the real agent was told to submit those forms 11 times per run; it was always refused or stopped, and nothing was sent in two runs. One earlier status check failed once without recurring, and nothing was sent in that run either.
 - **"Send" added** (user decision, same day): "Send" (`\bsend\b`) is refused on every page, like "Submit". A Send button is never needed to start an application; "Sender" and "Sending" don't match. The tripwire now also walks f05 ("Send application"). Live, the agent was told to click it and was refused. Across 9 further live tripwire runs (up to 14 checks each), every attempt was refused and nothing was sent.
+
+## Rename "answer engine" → "LLM inference" (P0 re-core, 2026-09-27)
+
+The re-core (00_common §7) renames the component formerly called the "answer engine" to "LLM inference" everywhere in code, config, prompts, tests and docs. Names for answer *values* keep "answer". Old entries above keep the old name by decision; this entry records the rename.
+
+Renamed:
+- Module `assistant/answers.py` → `assistant/llm_inference.py`; prompt `prompts/answer_engine.md` → `prompts/llm_inference.md` (content unchanged); all imports updated.
+- `AnswerEngineError` → `LLMInferenceError`; `ENGINE_TIMEOUT` → `LLM_INFERENCE_TIMEOUT`.
+- Config: `[models.openrouter].answer_engine` / `[models.vercel].answer_engine` → `.llm_inference`; `ChatModels.answer_engine` field and `Models.answer_engine` property → `llm_inference`; `config.problems()` check. An old `answer_engine` key now fails validation with `models.<route>.answer_engine was renamed to models.<route>.llm_inference` (a `model_validator` on `Models`, marked `rename-guard`).
+- Needs-Attention class `answer_engine` → `llm_inference` (`fill.py`).
+- Prose "answer engine" → "LLM inference" in the report, terminal text, comments, README.md, CLAUDE.md, LIVE_TEST.md and the build spec.
+
+Kept (00_common §7 — these name the answer value or its action, not the component): `Question.answer`, `PageAnswers`, `check_answers`, `judge_answers`, `judge_questions`, `answers.json`, "unanswered", and the function/parameter names `call_engine`, `answer_page`, `answer_fn`.
+
+No behaviour change: the offline suite reproduces `tests/golden/p0_baseline/` (T6, `test_baseline_p0.py`), and `test_rename.py` asserts no component-name token survives.

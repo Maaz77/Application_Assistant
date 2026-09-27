@@ -14,7 +14,7 @@ from assistant import config as config_mod
 from assistant import decide
 from assistant import jev as jevlib
 from assistant import pages, records, tabs
-from assistant.answers import Policy, Sources, answer_page, resume_text
+from assistant.llm_inference import Policy, Sources, answer_page, resume_text
 from assistant.rotation import Rotation
 from assistant.blockers import NeedsAttention, Parked, RestartFromEntry, StopRun
 from assistant.fill import JobCtx, run_pages
@@ -115,7 +115,7 @@ def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
     problems = cfg.problems()
     missing: dict[str, list[str]] = {}
     if not key:
-        missing.setdefault(config_mod.KEY_NAMES[cfg.models.chat_route], []).append("the answer engine and text helper")
+        missing.setdefault(config_mod.KEY_NAMES[cfg.models.chat_route], []).append("the LLM inference and text helper")
     if not config_mod.jev_key(cfg):
         missing.setdefault(config_mod.KEY_NAMES[cfg.models.jev_route], []).append("Jev")
     for name, users in missing.items():
@@ -135,7 +135,7 @@ def process(job: records.Job, *, browser: Jev, book: tabs.TabBook, cfg: config_m
     baseline = book.handles()
     src = Sources(profile=profile, job=job.job_md.read_text(), resume=resume_text(pdf))
     policy = Policy(cfg.policy.prefill, cfg.policy.free_text_max_chars)
-    engines = engines or Rotation(cfg.models.answer_engine)
+    engines = engines or Rotation(cfg.models.llm_inference)
 
     def engine(p):
         return answer_page(p, src, key=key, models=engines, policy=policy, today=today,
@@ -260,7 +260,7 @@ def run(cfg: config_mod.Config, args) -> int:
         recorder = records.Recorder(tracker, records.Journal(run_dir / "journal.jsonl"), cfg.base_dir(),
                                     cfg.path("pending_review"), cfg.path("needs_attention"), set(q.new_rows))
         profile = cfg.path("profile").read_text()
-        engines = Rotation(cfg.models.answer_engine)   # one for the run: each page starts at the last model that answered
+        engines = Rotation(cfg.models.llm_inference)   # one for the run: each page starts at the last model that answered
         for job in q.jobs:
             t0 = time.monotonic()
             result = JobResult(job.company, job.title, job.linkedin_url, job.folder, 0,

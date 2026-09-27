@@ -6,7 +6,7 @@ import pytest
 from pypdf import PdfWriter
 
 from assistant import cli, config as config_mod, pages, tabs
-from assistant.answers import PageAnswers
+from assistant.llm_inference import PageAnswers
 from assistant.fill import resume_input
 from assistant.jev import Jev
 from assistant.pages import classify, read_page

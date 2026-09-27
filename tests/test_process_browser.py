@@ -8,7 +8,7 @@ from datetime import date
 import pytest
 
 from assistant import cli, config as config_mod, tabs
-from assistant.answers import PageAnswers
+from assistant.llm_inference import PageAnswers
 from assistant.jev import Jev
 from assistant.records import Job
 from tests.support import CDP_URL

@@ -19,10 +19,10 @@ def test_unknown_key_is_an_error(tmp_path):
         config.load(f)
 
 
-def test_empty_answer_engine_is_a_problem(tmp_path):
+def test_empty_llm_inference_is_a_problem(tmp_path):
     f = tmp_path / "c.toml"
     f.write_text(f'[paths]\nbase = "{tmp_path}"\n')
-    assert any("answer_engine" in p for p in config.load(f).problems())
+    assert any("llm_inference" in p for p in config.load(f).problems())
 
 
 def test_cli_parses_run_flags():
