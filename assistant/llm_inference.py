@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from assistant import decide
+from assistant import decide, inference_log
 from assistant.decide import THRESHOLDS as T
 from assistant.pages import Page
 from assistant.rotation import NoModelAvailable, Rotation
@@ -176,12 +176,16 @@ def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post:
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]}
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    gw = inference_log.gateway_of(url)
     waited = False
     while True:
+        sent = {**body, "response_format": fmt}
         try:
-            status, data = post(url, {**body, "response_format": fmt}, headers, timeout)
+            status, data = post(url, sent, headers, timeout)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
+            inference_log.log_llm(gw, sent, None, f"unreachable ({type(exc).__name__})")   # §6.2: every attempt
             raise ModelUnavailable(f"unreachable ({type(exc).__name__})") from None
+        inference_log.log_llm(gw, sent, data)
         if status == 400 and fmt["type"] == "json_schema":
             fmt = {"type": "json_object"}
             continue

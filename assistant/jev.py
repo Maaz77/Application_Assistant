@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict
 
-from assistant import guard, probes
+from assistant import guard, inference_log, probes
 from assistant.guard import FORM, SUBMIT_RE, never_click  # noqa: F401 - the rule the package applies
 from assistant.decide import RETRY_WAITS, DecisionError
 from assistant import config
@@ -177,10 +177,29 @@ def clean_requests(policy) -> None:
     original = getattr(policy._post, "__wrapped__", policy._post)
 
     def _post(url, key, body):
-        return original(url, key, clean_json(body))
+        cleaned = clean_json(body)
+        try:
+            resp = original(url, key, cleaned)
+        except Exception as exc:              # the package raises TurboUnavailable on a failed attempt; log it, re-raise
+            _log_package_request(url, cleaned, None, str(exc))
+            raise
+        _log_package_request(url, cleaned, resp, None)
+        return resp
 
     _post.__wrapped__ = original
     policy._post = _post
+
+
+def _log_package_request(url: str, body, resp, reason: str | None) -> None:
+    """Route the package's own request to the right inference log (§6, D4). The package's `_post` retries internally
+    (range(3)), so only the last attempt is visible here (DISCOVERY 2026-09-27). A Jev body carries `state` and
+    `questions`; the text helper's body carries `messages`."""
+    if not isinstance(body, dict):
+        return
+    if "state" in body and "questions" in body:
+        inference_log.log_jev(body, resp, reason)
+    elif "messages" in body:
+        inference_log.log_llm(inference_log.gateway_of(url), body, resp, reason)
 
 _server = None
 _applied: dict[str, str] | None = None

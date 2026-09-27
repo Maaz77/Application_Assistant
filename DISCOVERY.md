@@ -393,3 +393,13 @@ Renamed:
 Kept (00_common §7 — these name the answer value or its action, not the component): `Question.answer`, `PageAnswers`, `check_answers`, `judge_answers`, `judge_questions`, `answers.json`, "unanswered", and the function/parameter names `call_engine`, `answer_page`, `answer_fn`.
 
 No behaviour change: the offline suite reproduces `tests/golden/p0_baseline/` (T6, `test_baseline_p0.py`), and `test_rename.py` asserts no component-name token survives.
+
+## Where the upstream provider sits in a chat response (live, 2026-09-27)
+
+One `mistral/mistral-small` call to `https://ai-gateway.vercel.sh/v1/chat/completions` (5 tokens out) showed that Vercel's OpenAI-compatible chat response has no top-level `provider` or `provider_metadata`. The routing record sits inside the message, at `choices[0].message.provider_metadata.gateway.routing`. That record has `finalProvider` (the provider that served the call after any fallbacks; here `mistral`), plus `resolvedProvider`, `modelAttempts[].providerAttempts[]` (with each attempt's `statusCode`) and `fallbacksAvailable`. Cost is at `provider_metadata.gateway.cost` in the same place, and also at `usage.cost`. OpenRouter puts the upstream in a top-level `provider` field. `inference_log._provider` reads OpenRouter's `provider` first, then Vercel's `finalProvider`, and logs just the gateway when neither is there (error bodies, the TypeSafe API's top-level `provider_metadata` without `routing`).
+
+## The package's `policy._post` retries internally (P0 T3.3, 2026-09-27)
+
+00_common §T3.3 asks whether the vendored package retries by calling `_post` again (each attempt visible to our wrapper) or inside `_post` (only the last visible). Evidence: `jev_ultrafast_mcp/policy.py` `_post(url, key, body)` is `for attempt in range(3): ... if status in {429, 529, 503} and attempt < 2: sleep; continue`. So it retries **inside** `_post` and returns only the last attempt's body (or raises `TurboUnavailable`).
+
+Consequence for the logs: `jev.clean_requests` wraps the whole `_post`, so for the package's own calls (the goal agent's Jev decisions, option picks and the text helper) `jev_inference_logs.json` / `llm_inference_logs.json` record **one entry per `_post` call — the last attempt only**, not the intermediate 429/503 retries. Our own senders (`decide.Decider._one`, `llm_inference._ask_model`) log every attempt, because their retry loops live in our code. A failed `_post` raises rather than returning an error body, so the wrapper catches it, logs the attempt with the exception text in place of the response, and re-raises.

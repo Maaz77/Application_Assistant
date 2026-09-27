@@ -23,6 +23,8 @@ from typing import Any, Callable
 
 import httpx
 
+from assistant import inference_log
+
 # Jev's System One endpoint per route (TypeSafe's request and answer shapes on both). Model IDs differ per route:
 # Vercel AI Gateway serves "typesafe-ai/jev", OpenRouter "typesafe/jev-1.13" (config models.jev).
 ENDPOINTS = {"vercel": "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
@@ -178,6 +180,7 @@ class Decider:
         t0 = time.monotonic()
         for wait in (*RETRY_WAITS, None):
             status, data = self.post(self.url, body, headers, TIMEOUT)
+            inference_log.log_jev(body, data, None if status else "request error")   # §6.3: every attempt
             if status == 200 or wait is None or not (status == 0 or status == 429 or status >= 500):
                 break
             self.sleep(wait)
