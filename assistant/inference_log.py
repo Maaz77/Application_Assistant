@@ -31,11 +31,12 @@ _buffers: dict[tuple[str, str], list] = {}
 
 # ------------------------------------------------------------------ run and scope
 
-def start_run(run_dir: Path) -> None:
-    """Begin a run: logs go under run_dir/<scope>/. Resets the scope to _run and the in-memory buffers."""
+def start_run(run_dir: Path | None) -> None:
+    """Begin a run: logs go under run_dir/<scope>/. Resets the scope to _run and the in-memory buffers.
+    None means no active run — the loggers become no-ops (used to reset between tests)."""
     global _run_dir, _scope, _buffers
     with _lock:
-        _run_dir = Path(run_dir)
+        _run_dir = Path(run_dir) if run_dir is not None else None
         _scope = _RUN
         _buffers = {}
 

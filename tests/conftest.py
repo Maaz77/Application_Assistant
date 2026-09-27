@@ -44,6 +44,15 @@ def decider(request):
     decide.use(None)
 
 
+@pytest.fixture(autouse=True)
+def _reset_inference_log():
+    """No active run by default: a test that never calls start_run gets no-op loggers, and no test writes into
+    another's run dir (preflight/run now start a run)."""
+    from assistant import inference_log
+    inference_log.start_run(None)
+    yield
+
+
 @pytest.fixture(scope="session")
 def _fixture_server():
     with FixtureServer() as srv:

@@ -308,6 +308,7 @@ def run_preflight(cfg: config_mod.Config) -> int:
         for p in problems:
             print(f"✗ {p}")
         return EXIT_PREFLIGHT
+    inference_log.start_run(RUNS / datetime.now().strftime("%Y%m%d-%H%M%S"))   # preflight's Jev call -> _run/ (§6.1)
     print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, Jev via {cfg.models.jev_route})")
     try:
         _load_package(cfg, key)
