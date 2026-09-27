@@ -36,7 +36,7 @@ text_helper = [                    # types the values the browser agent enters
   "nex-agi/nex-n2.5-mini:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
 ]
-jev = "respan/span-01-lite:free"   # TypeSafe System One via https://openrouter.ai/api/alpha/decisions
+jev = "typesafe/jev-1.13"   # TypeSafe System One via https://openrouter.ai/api/alpha/decisions
 
 [models.vercel]                    # AI_GATEWAY_API_KEY (Vercel AI Gateway, paid from its credit)
 # A realistic page (5.3K tokens in), 2026-09-24: Small 5.2 s and $0.0013; Nemo 58.6 s and $0.00013. Both answer in

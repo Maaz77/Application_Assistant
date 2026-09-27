@@ -123,6 +123,14 @@ def fit_state(state: Any) -> str:
     return json.dumps(state, ensure_ascii=False)[:STATE_CHARS]
 
 
+def adapt_questions_for(model: str) -> bool:
+    """Whether a decisions model needs the flattened question form. TypeSafe Jev (typesafe/*, jev-*) takes its
+    native structured instructions/criteria; other OpenRouter decisions models (respan/span-01-lite) need plain
+    strings, so they are flattened (respan_questions)."""
+    m = model.lower()
+    return "jev" not in m and not m.startswith("typesafe")
+
+
 def _plain(v: Any) -> str:
     return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
 
@@ -202,8 +210,8 @@ class Decider:
         return out
 
     def _one(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
-        sent = respan_questions(questions) if "alpha/decisions" in self.url else questions
-        body = {"model": self.model, "state": state, "questions": sent}
+        adapt = "alpha/decisions" in self.url and adapt_questions_for(self.model)
+        body = {"model": self.model, "state": state, "questions": respan_questions(questions) if adapt else questions}
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         for wait in (*RETRY_WAITS, None):
             status, data = self.post(self.url, body, headers, TIMEOUT)

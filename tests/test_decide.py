@@ -158,3 +158,12 @@ def test_decider_sends_string_state_and_plain_questions_on_the_openrouter_route(
     body = calls[0][1]
     assert body["model"] == "respan/span-01-lite:free"
     assert isinstance(body["state"], str) and isinstance(body["questions"]["q"]["instructions"], str)
+
+
+def test_jev_model_keeps_structured_questions_on_the_openrouter_route():
+    post, calls = fake_post((200, None))
+    d = decide.Decider("k", "typesafe/jev-1.13", route="openrouter", post=post)
+    d.ask("t", {"page": "x"}, {"q": decide.noul({"field": "email", "question": "own?"})})
+    assert calls[0][1]["questions"]["q"]["instructions"] == {"field": "email", "question": "own?"}  # not flattened
+    assert decide.adapt_questions_for("respan/span-01-lite:free")
+    assert not decide.adapt_questions_for("typesafe/jev-1.13") and not decide.adapt_questions_for("jev-latest")

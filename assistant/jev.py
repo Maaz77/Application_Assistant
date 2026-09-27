@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict
 
 from assistant import guard, inference_log, probes
 from assistant.guard import FORM, SUBMIT_RE, never_click  # noqa: F401 - the rule the package applies
-from assistant.decide import RETRY_WAITS, DecisionError, respan_questions
+from assistant.decide import RETRY_WAITS, DecisionError, adapt_questions_for, respan_questions
 from assistant import config
 from assistant.config import CHAT_BASES, Config
 from assistant.rotation import NoModelAvailable, Rotation
@@ -184,7 +184,8 @@ def clean_requests(policy) -> None:
             # respan_questions. Only the package's own System One bodies (state+questions) are touched.
             if not isinstance(cleaned.get("state"), str):
                 cleaned = {**cleaned, "state": json.dumps(cleaned.get("state"), ensure_ascii=False)}
-            if "alpha/decisions" in url and isinstance(cleaned.get("questions"), dict):
+            if ("alpha/decisions" in url and isinstance(cleaned.get("questions"), dict)
+                    and adapt_questions_for(str(cleaned.get("model", "")))):
                 cleaned = {**cleaned, "questions": respan_questions(cleaned["questions"])}
         try:
             resp = original(url, key, cleaned)
