@@ -138,3 +138,23 @@ def test_the_browser_agent_follows_the_same_route(monkeypatch):
     orouter = cfg.model_copy(update={"models": cfg.models.model_copy(update={"jev_route": "openrouter"})})
     env = jev.env_values(orouter, "or-key")
     assert env["TYPESAFE_BASE_URL"] == "https://openrouter.ai/api/alpha/decisions" and "TYPESAFE_API_KEY" not in env
+
+
+def test_respan_questions_flattens_instructions_and_criteria_to_strings():
+    qs = {"a": decide.noul({"form_question": "Q", "question": "ask?"}, true="yes", false="no"),
+          "b": decide.choice("plain?", {"x": "X", "y": {"nested": 1}})}
+    out = decide.respan_questions(qs)
+    assert isinstance(out["a"]["instructions"], str) and '"form_question"' in out["a"]["instructions"]
+    assert out["a"]["criteria"] == {"true": "yes", "false": "no"}      # already strings: unchanged
+    assert out["a"]["type"] == "noul" and out["b"]["type"] == "choice"  # type/ids preserved
+    assert out["b"]["instructions"] == "plain?"                         # a plain string is left alone
+    assert out["b"]["criteria"]["x"] == "X" and out["b"]["criteria"]["y"] == '{"nested": 1}'
+
+
+def test_decider_sends_string_state_and_plain_questions_on_the_openrouter_route():
+    post, calls = fake_post((200, None))
+    d = decide.Decider("k", "respan/span-01-lite:free", route="openrouter", post=post)
+    d.ask("t", {"page": "x"}, {"q": decide.noul({"field": "email", "question": "own?"})})
+    body = calls[0][1]
+    assert body["model"] == "respan/span-01-lite:free"
+    assert isinstance(body["state"], str) and isinstance(body["questions"]["q"]["instructions"], str)

@@ -123,6 +123,28 @@ def fit_state(state: Any) -> str:
     return json.dumps(state, ensure_ascii=False)[:STATE_CHARS]
 
 
+def _plain(v: Any) -> str:
+    return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+
+
+def respan_questions(questions: dict) -> dict:
+    """OpenRouter's decisions models (respan/span-01-lite) accept only plain-string question `instructions` and
+    `criteria` values (HTTP 400 otherwise, live 2026-09-28). Flatten TypeSafe Jev's structured instructions and
+    nested choice criteria to JSON strings — same content, as text. Question ids and types are unchanged."""
+    out = {}
+    for qid, q in questions.items():
+        q = dict(q)
+        if "instructions" in q:
+            q["instructions"] = _plain(q["instructions"])
+        crit = q.get("criteria")
+        if isinstance(crit, dict):
+            q["criteria"] = {k: _plain(v) for k, v in crit.items()}
+        elif isinstance(crit, list):
+            q["criteria"] = [_plain(v) for v in crit]
+        out[qid] = q
+    return out
+
+
 def _httpx_post(url: str, body: dict, headers: dict, timeout: float) -> tuple[int, Any]:
     try:
         r = httpx.post(url, json=body, headers=headers, timeout=timeout)
@@ -180,7 +202,8 @@ class Decider:
         return out
 
     def _one(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
-        body = {"model": self.model, "state": state, "questions": questions}
+        sent = respan_questions(questions) if "alpha/decisions" in self.url else questions
+        body = {"model": self.model, "state": state, "questions": sent}
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         for wait in (*RETRY_WAITS, None):
             status, data = self.post(self.url, body, headers, TIMEOUT)

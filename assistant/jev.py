@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict
 
 from assistant import guard, inference_log, probes
 from assistant.guard import FORM, SUBMIT_RE, never_click  # noqa: F401 - the rule the package applies
-from assistant.decide import RETRY_WAITS, DecisionError
+from assistant.decide import RETRY_WAITS, DecisionError, respan_questions
 from assistant import config
 from assistant.config import CHAT_BASES, Config
 from assistant.rotation import NoModelAvailable, Rotation
@@ -178,10 +178,14 @@ def clean_requests(policy) -> None:
 
     def _post(url, key, body):
         cleaned = clean_json(body)
-        if isinstance(cleaned, dict) and "questions" in cleaned and not isinstance(cleaned.get("state"), str):
-            # System One state must be a string for OpenRouter decisions models (respan/span-01-lite rejects a bare
-            # object: HTTP 400); TypeSafe accepts a string too. cf. decide.fit_state.
-            cleaned = {**cleaned, "state": json.dumps(cleaned.get("state"), ensure_ascii=False)}
+        if isinstance(cleaned, dict) and "questions" in cleaned:
+            # OpenRouter decisions models (respan/span-01-lite) require a string state and plain-string question
+            # instructions/criteria (HTTP 400 otherwise); TypeSafe accepts both too. cf. decide.fit_state /
+            # respan_questions. Only the package's own System One bodies (state+questions) are touched.
+            if not isinstance(cleaned.get("state"), str):
+                cleaned = {**cleaned, "state": json.dumps(cleaned.get("state"), ensure_ascii=False)}
+            if "alpha/decisions" in url and isinstance(cleaned.get("questions"), dict):
+                cleaned = {**cleaned, "questions": respan_questions(cleaned["questions"])}
         try:
             resp = original(url, key, cleaned)
         except Exception as exc:              # the package raises TurboUnavailable on a failed attempt; log it, re-raise
