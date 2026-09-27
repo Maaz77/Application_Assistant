@@ -90,9 +90,9 @@ def test_no_decider_configured_is_an_error():
         decide.current()
 
 
-def test_a_long_state_is_cut_to_fit():
+def test_a_long_state_is_cut_to_fit_and_returned_as_a_string():
     state = decide.fit_state({"url": "u", "text": "x" * (decide.STATE_CHARS * 2)})
-    assert len(json.dumps(state)) <= decide.STATE_CHARS and state["url"] == "u"
+    assert isinstance(state, str) and len(state) <= decide.STATE_CHARS and '"url": "u"' in state
 
 
 def test_the_vercel_route_endpoint_cost_and_errors():

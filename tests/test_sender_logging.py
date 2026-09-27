@@ -29,7 +29,7 @@ def test_decider_logs_every_jev_attempt_including_a_retry(tmp_path):
     entries = _read(tmp_path, L._JEV_FILE)
     assert len(entries) == 2
     assert entries[0]["Response"] == {"error": "Service temporarily unavailable"}
-    assert entries[1]["Noul"][0]["id"] == "q1" and entries[1]["State"] == {"page": "x"}
+    assert entries[1]["Noul"][0]["id"] == "q1" and entries[1]["State"] == '{"page": "x"}'
 
 
 def test_ask_model_logs_every_llm_attempt_including_the_json_object_fallback(tmp_path):

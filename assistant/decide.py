@@ -104,17 +104,23 @@ class Answer:
         raise DecisionError(f"malformed answer: {json.dumps(d)[:160]}")
 
 
-def fit_state(state: Any) -> Any:
-    """Cut a dict state's longest string values until its JSON fits STATE_CHARS."""
-    if not isinstance(state, dict):
-        return state if len(json.dumps(state)) <= STATE_CHARS else json.dumps(state)[:STATE_CHARS]
-    state = dict(state)
-    while len(json.dumps(state, ensure_ascii=False)) > STATE_CHARS:
-        key = max((k for k, v in state.items() if isinstance(v, str)), key=lambda k: len(state[k]), default=None)
-        if key is None or len(state[key]) < 200:
-            break
-        state[key] = state[key][: len(state[key]) * 3 // 4]
-    return state
+def fit_state(state: Any) -> str:
+    """The System One `state` as a string that fits STATE_CHARS. A dict's longest string values are cut first (text
+    before structure), then the whole state is JSON-serialised. A string state is sent unchanged.
+
+    Sending a string, not an object, is required by OpenRouter decisions models such as respan/span-01-lite (which
+    reject a bare JSON object: HTTP 400 "state must be a string or an object with only input … and output …",
+    live 2026-09-28), and TypeSafe Jev accepts a string too (docs: state may be a string, object or array)."""
+    if isinstance(state, str):
+        return state[:STATE_CHARS]
+    if isinstance(state, dict):
+        state = dict(state)
+        while len(json.dumps(state, ensure_ascii=False)) > STATE_CHARS:
+            key = max((k for k, v in state.items() if isinstance(v, str)), key=lambda k: len(state[k]), default=None)
+            if key is None or len(state[key]) < 200:
+                break
+            state[key] = state[key][: len(state[key]) * 3 // 4]
+    return json.dumps(state, ensure_ascii=False)[:STATE_CHARS]
 
 
 def _httpx_post(url: str, body: dict, headers: dict, timeout: float) -> tuple[int, Any]:

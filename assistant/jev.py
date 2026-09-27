@@ -178,6 +178,10 @@ def clean_requests(policy) -> None:
 
     def _post(url, key, body):
         cleaned = clean_json(body)
+        if isinstance(cleaned, dict) and "questions" in cleaned and not isinstance(cleaned.get("state"), str):
+            # System One state must be a string for OpenRouter decisions models (respan/span-01-lite rejects a bare
+            # object: HTTP 400); TypeSafe accepts a string too. cf. decide.fit_state.
+            cleaned = {**cleaned, "state": json.dumps(cleaned.get("state"), ensure_ascii=False)}
         try:
             resp = original(url, key, cleaned)
         except Exception as exc:              # the package raises TurboUnavailable on a failed attempt; log it, re-raise
