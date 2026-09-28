@@ -390,6 +390,8 @@ class Jev:
         "Allow remote debugging?" prompt, which a person has to click)."""
         fn = getattr(self.server, name)
         timeout = _timeout or (self.timeouts[1] if name == "browser_goal" else self.timeouts[0])
+        gateway = gateway_mod.current()
+        tripped_before = gateway.tripped if gateway is not None else None
         t0 = time.monotonic()
         future = _executor().submit(fn, **kwargs)
         try:
@@ -417,9 +419,12 @@ class Jev:
         # package's own thread, where `except Exception` above turns it into an "error(...)" string. The Gateway
         # keeps it, so ask here and raise it on the caller's thread: the run stops with its real reason and the
         # job is left untouched, instead of being recorded as Needs Attention (T3).
-        gateway = gateway_mod.current()
-        if gateway is not None:
-            gateway.check()
+        #
+        # Only a stop this call caused. The tab cleanup that runs after a stop (`book.release`, `book.close`) goes
+        # through here too and sends no model request; re-raising the old stop there would escape the `finally`
+        # blocks in cli.process and cli.run, and the report would never be written.
+        if gateway is not None and gateway.tripped is not None and gateway.tripped is not tripped_before:
+            raise gateway.tripped
         return text
 
     def checked(self, name: str, *, _timeout: float | None = None, **kwargs: Any) -> str:

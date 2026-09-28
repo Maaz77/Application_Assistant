@@ -71,16 +71,24 @@ class PreflightError(RuntimeError):
 PROBE_TIMEOUT = 60.0   # a preflight LLM-inference probe: a trivial page should answer well within this
 
 
-def _probe_llm_inference(cfg: config_mod.Config) -> str:
-    """Live check that a configured LLM inference model answers with a valid PageAnswers, over the strict
-    json_schema path the real run uses. One trivial empty page; LLMInferenceError when no model answers. Returns
-    the model that answered."""
-    models = Rotation(cfg.models.llm_inference)
+def _probe_llm_inference(cfg: config_mod.Config) -> list[str]:
+    """Live check that **each** configured LLM inference model answers with a valid PageAnswers, over the strict
+    json_schema path the real run uses (P1 T1). One trivial empty page per model, so a model that is dead or out of
+    quota is found now and not mid-job. Raises LLMInferenceError naming the model that failed; returns the models
+    that answered, in configured order."""
     user = {"page": {"url": "about:blank", "title": "Preflight", "text": "", "fields": []},
             "sources": {"profile": "", "job": "", "resume": ""}}
-    call_engine(key=config_mod.chat_key(cfg), models=models, system=system_prompt(cfg.policy.free_text_max_chars),
-                user=user, url=config_mod.chat_url(cfg), timeout=PROBE_TIMEOUT)
-    return models.last or cfg.models.llm_inference[0]
+    answered = []
+    for model in cfg.models.llm_inference:
+        rotation = Rotation([model])           # one model at a time: a rotation would hide the one that is out
+        try:
+            call_engine(key=config_mod.chat_key(cfg), models=rotation,
+                        system=system_prompt(cfg.policy.free_text_max_chars), user=user,
+                        url=config_mod.chat_url(cfg), timeout=PROBE_TIMEOUT)
+        except LLMInferenceError as exc:
+            raise LLMInferenceError(f"{model}: {exc}") from None
+        answered.append(model)
+    return answered
 
 
 def preflight(browser: Jev) -> Iterator[str]:
@@ -88,10 +96,14 @@ def preflight(browser: Jev) -> Iterator[str]:
     later failure does not hide an earlier ✓), and raises PreflightError on the first that fails. Writes only the
     run's inference logs."""
     try:
-        model = _probe_llm_inference(browser.cfg)
+        models = _probe_llm_inference(browser.cfg)
+    except gateway_mod.CreditOrKey as exc:
+        # P1 T1: in preflight this is a preflight failure naming the key, not a stopped run — nothing was written.
+        raise PreflightError(f"{exc}. Check {config_mod.KEY_NAMES[browser.cfg.models.chat_route]} in "
+                             f"Tools/Application_Assistant/.env, or add credit") from exc
     except LLMInferenceError as exc:
-        raise PreflightError(f"the LLM inference model does not answer: {exc}") from exc
-    yield f"LLM inference {model} answers (via {browser.cfg.models.chat_route})"
+        raise PreflightError(f"an LLM inference model does not answer: {exc}") from exc
+    yield f"LLM inference answers: {', '.join(models)} (via {browser.cfg.models.chat_route})"
     cfg = browser.cfg
     name = cfg.models.system_one_decision_model
     if cfg.models.system_one_decision_provider == "local":
@@ -104,6 +116,9 @@ def preflight(browser: Jev) -> Iterator[str]:
     try:
         a = decide.current().ask("preflight", "A job application form asks for the candidate's email address.",
                                  {"form": decide.noul("Is this about a job application?")})
+    except gateway_mod.CreditOrKey as exc:
+        key = config_mod.KEY_NAMES.get(cfg.models.system_one_decision_provider, "the route's key")
+        raise PreflightError(f"{exc}. Check {key} in Tools/Application_Assistant/.env, or add credit") from exc
     except decide.DecisionError as exc:
         hint = decide.start_hint(cfg)
         raise PreflightError(f"the decision model ({name}) does not answer: {exc}"

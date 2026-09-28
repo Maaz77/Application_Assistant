@@ -84,16 +84,38 @@ def click_rule_differences(server) -> list[str]:
     return out
 
 
+def connection_differences(server) -> list[str]:
+    """`jev.connect_chrome` opens the run's single CDP connection itself (P1 T5), which means reaching into the
+    package's browser manager. Check that what it reaches for is still there."""
+    import importlib
+    browser = importlib.import_module(server.__name__.rpartition(".")[0] + ".browser")   # only jev.py imports it by name
+    out = []
+    manager = server.MANAGER
+    if not hasattr(manager, "_cdp"):
+        out.append("browser.BrowserManager has no _cdp: jev.connect_chrome cannot pre-open the run's connection")
+    if not hasattr(manager.cfg, "attach_data_dirs"):
+        out.append("browser config has no attach_data_dirs(): jev.connect_chrome cannot pass it to attach_chrome")
+    params = inspect.signature(browser.attach_chrome).parameters
+    missing = [p for p in ("url", "timeout", "data_dirs", "open_timeout") if p not in params]
+    if missing:
+        out.append(f"attach_chrome{inspect.signature(browser.attach_chrome)} no longer takes {missing}")
+    if "open_timeout=max(" not in inspect.getsource(type(manager).cdp.fget):
+        out.append("browser.BrowserManager.cdp no longer sets its own open_timeout: re-check the handshake budget")
+    return out
+
+
 def main() -> int:
     from assistant import config, jev
     cfg = config.load()
     jev.apply_env(cfg, config.chat_key(cfg))
     diffs = (differences(jev.server_signatures()) + text_helper_differences(jev.load())
-             + request_differences(jev.load()) + click_rule_differences(jev.load()))
+             + request_differences(jev.load()) + click_rule_differences(jev.load())
+             + connection_differences(jev.load()))
     for d in diffs:
         print("✗", d)
     if not diffs:
-        print(f"✓ {len(EXPECTED)} browser_* signatures match spec §3; text helper rotation, request cleaning and the click rule are in place")
+        print(f"✓ {len(EXPECTED)} browser_* signatures match spec §3; text helper rotation, request cleaning, "
+              f"the click rule and the pre-opened CDP connection are in place")
     return 1 if diffs else 0
 
 

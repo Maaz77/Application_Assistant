@@ -352,7 +352,10 @@ package's internals and is covered by `contract_check`.
   | `CreditOrKey` | HTTP 401, 402 or 403, never retried | `<host> rejected the key / refused the account (HTTP n: <what the provider said>) — check the key / add credit on <route>` |
 
   In every case: the current job gets no record, its tab stays as it is, queued jobs stay at "Resume Built", the
-  report names the reason and the exit code is 3. A stop during preflight is a stop too, not a preflight failure.
+  report names the reason and the exit code is 3. In **preflight**, a `CreditOrKey` is a `PreflightError` instead —
+  exit 1, naming the key variable to check — because nothing has been written yet; a `ProviderOutage` or
+  `BudgetExceeded` there still exits 3. `Jev.call` re-raises only a stop that its own call caused, so the tab
+  cleanup that runs after a stop still completes and the report is still written.
   403 is included because Vercel AI Gateway answers it for an account with no card, which no retry or other model
   fixes. Because a stop can be raised inside the package's own worker thread — where `Jev.call`'s broad
   `except Exception` would turn it into an `error(...)` string — the Gateway keeps the first stop and `Jev.call`

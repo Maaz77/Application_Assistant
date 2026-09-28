@@ -84,12 +84,28 @@ def test_bad_config_is_exit_1(tmp_path, capsys):
     assert cli.main(["--config", str(bad), "preflight"]) == 1
 
 
-def test_llm_inference_probe_uses_the_chat_route_and_reports_the_model(monkeypatch):
+def test_the_llm_inference_probe_asks_every_configured_model(monkeypatch):
+    """P1 T1: each configured model, not just the first that answers — a dead second model must be found now and
+    not mid-job. One trivial empty page each."""
     cfg = cli.config_mod.load()
-    seen = {}
-    monkeypatch.setattr(cli, "call_engine", lambda **kw: seen.update(url=kw["url"]) or None)
-    assert cli._probe_llm_inference(cfg) == cfg.models.llm_inference[0]
-    assert seen["url"] == cli.config_mod.chat_url(cfg)
+    seen = []
+    monkeypatch.setattr(cli, "call_engine",
+                        lambda **kw: seen.append((kw["url"], list(kw["models"].models))) or None)
+    assert cli._probe_llm_inference(cfg) == list(cfg.models.llm_inference)
+    assert [m for _, ms in seen for m in ms] == list(cfg.models.llm_inference)
+    assert {url for url, _ in seen} == {cli.config_mod.chat_url(cfg)}
+
+
+def test_the_probe_names_the_model_that_did_not_answer(monkeypatch):
+    cfg = cli.config_mod.load()
+    dead = cfg.models.llm_inference[-1]
+
+    def fake(**kw):
+        if dead in kw["models"].models:
+            raise cli.LLMInferenceError("no capacity")
+    monkeypatch.setattr(cli, "call_engine", fake)
+    with pytest.raises(cli.LLMInferenceError, match=dead):
+        cli._probe_llm_inference(cfg)
 
 
 def test_llm_inference_probe_raises_when_no_model_answers(monkeypatch):
@@ -113,3 +129,17 @@ def test_the_local_decision_route_asks_for_no_key(tmp_path, monkeypatch):
     assert not [p for p in cli._static_checks(cfg, "chat-key") if "API_KEY" in p]
     missing = [p for p in cli._static_checks(cfg, "") if "API_KEY" in p]
     assert len(missing) == 1 and missing[0].startswith("OPENROUTER_API_KEY is missing") and "KEV_" not in missing[0]
+
+
+def test_a_rejected_key_fails_preflight_and_names_the_variable(monkeypatch):
+    """P1 T1: in preflight a 401/402/403 is a preflight failure (exit 1, nothing written) that says which key to
+    check — not a stopped run. During the job loop the same condition is a clean stop (exit 3, T3)."""
+    from assistant import gateway as G
+    cfg = cli.config_mod.load()
+
+    def fake(**kw):
+        raise G.CreditOrKey("ai-gateway.vercel.sh rejected the key (HTTP 401) — check the key / add credit on vercel")
+    monkeypatch.setattr(cli, "call_engine", fake)
+    browser = type("B", (), {"cfg": cfg})()
+    with pytest.raises(cli.PreflightError, match="AI_GATEWAY_API_KEY"):
+        list(cli.preflight(browser))

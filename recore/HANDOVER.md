@@ -63,29 +63,48 @@ returns the shapes `Answer.parse` already reads. The Decider asks System One fir
 System One send and the fallback send defer their verdict, and the Decider reports **one** verdict for the pair.
 
 **One Chrome connection** (T5). `jev.connect_chrome(cfg, 180)` + `cli.connect_once`, called before preflight.
+`contract_check.connection_differences` checks the four package internals it reaches for (`MANAGER._cdp`,
+`cfg.attach_data_dirs`, `attach_chrome`'s parameters, and that `BrowserManager.cdp` still sets its own
+`open_timeout`).
+
+**Preflight** (T1). It now probes **each** configured LLM inference model, one at a time, and names the one that
+failed. A 401/402/403 during preflight is a `PreflightError` naming the key variable (`config.KEY_NAMES`) and exit 1
+— "nothing written" is the accurate outcome there, and it is what T1 asks for; the same condition during the job
+loop is a `CreditOrKey` stop with exit 3 (T3).
 
 **Report** (T6). Summary gains the model-request totals, the spend (reported/estimated), the highest number in
 flight and `Decisions by fallback: N`; Timings gains a per-job breakdown.
 
 **Config** (T1). New strict sections `[limits]`, `[budget]`, `[jev]`, `[decider]`, `[prices]`.
 
-## Two defects the new tests found
+## Four defects found before the gate
 
-1. `Gateway.release()` was dead code: `send` frees the queue slot before returning, so the chat fallback's send was
+1. **The sticky re-raise fired during cleanup.** `Jev.call` asked the Gateway for a stop after *every* browser call,
+   including the tab cleanup that runs after one. `StopRun` is not a `RuntimeError`, so it escaped the `except`
+   clauses in `cli.process`'s and `cli.run`'s `finally` blocks, `report.write()` never ran, and the run ended in a
+   traceback with exit 1 instead of a report and exit 3 — failing T3 exactly where it matters. `Jev.call` now notes
+   `gateway.tripped` before the call and re-raises only a stop that this call caused. Covered by three tests in
+   `test_clean_stop.py`, verified by reintroducing the bug.
+2. **The live fixture installed no Gateway.** `tests/conftest.py`'s `decider` fixture built a `Decider` without one,
+   so the first `ask` in any `--live` test (and `tripwire --live`) would have raised "may not bypass". It now
+   installs `gateway.for_config(cfg)` for a live test and none for an offline one — a sender with no Gateway refuses
+   rather than reaching a provider, which is what keeps the offline suite off the network.
+3. `Gateway.release()` was dead code: `send` frees the queue slot before returning, so the chat fallback's send was
    never nested and could not self-deadlock. Deleted; the test that proved it stayed, because a regression there
    would hang rather than fail.
-2. `llm_inference` still carried an `httpx` sender no longer on any path. A static test now forbids `httpx.post` in
+4. `llm_inference` still carried an `httpx` sender no longer on any path. A static test now forbids `httpx.post` in
    any model-sending module, so a second path cannot be reintroduced quietly.
 
 ## Evidence
 
-**Offline:** 324 unit + 50 browser pass; `contract_check` clean; `run --dry-run` unchanged (7 jobs);
+**Offline:** 329 unit + 50 browser pass; `contract_check` clean; `run --dry-run` unchanged (7 jobs);
 `test_baseline_p0` green after the one intended golden change (`provider.require_parameters`).
 
-**New tests, 59 functions in four files:** `tests/test_gateway.py` (30, against a real local `http.server`),
-`tests/test_fallback.py` (16), `tests/test_clean_stop.py` (6, one of them parametrized over the three stops, on
-temp copies of the tracker and the job folders), `tests/test_no_bypass.py` (7, both HTTP clients sealed off plus a
-static check), plus five P1 config-default tests in `tests/test_config.py`.
+**New tests, 62 functions in four files:** `tests/test_gateway.py` (30, against a real local `http.server`),
+`tests/test_fallback.py` (16), `tests/test_clean_stop.py` (9 — one parametrized over the three stops, three over the
+cleanup path with a real `Jev` and `TabBook`, all on temp copies of the tracker and the job folders),
+`tests/test_no_bypass.py` (7, both HTTP clients sealed off plus a static check), plus five P1 config-default tests
+and three preflight-probe tests in `tests/test_config.py` / `tests/test_cli.py`.
 
 **Changed assertions**, each required by P1 and recorded in `DISCOVERY.md`: `test_decide`'s batching and retry
 ladders; `test_jev`'s goal retry; the 401 assertions in `test_answers` (now a clean stop, not one model's failure).
@@ -121,7 +140,9 @@ No guard, tripwire or records test was touched.
    condition and is not cured by retrying or by another model.
 5. **T2's timeout for the local route** — `models.local.timeout` (120 s), not the 20 s P1 names for System One: a
    pass on an Apple GPU is seconds, not a data-centre's milliseconds.
-6. **A model rotation hands over before it retries** — a chat request passes `attempts=1` while an untried model
+6. **A key failure is exit 1 in preflight and exit 3 in the job loop.** T1 says it "fails preflight"; T3 says it
+   stops the run. Both hold, split by where it happens.
+7. **A model rotation hands over before it retries** — a chat request passes `attempts=1` while an untried model
    remains. P1 caps attempts per request; this keeps the cheaper behaviour the live 2026-09-24 evidence encodes,
    and is still one retry layer (another model is a different request).
 
