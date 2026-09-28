@@ -7,7 +7,7 @@ import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 from urllib.parse import urlparse
 
 from assistant import config as config_mod
@@ -81,15 +81,15 @@ def _probe_llm_inference(cfg: config_mod.Config) -> str:
     return models.last or cfg.models.llm_inference[0]
 
 
-def preflight(browser: Jev) -> list[str]:
-    """Decision model, LLM inference, server, capabilities, LinkedIn sign-in. Raises PreflightError. Writes only
-    the run's inference logs."""
-    done = []
+def preflight(browser: Jev) -> Iterator[str]:
+    """LLM inference, decision model, server, capabilities, LinkedIn sign-in. Yields each check as it passes (so a
+    later failure does not hide an earlier ✓), and raises PreflightError on the first that fails. Writes only the
+    run's inference logs."""
     try:
         model = _probe_llm_inference(browser.cfg)
     except LLMInferenceError as exc:
         raise PreflightError(f"the LLM inference model does not answer: {exc}") from exc
-    done.append(f"LLM inference {model} answers (via {browser.cfg.models.chat_route})")
+    yield f"LLM inference {model} answers (via {browser.cfg.models.chat_route})"
     try:
         a = decide.current().ask("preflight", "A job application form asks for the candidate's email address.",
                                  {"form": decide.noul("Is this about a job application?")})
@@ -97,12 +97,12 @@ def preflight(browser: Jev) -> list[str]:
         raise PreflightError(f"the decision model (Jev) does not answer: {exc}") from exc
     if not a["form"].yes(0.5):
         raise PreflightError("the decision model (Jev) answered a trivial question wrongly")
-    done.append(f"decision model {browser.cfg.models.jev} answers (via {browser.cfg.models.jev_route})")
+    yield f"decision model {browser.cfg.models.jev} answers (via {browser.cfg.models.jev_route})"
     doc = browser.doctor()
     for cap in ("text_model", "uploads", "js_eval"):
         if doc.get(cap) is not True:
             raise PreflightError(f"browser_doctor: {cap} is not enabled")
-    done.append("server started; text helper, uploads and JS eval enabled")
+    yield "server started; text helper, uploads and JS eval enabled"
     print("… connecting to Chrome — if Chrome shows “Allow remote debugging?”, click Allow", flush=True)
     try:
         browser.open(LINKEDIN_FEED, "preflight", timeout=CONNECT_TIMEOUT)
@@ -117,10 +117,10 @@ def preflight(browser: Jev) -> list[str]:
             pass
     if not pages.linkedin_feed_ok(table.url):
         raise PreflightError(f"LinkedIn is signed out in this Chrome (landed on {table.url})")
-    done.append("LinkedIn signed in")
+    yield "LinkedIn signed in"
     if (browser.doctor()).get("connected") is not True:
         raise PreflightError("browser_doctor: not connected after the LinkedIn probe")
-    done.append("attached to Chrome")
+    yield "attached to Chrome"
     try:
         book = tabs.TabBook(browser)
         browser.open("about:blank", "preflight-tabs")
@@ -129,8 +129,7 @@ def preflight(browser: Jev) -> list[str]:
         book.close()
     except (tabs.TabError, JevError) as exc:
         raise PreflightError(f"tab bookkeeping does not work in this Chrome: {exc}") from exc
-    done.append("tab release works")
-    return done
+    yield "tab release works"
 
 
 def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
