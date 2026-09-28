@@ -23,21 +23,10 @@ system_one_decision_provider = "local"    # who serves the System One decision m
 
 # Each list is tried in turn: the model that answered last goes first, and one that is out (rate-limited,
 # overloaded, wrong output) hands over to the next; when none answers the job goes to Needs Attention.
-[models.openrouter]                # OPENROUTER_API_KEY. Free tier: 50 requests a day across all free models
-# Each one supports structured outputs and answered the engine's real request shape on 2026-09-24.
-llm_inference = [
-  "qwen/qwen3.8-27b:free",
-  "dots-studio/dots-3-note-preview:free",
-  "nvidia/nemotron-3-super-120b-a12b:free",
-  "nex-agi/nex-n2.5-mini:free",
-  "nex-agi/nex-n2.5-pro:free",             # slow (54 s for one short value): last
-]
-text_helper = [                    # types the values the browser agent enters
-  "qwen/qwen3.8-27b:free",
-  "dots-studio/dots-3-note-preview:free",
-  "nex-agi/nex-n2.5-mini:free",
-  "nvidia/nemotron-3-super-120b-a12b:free",
-]
+[models.openrouter]                # OPENROUTER_API_KEY. Paid: no `:free` model is configured (D14) — a free
+# model shares its provider's capacity with everyone and answers 429 or an overloaded body in bursts.
+llm_inference = ["deepseek/deepseek-v4.1-flash", "openai/gpt-5.4-mini"]
+text_helper   = ["deepseek/deepseek-v4.1-flash", "openai/gpt-5.4-mini"]   # the package's text helper, until P2
 system_one_decision_model = "typesafe/jev-1.13"   # TypeSafe System One via https://openrouter.ai/api/alpha/decisions
 
 [models.vercel]                    # AI_GATEWAY_API_KEY (Vercel AI Gateway, paid from its credit)
@@ -56,6 +45,29 @@ system_one_decision_model = "kev-latest"   # the name the server answers to; --r
 # a short state is also much faster on an Apple GPU. 12000 characters is about 3000 tokens.
 state_chars = 12000
 timeout = 120.0                    # seconds; one pass on an M3 is seconds, not the milliseconds of an H100
+
+[limits]                           # one queue for every model request (gateway.py)
+max_in_flight = 1                  # a run sent 222 System One requests in 19 min with 4 batches in flight (§13.1)
+min_interval_s = 0.25              # seconds between the starts of two requests
+max_attempts = 3                   # per request, and the only retry layer there is
+
+[budget]
+max_usd_per_run = 1.00             # D15: the run stops cleanly when its model spend reaches this
+
+[jev]
+max_questions_per_request = 24     # above this a judgment is split, and the parts go one after another
+
+[decider]
+fallback = "chat"                  # "chat" | "none": who answers when the System One model fails (D19)
+
+[prices]                           # USD per million tokens [input, output]; used only when the gateway reports no
+# cost. Vercel reports it at usage.cost and provider_metadata.gateway.cost, so this is a fallback (2026-09-27).
+# A System One model on this machine is free, and so has no entry.
+"mistral/mistral-small"        = [0.20, 0.60]
+"mistral/mistral-nemo"         = [0.02, 0.04]
+"typesafe/jev-1.13"            = [0.042, 0.0]
+"deepseek/deepseek-v4.1-flash" = [0.099, 0.60]
+"openai/gpt-5.4-mini"          = [0.75, 4.50]
 
 [policy]
 prefill = "keep-if-silent"         # or "strict"

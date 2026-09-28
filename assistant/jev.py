@@ -25,7 +25,8 @@ from pydantic import BaseModel, ConfigDict
 
 from assistant import guard, inference_log, probes
 from assistant.guard import FORM, SUBMIT_RE, never_click  # noqa: F401 - the rule the package applies
-from assistant.decide import RETRY_WAITS, DecisionError, adapt_questions_for, respan_questions
+from assistant import gateway as gateway_mod
+from assistant.decide import DecisionError, adapt_questions_for, respan_questions
 from assistant import config
 from assistant.config import CHAT_BASES, Config
 from assistant.rotation import NoModelAvailable, Rotation
@@ -37,6 +38,7 @@ EXPECTED_PACKAGE_VERSION = "0.1.5+aa6"
 LOCAL_PLACEHOLDER_KEY = "local"      # an open Kev server wants no key; the package wants a non-empty one
 DEFAULT_TIMEOUT = 60.0
 GOAL_TIMEOUT = 300.0
+GOAL_RETRY_WAIT = 2.0        # the one retry of a goal that took no step; the Gateway retried the request itself
 EXIT_STOPPED = 3
 
 # Result prefixes the package uses for failures (server._error and friends).
@@ -178,15 +180,25 @@ def clean_json(value: Any) -> Any:
 
 
 def clean_requests(policy, string_state: bool = True) -> None:
-    """Every request the package sends (the decisions, option picks, the text helper) goes through
-    `policy._post(url, key, body)`, and httpx encodes the body as UTF-8: a page whose text was cut inside a
-    surrogate pair made every browser_goal fail with UnicodeEncodeError (Genesys and Mastercard, live 2026-09-24).
-    Wrap it so the body is cleaned first. Calls inside policy.py look `_post` up at call time (contract_check)."""
+    """Every request the package sends (its System One decisions, option picks and the text helper) goes through
+    `policy._post(url, key, body)`. Wrap it so that:
+
+    1. the body is cleaned first — httpx encodes it as UTF-8, and a page whose text was cut inside a surrogate pair
+       made every browser_goal fail with UnicodeEncodeError (Genesys and Mastercard, live 2026-09-24);
+    2. the request leaves through our Gateway instead of the package's own client (P1 T2). `original` is never
+       called, so the package's three internal attempts (`policy._post`'s `range(3)`) and its fixed 30 s
+       `policy.CLIENT` are out of the send path, and this program has exactly one queue, one retry layer and one
+       log for every model request.
+
+    A failure is raised as the package's own `TurboUnavailable`, with the message text it would have produced
+    (`policy._http_reason`), because `TRANSIENT_GOAL_RE` and the package's own callers read those strings.
+    Calls inside policy.py look `_post` up at call time (contract_check)."""
     original = getattr(policy._post, "__wrapped__", policy._post)
 
     def _post(url, key, body):
         cleaned = clean_json(body)
-        if isinstance(cleaned, dict) and "questions" in cleaned:
+        is_decision = isinstance(cleaned, dict) and "questions" in cleaned
+        if is_decision:
             # OpenRouter decisions models (respan/span-01-lite) require a string state and plain-string question
             # instructions/criteria (HTTP 400 otherwise); TypeSafe accepts both too. cf. decide.fit_state /
             # respan_questions. Only the package's own System One bodies (state+questions) are touched.
@@ -197,22 +209,35 @@ def clean_requests(policy, string_state: bool = True) -> None:
             if ("alpha/decisions" in url and isinstance(cleaned.get("questions"), dict)
                     and adapt_questions_for(str(cleaned.get("model", "")))):
                 cleaned = {**cleaned, "questions": respan_questions(cleaned["questions"])}
-        try:
-            resp = original(url, key, cleaned)
-        except Exception as exc:              # the package raises TurboUnavailable on a failed attempt; log it, re-raise
-            _log_package_request(url, cleaned, None, str(exc))
-            raise
-        _log_package_request(url, cleaned, resp, None)
-        return resp
+        gateway = gateway_mod.current()
+        if gateway is None:                   # no run in progress (a test driving the package directly)
+            try:
+                resp = original(url, key, cleaned)
+            except Exception as exc:          # the package raises TurboUnavailable on a failed attempt; log it
+                _log_package_request(url, cleaned, None, str(exc))
+                raise
+            _log_package_request(url, cleaned, resp, None)
+            return resp
+        kind = gateway_mod.JEV if is_decision else gateway_mod.CHAT
+        headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        out = gateway.send(kind, url, cleaned, headers, model=str(cleaned.get("model") or ""))
+        if not out.ok:
+            raise policy.TurboUnavailable(policy._http_reason(out.status) if out.status
+                                          else "Decision model unreachable; no action executed.")
+        if not isinstance(out.body, dict):
+            raise policy.TurboUnavailable("Decision model returned a body that is not JSON "
+                                          f"(HTTP {out.status}); no action executed.")
+        return out.body
 
     _post.__wrapped__ = original
     policy._post = _post
 
 
 def _log_package_request(url: str, body, resp, reason: str | None) -> None:
-    """Route the package's own request to the right inference log (§6, D4). The package's `_post` retries internally
-    (range(3)), so only the last attempt is visible here (DISCOVERY 2026-09-27). A Jev body carries `state` and
-    `questions`; the text helper's body carries `messages`."""
+    """Route the package's own request to the right inference log (§6, D4) when no Gateway is installed — with one,
+    the Gateway logs every attempt itself and this is not reached. The package's `_post` retries internally
+    (range(3)), so only the last attempt is visible here (DISCOVERY 2026-09-27). A System One body carries `state`
+    and `questions`; the text helper's body carries `messages`."""
     if not isinstance(body, dict):
         return
     if "state" in body and "questions" in body:
@@ -262,6 +287,24 @@ def rotate_text_helper(policy, models: tuple[str, ...]) -> None:
     text_for.__wrapped__ = original
     text_for.rotation = rotation
     policy.text_for = text_for
+
+
+def connect_chrome(cfg: Config, open_timeout: float) -> None:
+    """Open the run's ONE CDP connection, before preflight (D13, P1 T5).
+
+    The package already holds one websocket per process: `browser.Manager.cdp` builds it lazily on first use and
+    `browser_close(session)` closes a tab, not the socket (browser.py, 0.1.5+aa6). What it does not have is a long
+    enough handshake: `attach_chrome(..., open_timeout=max(60, call_timeout))` with the default 30 s call timeout
+    gives 60 s, and Chrome's "Allow remote debugging?" prompt waits for a person. So the socket is built here, with
+    a human-sized budget, and handed to the manager — rather than raising `call_timeout`, which is the default
+    timeout of every later CDP call. Checked by contract_check.
+    """
+    from jev_ultrafast_mcp import browser as browser_mod
+    manager = load().MANAGER
+    if manager._cdp is not None:
+        return
+    manager._cdp = browser_mod.attach_chrome(cfg.browser.cdp_url, timeout=manager.cfg.call_timeout,
+                                             data_dirs=manager.cfg.attach_data_dirs(), open_timeout=open_timeout)
 
 
 def package_version() -> str:
@@ -386,6 +429,13 @@ class Jev:
             text = f"error({type(exc).__name__}): {exc}"
         text = clean_text(text if isinstance(text, str) else str(text))
         self._log(name, kwargs, text, int((time.monotonic() - t0) * 1000))
+        # A clean stop (spend cap, provider outage, key or credit) can be raised inside `policy._post` on the
+        # package's own thread, where `except Exception` above turns it into an "error(...)" string. The Gateway
+        # keeps it, so ask here and raise it on the caller's thread: the run stops with its real reason and the
+        # job is left untouched, instead of being recorded as Needs Attention (T3).
+        gateway = gateway_mod.current()
+        if gateway is not None:
+            gateway.check()
         return text
 
     def checked(self, name: str, *, _timeout: float | None = None, **kwargs: Any) -> str:
@@ -435,10 +485,11 @@ class Jev:
         return self.assert_([{"type": "js", "expr": probes.CAPTCHA_PRESENT}], session).startswith("PASS")
 
     def goal(self, goal: str, session: str, *, max_steps: int = 20, verify: list[dict] | None = None) -> str:
-        """browser_goal. A goal the decision model could not serve (429/5xx, unreachable) before any step is
-        asked again after each of decide.RETRY_WAITS; still out, it is a DecisionError (the job goes to Needs
-        Attention as `decision`), never a page with "no way forward"."""
-        for wait in (*RETRY_WAITS, None):
+        """browser_goal. A goal the decision model could not serve (429/5xx, unreachable) before any step is asked
+        again ONCE (P1 T2: the Gateway holds the retry layer, and it has already spent its attempts on the request
+        underneath this goal); still out, it is a DecisionError (the job goes to Needs Attention as `decision`),
+        never a page with "no way forward"."""
+        for wait in (GOAL_RETRY_WAIT, None):
             # verbose=True: the trace is the only place a needs_confirmation label shows (B1). No url= (0.1.5).
             out = self.call("browser_goal", goal=goal, session=session, max_steps=max_steps, verify=verify,
                             verbose=True)

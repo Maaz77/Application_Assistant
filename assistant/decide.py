@@ -15,15 +15,16 @@ DecisionError: a job that cannot get a decision goes to Needs-Attention, it is n
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlparse
 
 import httpx
 
+from assistant import gateway as gateway_mod
 from assistant import inference_log
 
 # Jev's System One endpoint per route (TypeSafe's request and answer shapes on both). The model ID per route is
@@ -32,20 +33,12 @@ from assistant import inference_log
 ENDPOINTS = {"vercel": "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
              "openrouter": "https://openrouter.ai/api/alpha/decisions"}
 SYSTEM_ONE_PATH = "/v1/systemone"   # TypeSafe's own path, which a Kev server on this machine serves (README, API)
-TIMEOUT = 30.0
 # Questions per request. TypeSafe fails a whole request when any one question fails, so a big request rarely gets
 # through: on Vercel, 2026-09-24, 44 questions per request failed 5 of 6 times, 11 per request 7 of 12, 4 per
-# request 4 of 33 (503 "Service temporarily unavailable" from the provider). Small batches go out side by side.
-BATCH = 4
-PARALLEL = 4                # batches in flight at once
+# request 4 of 33 (503 "Service temporarily unavailable" from the provider). Above MAX_QUESTIONS a judgment is
+# split and the parts go one after another — never side by side: P1 T2 allows one request in flight at a time.
+MAX_QUESTIONS = 24
 STATE_CHARS = 60_000        # Jev's context is 32K tokens: the state is cut to fit, text first
-# Waits before each retry of a transient failure (no connection, 429, 5xx). Vercel's Jev answers "high demand"
-# (429) and "Service temporarily unavailable" (503) in bursts: 7 of 42 live tests on 2026-09-24 failed after one
-# 2 s retry, and in the live run that day a burst outlasted 2+5+15 s (23.7 s) and sent The Flex to Needs Attention.
-RETRY_WAITS = (2.0, 5.0, 15.0, 30.0, 60.0)
-# A server on this machine is never rate-limited and never "in high demand": a failure is a server that is down or
-# a model that is out of memory, and neither is cured by waiting a minute. Say so quickly instead.
-LOCAL_RETRY_WAITS = (2.0, 5.0)
 
 # What each yes/no answer must reach before the code acts on it. Set by the cost of being wrong, per question.
 THRESHOLDS = {
@@ -167,17 +160,6 @@ def respan_questions(questions: dict) -> dict:
     return out
 
 
-def _httpx_post(url: str, body: dict, headers: dict, timeout: float) -> tuple[int, Any]:
-    try:
-        r = httpx.post(url, json=body, headers=headers, timeout=timeout)
-    except httpx.HTTPError as exc:
-        return 0, {"error": f"{type(exc).__name__}: {exc}"}
-    try:
-        return r.status_code, r.json()
-    except ValueError:
-        return r.status_code, {"raw": r.text[:300]}
-
-
 def _error(data: Any) -> str:
     """OpenRouter: {"error": {"message"}}; Vercel: {"error": {"message", "type"}} or {"message", "error_type"}."""
     err = data.get("error", data) if isinstance(data, dict) else data
@@ -196,35 +178,45 @@ def _cost(data: Any) -> float:
 
 
 class Decider:
-    """ask(topic, state, questions) → {question id: Answer}. `post` is injectable for tests."""
+    """ask(topic, state, questions) → {question id: Answer}.
+
+    Every request leaves through the Gateway (P1 T2): the queue, the one retry layer, the timeout, the cost and the
+    log all live there, so this class only shapes the request and reads the answers. A judgment is one request;
+    above MAX_QUESTIONS questions it is split and the parts go one after another.
+    """
 
     def __init__(self, key: str, model: str, *, route: str = "openrouter", url: str | None = None,
-                 state_chars: int = STATE_CHARS, timeout: float = TIMEOUT, retry_waits: tuple[float, ...] = RETRY_WAITS,
-                 keep_object_state: bool = False, post: Callable | None = None,
-                 sleep: Callable[[float], None] = time.sleep):
+                 state_chars: int = STATE_CHARS, keep_object_state: bool = False,
+                 max_questions: int = MAX_QUESTIONS, fallback: "ChatDecider | None" = None,
+                 gateway: "gateway_mod.Gateway | None" = None, post: Callable | None = None,
+                 timeout: float | None = None, sleep: Callable[[float], None] = time.sleep):
         self.key, self.model = key, model
         self.url = url or ENDPOINTS[route]
-        self.state_chars, self.timeout, self.retry_waits = state_chars, timeout, retry_waits
+        self.state_chars = state_chars
         self.keep_object_state = keep_object_state
-        self.post = post or _httpx_post
-        self.sleep = sleep
+        self.max_questions = max(1, max_questions)
+        self.fallback = fallback
+        self.timeout = timeout
+        # `post` is for a caller that sends with its own client (the tests). It does not bypass the Gateway: it gets
+        # a Gateway of its own, so the queue, the retry rule and the log apply to it as well (A2).
+        self._gateway = gateway or (gateway_mod.private(post, sleep=sleep) if post else None)
         self.calls = 0
         self.cost = 0.0
-        self._lock = threading.Lock()         # batches run on worker threads: counters and the log are shared
+        self.by_fallback = 0
+        self._lock = threading.Lock()         # a goal runs on a worker thread: the counters are shared
+
+    @property
+    def gateway(self) -> "gateway_mod.Gateway":
+        return self._gateway or gateway_mod.required()
 
     def ask(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
-        """Every question answered, or DecisionError. Batches of BATCH questions, PARALLEL at a time; each batch
-        retries on its own, so one failing batch does not cost the others their answers."""
+        """Every question answered, or DecisionError."""
         if not questions:
             return {}
         ids, fitted = list(questions), fit_state(state, self.state_chars, self.keep_object_state)
-        chunks = [{k: questions[k] for k in ids[i:i + BATCH]} for i in range(0, len(ids), BATCH)]
-        if len(chunks) == 1:
-            return self._one(topic, fitted, chunks[0])
         out: dict[str, Answer] = {}
-        with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
-            for part in pool.map(lambda c: self._one(topic, fitted, c), chunks):
-                out.update(part)
+        for i in range(0, len(ids), self.max_questions):
+            out.update(self._one(topic, fitted, {k: questions[k] for k in ids[i:i + self.max_questions]}))
         return out
 
     def _one(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
@@ -233,23 +225,121 @@ class Decider:
         # A Kev server started without KEV_API_KEY is open and ignores the header; the cloud routes need it.
         headers = {"Content-Type": "application/json",
                    **({"Authorization": f"Bearer {self.key}"} if self.key else {})}
-        for wait in (*self.retry_waits, None):
-            status, data = self.post(self.url, body, headers, self.timeout)
-            inference_log.log_jev(body, data, None if status else "request error")   # §6.3: every attempt
-            if status == 200 or wait is None or not (status == 0 or status == 429 or status >= 500):
-                break
-            self.sleep(wait)
-        if status != 200:
-            raise DecisionError(f"decision model HTTP {status}: {_error(data)}")
+        gateway = self.gateway
+        # The Gateway counts this request's verdict only when we say so: a request the chat fallback answered is not
+        # evidence that the provider is out (T4), so the verdict is deferred until the fallback has had its turn.
+        out = gateway.send(gateway_mod.JEV, self.url, body, headers, model=self.model,
+                           timeout=self.timeout, defer_verdict=True)
+        if out.ok:
+            try:
+                answers = self._answers(out.body, questions)
+            except DecisionError:
+                gateway.note_failure(False)      # the model answered; a malformed answer is not an outage
+                raise
+            gateway.note_failure(False)
+            with self._lock:
+                self.calls += 1
+                self.cost += _cost(out.body)
+            return answers
+        if self.fallback is not None:
+            try:
+                with gateway.release():          # max_in_flight = 1: the nested chat call needs the slot back
+                    answers = self.fallback.ask(topic, state, questions)
+            except DecisionError as exc:
+                gateway.note_failure(True)       # both failed: one failure for the breaker
+                raise DecisionError(f"decision model HTTP {out.status}: {_error(out.body)}; "
+                                    f"the chat fallback also failed ({exc})") from None
+            gateway.note_failure(False)
+            gateway.note_fallback()
+            with self._lock:
+                self.calls += 1
+                self.by_fallback += 1
+            return answers
+        gateway.note_failure(True)
+        raise DecisionError(f"decision model HTTP {out.status}: {_error(out.body)}")
+
+    @staticmethod
+    def _answers(data: Any, questions: dict[str, dict]) -> dict[str, Answer]:
         raw = (data or {}).get("answers") or {}
         missing = [k for k in questions if k not in raw]
         if missing:
             raise DecisionError(f"decision model left {len(missing)} question(s) unanswered: {missing[:3]}")
-        answers = {k: Answer.parse(raw[k]) for k in questions}
-        with self._lock:
-            self.calls += 1
-            self.cost += _cost(data)
-        return answers
+        return {k: Answer.parse(raw[k]) for k in questions}
+
+
+class ChatDecider:
+    """The same typed questions, answered by a chat model (D19, P1 T4).
+
+    A System One model returns a probability per question natively; a chat model has to be asked for one. Each
+    question goes out as its own JSON object in one request, and the answers come back in the shape `Answer.parse`
+    already reads, so nothing downstream knows which backend answered. Its calls are chat-model calls, so the
+    Gateway logs them to llm_inference_logs.json (D4).
+    """
+
+    SYSTEM = ("You answer typed decision questions about a state. Reply with JSON only: "
+              '{"answers": {"<question id>": {...}}}. For a question of type "noul", the object is '
+              '{"type": "noul", "noul": <probability between 0 and 1 that the statement is true>}. For type '
+              '"choice", it is {"type": "choice", "choice": "<one key of that question\'s criteria, exactly as '
+              'spelled>", "probabilities": {"<each criteria key>": <probability>}, "confidence": <0 to 1>}. '
+              "Answer every question. Judge only from the state; never guess a fact the state does not contain — "
+              "an even spread of probabilities is the honest answer when the state does not say.")
+
+    def __init__(self, key: str, models, *, url: str, max_tokens: int = 4096,
+                 gateway: "gateway_mod.Gateway | None" = None):
+        self.key, self.models, self.url = key, models, url
+        self.max_tokens = max_tokens
+        self._gateway = gateway
+        self.calls = 0
+
+    @property
+    def gateway(self) -> "gateway_mod.Gateway":
+        return self._gateway or gateway_mod.required()
+
+    def ask(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
+        if not questions:
+            return {}
+        from assistant.rotation import NoModelAvailable, Rotation
+        rotation = self.models if isinstance(self.models, Rotation) else Rotation(self.models)
+        try:
+            data = rotation.call(lambda m: self._one(m, topic, state, questions), _ChatAttemptFailed)
+        except NoModelAvailable as exc:
+            raise DecisionError(f"the chat fallback did not answer: {exc}") from None
+        self.calls += 1
+        return Decider._answers(data, questions)
+
+    def _one(self, model: str, topic: str, state: Any, questions: dict[str, dict]) -> dict:
+        user = {"topic": topic, "state": state,
+                "questions": {qid: {"type": _kind(q), **{k: _plain(v) for k, v in q.items() if k != "type"}}
+                              for qid, q in questions.items()}}
+        body = {"model": model, "temperature": 0, "max_tokens": self.max_tokens,
+                "response_format": {"type": "json_object"}, "reasoning": {"enabled": False},
+                "messages": [{"role": "system", "content": self.SYSTEM},
+                             {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]}
+        headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
+        out = self.gateway.send(gateway_mod.CHAT, self.url, body, headers, model=model)
+        if not out.ok:
+            raise _ChatAttemptFailed(f"HTTP {out.status}: {_error(out.body)}")
+        try:
+            content = out.body["choices"][0]["message"]["content"]
+            parsed = json.loads(_fences.sub(r"\1", (content or "").strip()))
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise _ChatAttemptFailed("output is not the JSON asked for") from None
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("answers"), dict):
+            raise _ChatAttemptFailed("no answers object in the output")
+        return parsed
+
+
+class _ChatAttemptFailed(RuntimeError):
+    """One chat model did not answer; the rotation tries the next."""
+
+
+_fences = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.S)
+
+
+def _kind(question: dict) -> str:
+    """noul or choice, from the shape the question was built with (noul() / choice())."""
+    return str(question.get("type") or ("choice" if "criteria" in question else "noul"))
+
 
 
 def endpoint(cfg) -> str:
@@ -290,16 +380,21 @@ def server_card(cfg, timeout: float = 15.0) -> dict:
     return models[0]
 
 
-def for_config(cfg) -> Decider:
+def for_config(cfg, gateway: "gateway_mod.Gateway | None" = None) -> Decider:
     """The run's Decider: config models.system_one_decision_model on models.system_one_decision_provider, with that
-    route's URL and its key from .env (a local Kev server usually has none)."""
+    route's URL and its key from .env (a local Kev server usually has none). The chat fallback (D19) answers when a
+    System One request fails after all of the Gateway's attempts; decider.fallback = "none" turns it off."""
     from assistant import config
     local = cfg.models.system_one_decision_provider == "local"
+    fallback = None
+    if cfg.decider.fallback == "chat" and cfg.models.llm_inference:
+        fallback = ChatDecider(config.chat_key(cfg), list(cfg.models.llm_inference),
+                               url=config.chat_url(cfg), gateway=gateway)
     return Decider(config.system_one_decision_key(cfg), cfg.models.system_one_decision_model,
                    route=cfg.models.system_one_decision_provider, url=endpoint(cfg),
                    state_chars=cfg.models.local.state_chars if local else STATE_CHARS,
-                   timeout=cfg.models.local.timeout if local else TIMEOUT,
-                   retry_waits=LOCAL_RETRY_WAITS if local else RETRY_WAITS, keep_object_state=local)
+                   max_questions=cfg.jev.max_questions_per_request,
+                   keep_object_state=local, fallback=fallback, gateway=gateway)
 
 
 _current: Decider | None = None

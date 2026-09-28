@@ -176,7 +176,7 @@ def test_the_package_s_requests_are_cleaned_before_httpx_encodes_them():
 def test_a_goal_the_decision_model_could_not_serve_is_asked_again_then_is_a_decision_error():
     """Mastercard, live 2026-09-24: Vercel's Jev answered 503 through the package's ~1.5 s of retries on both
     navigate goals, and the job was reported as "no way forward"."""
-    from assistant.decide import RETRY_WAITS, DecisionError
+    from assistant.decide import DecisionError
     out503 = "goal: x\nstatus: turbo_unavailable: Decision model returned HTTP 503; no action executed.\nsteps: 0\n"
     done = "goal: x\nstatus: done\nsteps: 1\n"
     replies, slept = [out503, out503, done], []
@@ -185,8 +185,10 @@ def test_a_goal_the_decision_model_could_not_serve_is_asked_again_then_is_a_deci
         def browser_goal(self, **kw):
             return replies.pop(0)
     b = jev.Jev(None, "", server=Srv(), sleep=slept.append)
-    assert b.goal("x", "s", max_steps=1) == done and slept == list(RETRY_WAITS[:2])
-    replies[:] = [out503] * (len(RETRY_WAITS) + 1)
+    # P1 T2: ONE retry of a goal that took no step — the Gateway already spent its attempts on the request under it.
+    replies[:] = [out503, done]
+    assert b.goal("x", "s", max_steps=1) == done and slept == [jev.GOAL_RETRY_WAIT]
+    replies[:] = [out503] * 2
     with pytest.raises(DecisionError, match="HTTP 503"):
         b.goal("x", "s", max_steps=1)
     acted = "goal: x\nstatus: turbo_unavailable: Decision model returned HTTP 503; no action executed.\nsteps: 2\n"

@@ -4,6 +4,7 @@ import json
 import pytest
 
 from assistant import decide
+from assistant import gateway as G
 
 pytestmark = pytest.mark.unit
 
@@ -36,43 +37,58 @@ def test_request_shape_answers_and_cost():
     assert headers["Authorization"] == "Bearer sk-secret" and d.calls == 1 and d.cost == pytest.approx(0.00002)
 
 
-def test_many_questions_are_split_into_small_batches_that_retry_on_their_own():
-    """TypeSafe fails a whole request when one question fails (Vercel, live 2026-09-24): small batches, each
-    retried alone, all answered in the end."""
-    import threading
-    lock, calls, failed = threading.Lock(), [], set()
+def test_many_questions_are_split_and_the_parts_go_one_after_another():
+    """TypeSafe fails a whole request when one question fails (Vercel, live 2026-09-24), so a judgment above
+    jev.max_questions_per_request is split. P1 T2: the parts go one after another, never side by side."""
+    order, live, peak = [], [0], [0]
 
     def post(url, body, headers, timeout):
-        first = next(iter(body["questions"]))
-        with lock:
-            calls.append(first)
-            if first == "q4" and first not in failed:            # the second batch fails once
-                failed.add(first)
-                return 503, {"error": {"message": "Service temporarily unavailable"}}
+        live[0] += 1
+        peak[0] = max(peak[0], live[0])
+        order.append(len(body["questions"]))
+        live[0] -= 1
         return 200, {"answers": {k: {"type": "noul", "noul": 0.9} for k in body["questions"]}}
-    n = decide.BATCH * 3 + 1
-    qs = {f"q{i}": decide.noul(f"Q{i}?") for i in range(n)}
-    slept = []
-    d = decide.Decider("k", "m", post=post, sleep=slept.append)
+
+    qs = {f"q{i}": decide.noul(f"Q{i}?") for i in range(10)}
+    d = decide.Decider("k", "m", post=post, max_questions=4)
     got = d.ask("page", "s", qs)
     assert set(got) == set(qs) and all(a.yes(0.5) for a in got.values())
-    assert len(calls) == 4 + 1 and calls.count("q4") == 2 and slept == [decide.RETRY_WAITS[0]] and d.calls == 4
+    assert order == [4, 4, 2] and peak[0] == 1 and d.calls == 3
 
 
-def test_transient_errors_are_retried_with_backoff_then_a_decision_error():
+def test_a_judgment_under_the_limit_is_one_request():
+    post, calls = fake_post((200, None))
+    qs = {f"q{i}": decide.noul(f"Q{i}?") for i in range(decide.MAX_QUESTIONS)}
+    decide.Decider("k", "m", post=post).ask("page", "s", qs)
+    assert len(calls) == 1
+
+
+def test_transient_errors_are_retried_by_the_gateway_then_a_decision_error():
+    """P1 T2: the Gateway is the only retry layer — at most 3 attempts, waiting 2 s then 6 s."""
+    from assistant import gateway as G
     slept = []
     post, calls = fake_post((503, {"error": "busy"}), (429, {"error": "high demand"}), (200, None))
     decide.Decider("k", "m", post=post, sleep=slept.append).ask("t", "s", {"x": decide.noul("?")})
-    assert len(calls) == 3 and slept == list(decide.RETRY_WAITS[:2])
+    assert len(calls) == 3 and slept == list(G.BACKOFF)
     slept.clear()
     post, calls = fake_post((429, {"error": "rate"}))
     with pytest.raises(decide.DecisionError, match="HTTP 429"):
         decide.Decider("k", "m", post=post, sleep=slept.append).ask("t", "s", {"x": decide.noul("?")})
-    assert slept == list(decide.RETRY_WAITS) and len(calls) == len(decide.RETRY_WAITS) + 1
-    post, calls = fake_post((402, {"error": {"message": "credits"}}))
-    with pytest.raises(decide.DecisionError, match="HTTP 402"):             # not transient: no retry
-        decide.Decider("k", "m", post=post).ask("t", "s", {"x": decide.noul("?")})
-    assert len(calls) == 1
+    assert len(calls) == 3 and slept == list(G.BACKOFF)          # three attempts, not the old five-wait ladder
+    post, calls = fake_post((500, {"error": "boom"}))
+    with pytest.raises(decide.DecisionError, match="HTTP 500"):
+        decide.Decider("k", "m", post=post, sleep=lambda _: None).ask("t", "s", {"x": decide.noul("?")})
+    assert len(calls) == 3
+
+
+def test_no_credit_stops_the_run_instead_of_failing_one_job():
+    """P1 T3: 401, 402 and 403 are CreditOrKey — a clean stop, not a retry and not one job's Needs Attention."""
+    from assistant import gateway as G
+    for status in (401, 402, 403):
+        post, calls = fake_post((status, {"error": {"message": "credits"}}))
+        with pytest.raises(G.CreditOrKey):
+            decide.Decider("k", "m", post=post).ask("t", "s", {"x": decide.noul("?")})
+        assert len(calls) == 1                                   # never retried
 
 
 def test_missing_or_malformed_answers_are_errors_never_guesses():
@@ -107,7 +123,8 @@ def test_the_vercel_route_endpoint_cost_and_errors():
     assert d.cost == pytest.approx(0.00001155)
     post, _ = fake_post((403, {"error": {"message": "AI Gateway requires a valid credit card on file",
                                          "type": "customer_verification_required"}}))
-    with pytest.raises(decide.DecisionError, match="HTTP 403: AI Gateway requires a valid credit card"):
+    # P1 T3: 403 is CreditOrKey — a clean stop, not one job's failure. The provider's own words are kept.
+    with pytest.raises(G.CreditOrKey, match="HTTP 403: AI Gateway requires a valid credit card"):
         decide.Decider("k", "m", route="vercel", post=post).ask("t", "s", {"x": decide.noul("?")})
 
 
@@ -216,23 +233,26 @@ def test_a_short_state_is_cut_to_the_local_limit():
     assert len(decide.fit_state("x" * 900, 300)) == 300 and len(decide.fit_state("x" * 900)) == 900
 
 
-def test_a_server_that_is_down_fails_after_the_short_local_ladder():
+def test_a_server_that_is_down_fails_after_the_gateways_attempts():
+    """A server on this machine is never "in high demand": a failure is a server that is down or a model out of
+    memory, and neither is cured by waiting. The Gateway's three attempts are the whole ladder now (P1 T2)."""
     post, calls = fake_post((0, {"error": "ConnectError"}))
     waits = []
-    d = decide.Decider("", "kev-latest", url="http://127.0.0.1:8009/v1/systemone", post=post,
-                       retry_waits=decide.LOCAL_RETRY_WAITS, sleep=waits.append)
+    d = decide.Decider("", "kev-latest", url="http://127.0.0.1:8009/v1/systemone", post=post, sleep=waits.append)
     with pytest.raises(decide.DecisionError):
         d.ask("page", "x", {"q": decide.noul("own?")})
-    assert waits == list(decide.LOCAL_RETRY_WAITS) and len(calls) == len(decide.LOCAL_RETRY_WAITS) + 1
+    assert len(calls) == 3 and waits == list(G.BACKOFF)
 
 
-def test_for_config_wires_the_local_server_its_url_size_timeout_and_ladder(monkeypatch, tmp_path):
+def test_for_config_wires_the_local_server_its_url_size_and_timeout(monkeypatch, tmp_path):
     monkeypatch.delenv("KEV_API_KEY", raising=False)
     from assistant import config
     monkeypatch.setattr(config, "DEFAULT_ENV", tmp_path / "no.env")
     d = decide.for_config(local_config(base_url="http://127.0.0.1:8010/", state_chars=5000, timeout=90.0))
     assert d.url == "http://127.0.0.1:8010/v1/systemone" and d.model == "kev-latest" and d.key == ""
-    assert (d.state_chars, d.timeout, d.retry_waits) == (5000, 90.0, decide.LOCAL_RETRY_WAITS)
+    assert d.state_chars == 5000
+    # a System One model on this Mac answers in seconds, not a data-centre's milliseconds: its own timeout, not 20 s
+    assert G.for_config(local_config(base_url="http://x", state_chars=5000, timeout=90.0)).timeouts[G.JEV] == 90.0
 
 
 def test_the_cloud_routes_are_unchanged():
@@ -242,7 +262,8 @@ def test_the_cloud_routes_are_unchanged():
                                              vercel=config.ChatModels(system_one_decision_model="typesafe-ai/jev")))
     assert decide.endpoint(cfg) == decide.ENDPOINTS["vercel"] and decide.start_hint(cfg) == ""
     d = decide.Decider("k", "typesafe-ai/jev", route="vercel")
-    assert (d.state_chars, d.timeout, d.retry_waits) == (decide.STATE_CHARS, decide.TIMEOUT, decide.RETRY_WAITS)
+    assert d.state_chars == decide.STATE_CHARS and d.timeout is None   # the Gateway holds the timeout
+    assert G.for_config(cfg).timeouts[G.JEV] == 20.0                   # a cloud System One route
 
 
 def test_the_start_hint_names_the_command_and_the_configured_port():

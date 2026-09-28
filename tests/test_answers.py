@@ -191,10 +191,12 @@ def test_a_timeout_moves_on_but_a_rejected_key_stops_at_once():
         return 200, {"choices": [{"message": {"content": GOOD}}]}
     assert A.answer_page(PAGE, SRC, key="k", models=["slow", "fast"], policy=Policy(), today=TODAY,
                          post=timing_out).model == "fast"
+    # P1 T3: a rejected key stops the whole run (CreditOrKey), because no other model on that key would do better.
+    from assistant import gateway as G
     post, calls = canned((401, {"error": {"code": 401, "message": "No auth credentials found"}}))
-    with pytest.raises(A.LLMInferenceError, match="rejected the key") as ei:
+    with pytest.raises(G.CreditOrKey, match="rejected the key") as ei:
         A.answer_page(PAGE, SRC, key="k", models=["a", "b"], policy=Policy(), today=TODAY, post=post)
-    assert len(calls) == 1 and not isinstance(ei.value, A.ModelUnavailable)
+    assert len(calls) == 1 and not isinstance(ei.value, A.ModelUnavailable)   # the second model is never tried
 
 
 def test_the_llm_inference_posts_to_the_routes_url():
@@ -209,7 +211,8 @@ def test_the_llm_inference_posts_to_the_routes_url():
                   post=post)
     assert seen == [(vercel, "Bearer gw")]
     post401, _ = canned((401, {"error": {"message": "Authentication failed.", "type": "authentication_error"}}))
-    with pytest.raises(A.LLMInferenceError, match="ai-gateway.vercel.sh rejected the key"):
+    from assistant import gateway as G
+    with pytest.raises(G.CreditOrKey, match="ai-gateway.vercel.sh rejected the key"):
         A.answer_page(PAGE, SRC, key="bad", models="m", policy=Policy(), today=TODAY, url=vercel, post=post401)
 
 

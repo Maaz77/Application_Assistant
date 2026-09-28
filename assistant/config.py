@@ -103,6 +103,28 @@ class Models(_Strict):
         return self.chat.text_helper
 
 
+class Limits(_Strict):
+    """One queue for every model request (gateway.py). A run sent 222 System One requests in 19 minutes with four
+    batches in flight (spec §13.1); one at a time, spaced, is what keeps a provider from rate-limiting us."""
+    max_in_flight: int = 1
+    min_interval_s: float = 0.25
+    max_attempts: int = 3
+
+
+class Budget(_Strict):
+    max_usd_per_run: float = 1.00       # D15: the run stops cleanly when its model spend reaches this
+
+
+class SystemOneLimits(_Strict):
+    """TypeSafe fails a whole request when any one question fails, so a request is split above this many
+    questions and the parts are sent one after another (never side by side: see Limits)."""
+    max_questions_per_request: int = 24
+
+
+class Decider(_Strict):
+    fallback: Literal["chat", "none"] = "chat"   # D19: a chat model answers the same questions when System One fails
+
+
 class Policy(_Strict):
     prefill: Literal["keep-if-silent", "strict"] = "keep-if-silent"
     free_text_max_chars: int = 1500
@@ -116,6 +138,11 @@ class Config(_Strict):
     paths: Paths
     browser: Browser = Browser()
     models: Models = Models()
+    limits: Limits = Limits()
+    budget: Budget = Budget()
+    jev: SystemOneLimits = SystemOneLimits()
+    decider: Decider = Decider()
+    prices: dict[str, tuple[float, float]] = {}
     policy: Policy = Policy()
     google: Google = Google()
     source: Path = DEFAULT_CONFIG  # set by load(); not a TOML key

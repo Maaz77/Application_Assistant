@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from assistant import decide, inference_log
+from assistant import decide, gateway as gateway_mod, inference_log
 from assistant.decide import THRESHOLDS as T
 from assistant.pages import Page
 from assistant.rotation import NoModelAvailable, Rotation
@@ -146,7 +146,7 @@ def system_prompt(free_text_max_chars: int) -> str:
 
 # Mistral Nemo on Vercel took 58.6 s for a realistic page (5.3K tokens in, 970 out) and timed out at 60 s on
 # Linda AI's Easy Apply form (live 2026-09-24).
-LLM_INFERENCE_TIMEOUT = 120.0
+LLM_INFERENCE_TIMEOUT = 45.0
 
 
 def call_engine(*, key: str, models: Rotation | str | list[str], system: str, user: dict,
@@ -156,51 +156,58 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
     `url` is the route's chat/completions (config.chat_url): OpenRouter and Vercel AI Gateway take the same request.
     `post(url, json, headers, timeout) -> (status, body)` is injectable for tests."""
     rotation = models if isinstance(models, Rotation) else Rotation(models)
+    # `post` is for a caller that sends with its own client (the tests and the preflight probe). It does not bypass
+    # the Gateway: it gets a Gateway of its own, so the retry rule and the log still apply (A2).
+    installed = gateway_mod.current()
+    if post is not None and installed is None:
+        gateway_mod.use(gateway_mod.private(post, sleep=sleep))
+    # One attempt per model while another is untried; the last model in the order gets the Gateway's full ladder.
+    last = rotation.order()[-1]
     try:
         pa = rotation.call(lambda m: _ask_model(m, key=key, system=system, user=user, url=url,
-                                                post=post or _httpx_post, timeout=timeout, sleep=sleep),
+                                                post=post, timeout=timeout, sleep=sleep,
+                                                attempts=None if m == last else 1),
                            ModelUnavailable)
     except NoModelAvailable as exc:
         raise LLMInferenceError(f"LLM inference: {exc}") from None
+    finally:
+        if post is not None and installed is None:
+            gateway_mod.use(None)
     pa.model = rotation.last
     return pa
 
 
 def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post: Callable, timeout: float,
-               sleep: Callable[[float], None]) -> PageAnswers:
-    """One model: POST chat/completions, json_schema strict with a json_object fallback on HTTP 400. A rejected
-    key is LLMInferenceError (no other model would do better); anything else that fails is ModelUnavailable. A 429
-    that names a short Retry-After is waited out once."""
+               sleep: Callable[[float], None], attempts: int | None = None) -> PageAnswers:
+    """One model: POST chat/completions through the Gateway, json_schema strict with a json_object fallback on
+    HTTP 400. Anything that fails is ModelUnavailable, so the rotation tries the next model; a rejected key or an
+    account out of credit is not — the Gateway raises CreditOrKey and stops the run, because no other model on that
+    key would do better. The Gateway holds the one retry layer, the queue and the log (P1 T2); `post`, `timeout` and
+    `sleep` are honoured only when a test passes its own gateway-less sender. `attempts` is 1 while the rotation
+    still has an untried model: handing over is cheaper than waiting to ask a rate-limited model again."""
     fmt: dict = {"type": "json_schema", "json_schema": {"name": "page_answers", "strict": True, "schema": SCHEMA}}
     body = {"model": model, "temperature": 0, "max_tokens": MAX_TOKENS, "reasoning": REASONING,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]}
+    # OpenRouter only: route to a provider that supports every parameter sent, instead of one that drops
+    # response_format or temperature silently. Vercel AI Gateway has no such field.
+    if inference_log.gateway_of(url) == "openrouter":
+        body["provider"] = {"require_parameters": True}
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    gw = inference_log.gateway_of(url)
-    waited = False
+    gateway = gateway_mod.required()
     while True:
         sent = {**body, "response_format": fmt}
-        try:
-            status, data = post(url, sent, headers, timeout)
-        except (httpx.TimeoutException, httpx.TransportError) as exc:
-            inference_log.log_llm(gw, sent, None, f"unreachable ({type(exc).__name__})")   # §6.2: every attempt
-            raise ModelUnavailable(f"unreachable ({type(exc).__name__})") from None
-        inference_log.log_llm(gw, sent, data)
-        if status == 400 and fmt["type"] == "json_schema":
+        out = gateway.send(gateway_mod.CHAT, url, sent, headers, model=model, timeout=timeout,
+                           attempts=attempts)
+        data = out.body
+        if out.status == 400 and fmt["type"] == "json_schema":
             fmt = {"type": "json_object"}
             continue
-        if status == 401:
-            raise LLMInferenceError(f"{urlparse(url).hostname} rejected the key (HTTP 401)")
         # OpenRouter passes an overloaded upstream through as HTTP 200 with an error body and an empty choice
         # (nemotron-3-super:free, live 2026-09-24), so an error body fails the model whatever the status.
         err = data.get("error") if isinstance(data, dict) else None
-        wait = _retry_after(data) if status == 429 and not waited else None
-        if wait is not None and wait <= RETRY_AFTER_MAX:
-            sleep(wait)
-            waited = True
-            continue
-        if status != 200 or err:
-            raise ModelUnavailable(f"HTTP {_code(status, err)} {_message(err)}".rstrip())
+        if not out.ok or err:
+            raise ModelUnavailable(f"HTTP {_code(out.status, err)} {_message(err)}".rstrip())
         try:
             content = data["choices"][0]["message"]["content"]
             return PageAnswers.model_validate_json(_strip_fences(content))

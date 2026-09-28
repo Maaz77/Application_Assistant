@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import dataclasses
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from assistant import pages, records, tabs
 from assistant.llm_inference import (LLMInferenceError, Policy, Sources, answer_page, call_engine, resume_text,
                                      system_prompt)
 from assistant.rotation import Rotation
+from assistant import gateway as gateway_mod
 from assistant.blockers import NeedsAttention, Parked, RestartFromEntry, StopRun
 from assistant.fill import JobCtx, run_pages
 from assistant.jev import Jev, JevError, split_json
@@ -114,7 +116,6 @@ def preflight(browser: Jev) -> Iterator[str]:
         if doc.get(cap) is not True:
             raise PreflightError(f"browser_doctor: {cap} is not enabled")
     yield "server started; text helper, uploads and JS eval enabled"
-    print("… connecting to Chrome — if Chrome shows “Allow remote debugging?”, click Allow", flush=True)
     try:
         browser.open(LINKEDIN_FEED, "preflight", timeout=CONNECT_TIMEOUT)
         _, table = split_json(browser.observe("preflight", include_text=False))
@@ -248,6 +249,19 @@ def dry_run(cfg: config_mod.Config, args) -> int:
     return 0
 
 
+def connect_once(cfg: config_mod.Config) -> None:
+    """The run's single CDP connection (D13, P1 T5), opened before preflight so the whole run costs one "Allow"
+    click. The package keeps one websocket per process and reuses it for every session, so this is the only
+    handshake there is."""
+    print(f'Chrome will ask "Allow remote debugging?" — click Allow (waiting up to {CONNECT_TIMEOUT:.0f} s).',
+          flush=True)
+    try:
+        jevlib.connect_chrome(cfg, CONNECT_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001 - any handshake failure is a preflight failure
+        raise PreflightError(f"could not connect to Chrome on {cfg.browser.cdp_url} ({exc}). Is Chrome running "
+                             f"with remote debugging switched on in chrome://inspect?") from exc
+
+
 def _load_package(cfg: config_mod.Config, key: str) -> None:
     """Preflight step: the package imports after apply_env() (§1.1, §3)."""
     try:
@@ -274,10 +288,14 @@ def run(cfg: config_mod.Config, args) -> int:
         print(f"Report: {report.write(run_dir)}")
 
     browser = Jev(cfg, key, on_timeout=on_timeout)     # calls are not logged until preflight passes
-    decide.use(decide.for_config(cfg))
+    gateway = gateway_mod.for_config(cfg)              # every model request in this run goes through it (T2)
+    gateway_mod.use(gateway)
+    report.gateway = gateway
+    decide.use(decide.for_config(cfg, gateway))
     try:
         _load_package(cfg, key)
         tracker = Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
+        connect_once(cfg)                              # one "Allow remote debugging?" click for the whole run
         for line in preflight(browser):
             print(f"✓ {line}")
     except (PreflightError, TrackerError, JevError) as exc:
@@ -298,6 +316,7 @@ def run(cfg: config_mod.Config, args) -> int:
         for job in q.jobs:
             with inference_log.scope(job.folder):      # §6.1: this job's logs land in run_dir/<job folder>/
                 browser.calls_log = run_dir / job.folder / "browser_actions.jsonl"
+                counters = gateway.start_job()
                 t0 = time.monotonic()
                 result = JobResult(job.company, job.title, job.linkedin_url, job.folder, 0,
                                    date=started.strftime("%Y-%m-%d"))
@@ -308,6 +327,7 @@ def run(cfg: config_mod.Config, args) -> int:
                 except NeedsAttention as na:
                     result.attention = na
                 result.seconds = time.monotonic() - t0
+                result.models = dataclasses.replace(counters)
                 if not args.no_record:
                     if result.parked:
                         dst = recorder.record(job, PENDING_REVIEW, records.parked_note(result.parked, datetime.now()),
@@ -330,6 +350,7 @@ def run(cfg: config_mod.Config, args) -> int:
             pass
         d = decide.current()
         report.decisions, report.decision_model = (d.calls, d.cost), d.model
+        report.by_fallback = getattr(d, "by_fallback", 0)
     path = report.write(run_dir)
     print(f"Report: {path}")
     return report.exit_code()
@@ -350,9 +371,15 @@ def run_preflight(cfg: config_mod.Config) -> int:
         print("✓ jev-ultrafast-mcp loaded after apply_env()")
         Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
         print("✓ tracker readable")
-        decide.use(decide.for_config(cfg))
+        gateway = gateway_mod.for_config(cfg)
+        gateway_mod.use(gateway)
+        decide.use(decide.for_config(cfg, gateway))
+        connect_once(cfg)
         for line in preflight(Jev(cfg, key)):
             print(f"✓ {line}")
+    except gateway_mod.GatewayStop as exc:
+        print(f"■ {exc}")
+        return EXIT_STOPPED
     except (PreflightError, TrackerError, JevError) as exc:
         print(f"✗ {exc}")
         return EXIT_PREFLIGHT
@@ -366,7 +393,9 @@ def capture(cfg: config_mod.Config, url: str) -> int:
     out.mkdir(parents=True)
     key = config_mod.chat_key(cfg)
     jevlib.apply_env(cfg, key)
-    decide.use(decide.for_config(cfg))
+    gateway = gateway_mod.for_config(cfg)
+    gateway_mod.use(gateway)
+    decide.use(decide.for_config(cfg, gateway))
     browser = Jev(cfg, key)
     book = tabs.TabBook(browser)                       # before the captured tab exists
     S = "capture"

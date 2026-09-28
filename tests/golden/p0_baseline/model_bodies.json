@@ -16,6 +16,9 @@
         "content": "{\"page\": {\"url\": \"https://acme.io/apply\", \"title\": \"Apply\", \"elements\": [{\"ref\": \"e1\", \"role\": \"textbox\", \"name\": \"Email\", \"value\": \"amin@example.com\"}, {\"ref\": \"e2\", \"role\": \"textbox\", \"name\": \"Notice period\"}, {\"ref\": \"e3\", \"role\": \"textbox\", \"name\": \"Why Acme?\"}, {\"ref\": \"e4\", \"role\": \"combobox\", \"name\": \"Work model\", \"options\": [{\"label\": \"Remote\"}, {\"label\": \"Hybrid\"}]}, {\"ref\": \"e5\", \"role\": \"textbox\", \"name\": \"Total years of experience\"}, {\"ref\": \"e6\", \"role\": \"textbox\", \"name\": \"Phone\", \"value\": \"+39 000\"}], \"text\": \"Email Notice period Why Acme? Work model Remote Hybrid On-site Total years of experience Phone\", \"maxlengths\": {\"n\": 1, \"more\": false, \"items\": [[\"Why Acme?\", 120]], \"min\": 120}, \"required_empty\": {\"n\": 0, \"more\": false, \"items\": []}}, \"sources\": {\"profile\": \"# Resume\\n**Full Stack Software Engineer** · Feb 2026 – Present\\n**Deep Learning Engineer & Researcher** · Dec 2024 – Dec 2025\\n**Computer Vision Research Assistant** · Sep 2024 – Dec 2024\\nI built a real-time computer vision pipeline reaching 200 FPS on an NPU.\\n# Scratch Pad\\n- What is your notice period? 3 months\\n\", \"job\": \"Acme builds perception software for robots. We value ownership.\", \"resume\": \"Amin Abbaszadeh\\nMilan, Italy\\namin@example.com\"}}"
       }
     ],
+    "provider": {
+      "require_parameters": true
+    },
     "response_format": {
       "type": "json_schema",
       "json_schema": {
