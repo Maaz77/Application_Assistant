@@ -378,3 +378,117 @@ The user first chose Jev alone for the never-submit decision (no fixed floor). A
 - **Not covered, by decision:** "Send application", "Done", "Finish", "Confirm", Enter-submitting forms. An "Apply" that is a form's own submit button *before* filling starts is not refused either: that would be the navigate agent clicking a form's Apply instead of reporting the form (Toast's Greenhouse form ends in "Apply now!").
 - **Tests:** the tripwire walks f01–f03 (Submit application / multi-step Submit / Apply) with the form being filled, and nothing is sent. Live, the real agent was told to submit those forms 11 times per run; it was always refused or stopped, and nothing was sent in two runs. One earlier status check failed once without recurring, and nothing was sent in that run either.
 - **"Send" added** (user decision, same day): "Send" (`\bsend\b`) is refused on every page, like "Submit". A Send button is never needed to start an application; "Sender" and "Sending" don't match. The tripwire now also walks f05 ("Send application"). Live, the agent was told to click it and was refused. Across 9 further live tripwire runs (up to 14 checks each), every attempt was refused and nothing was sent.
+
+## Rename "answer engine" → "LLM inference" (P0 re-core, 2026-09-27)
+
+The re-core (00_common §7) renames the component formerly called the "answer engine" to "LLM inference" everywhere in code, config, prompts, tests and docs. Names for answer *values* keep "answer". Old entries above keep the old name by decision; this entry records the rename.
+
+Renamed:
+- Module `assistant/answers.py` → `assistant/llm_inference.py`; prompt `prompts/answer_engine.md` → `prompts/llm_inference.md` (content unchanged); all imports updated.
+- `AnswerEngineError` → `LLMInferenceError`; `ENGINE_TIMEOUT` → `LLM_INFERENCE_TIMEOUT`.
+- Config: `[models.openrouter].answer_engine` / `[models.vercel].answer_engine` → `.llm_inference`; `ChatModels.answer_engine` field and `Models.answer_engine` property → `llm_inference`; `config.problems()` check. An old `answer_engine` key now fails validation with `models.<route>.answer_engine was renamed to models.<route>.llm_inference` (a `model_validator` on `Models`, marked `rename-guard`).
+- Needs-Attention class `answer_engine` → `llm_inference` (`fill.py`).
+- Prose "answer engine" → "LLM inference" in the report, terminal text, comments, README.md, CLAUDE.md, LIVE_TEST.md and the build spec.
+
+Kept (00_common §7 — these name the answer value or its action, not the component): `Question.answer`, `PageAnswers`, `check_answers`, `judge_answers`, `judge_questions`, `answers.json`, "unanswered", and the function/parameter names `call_engine`, `answer_page`, `answer_fn`.
+
+No behaviour change: the offline suite reproduces `tests/golden/p0_baseline/` (T6, `test_baseline_p0.py`), and `test_rename.py` asserts no component-name token survives.
+
+## Where the upstream provider sits in a chat response (live, 2026-09-27)
+
+One `mistral/mistral-small` call to `https://ai-gateway.vercel.sh/v1/chat/completions` (5 tokens out) showed that Vercel's OpenAI-compatible chat response has no top-level `provider` or `provider_metadata`. The routing record sits inside the message, at `choices[0].message.provider_metadata.gateway.routing`. That record has `finalProvider` (the provider that served the call after any fallbacks; here `mistral`), plus `resolvedProvider`, `modelAttempts[].providerAttempts[]` (with each attempt's `statusCode`) and `fallbacksAvailable`. Cost is at `provider_metadata.gateway.cost` in the same place, and also at `usage.cost`. OpenRouter puts the upstream in a top-level `provider` field. `inference_log._provider` reads OpenRouter's `provider` first, then Vercel's `finalProvider`, and logs just the gateway when neither is there (error bodies, the TypeSafe API's top-level `provider_metadata` without `routing`).
+
+## The package's `policy._post` retries internally (P0 T3.3, 2026-09-27)
+
+00_common §T3.3 asks whether the vendored package retries by calling `_post` again (each attempt visible to our wrapper) or inside `_post` (only the last visible). Evidence: `jev_ultrafast_mcp/policy.py` `_post(url, key, body)` is `for attempt in range(3): ... if status in {429, 529, 503} and attempt < 2: sleep; continue`. So it retries **inside** `_post` and returns only the last attempt's body (or raises `TurboUnavailable`).
+
+Consequence for the logs: `jev.clean_requests` wraps the whole `_post`, so for the package's own calls (the goal agent's Jev decisions, option picks and the text helper) `jev_inference_logs.json` / `llm_inference_logs.json` record **one entry per `_post` call — the last attempt only**, not the intermediate 429/503 retries. Our own senders (`decide.Decider._one`, `llm_inference._ask_model`) log every attempt, because their retry loops live in our code. A failed `_post` raises rather than returning an error body, so the wrapper catches it, logs the attempt with the exception text in place of the response, and re-raises.
+
+## Jev moved to OpenRouter System One; per-route Jev model (user decision, 2026-09-28)
+
+Vercel AI Gateway's Jev now returns **HTTP 403** for the account: "Free tier users do not have access to this model. Upgrade to paid credits…". Preflight stops there (`the decision model (Jev) does not answer: decision model HTTP 403`), so no live run could proceed.
+
+The user supplied a TypeSafe-compatible System One model on OpenRouter — `respan/span-01-lite:free`, reached at `https://openrouter.ai/api/alpha/decisions` (same request/answer shapes: `state`, `questions` typed noul/choice/score; `answers[…]["noul"|"choice"|"probabilities"]`). Changes:
+
+- **Endpoint fix.** `decide.ENDPOINTS["openrouter"]` was `https://openrouter.ai/api/v1/systemone`, which is not the System One route; corrected to `https://openrouter.ai/api/alpha/decisions` (already what `jev.agent_route` and the package's no-key hint use). Removed the unused `decide.SYSTEMONE` constant.
+- **Per-route Jev model, like llm_inference.** `ChatModels` gains a `jev` field, so each `[models.<route>]` table names that route's Jev model; `Models.jev` is now a property selecting by `models.jev_route` (parallel to `chat`/`chat_route`). config.toml: `[models.openrouter].jev = "respan/span-01-lite:free"`, `[models.vercel].jev = "typesafe-ai/jev"`, and `jev_route = "openrouter"`. `config.problems()` now also flags an empty Jev model for the active route.
+- **Key.** On `jev_route = "openrouter"`, Jev uses `OPENROUTER_API_KEY` (via `config.jev_key`), so `.env` must have it.
+
+Deviations, recorded per 00_common §3/§5.2:
+- **P0 is "no behaviour change"**, but this changes the decision model, route and endpoint. It is a user-directed fix to unblock the P0 live gate, kept minimal (config + one endpoint string + the offline tests that pinned the old endpoint/model). T6 is unaffected (it runs offline on RuleDecider; the LLM inference request bodies it snapshots do not involve Jev).
+- **D14** named Jev `typesafe/jev-1.13` on OpenRouter and "no `:free` models". The user overrode both. Caveat from earlier findings: OpenRouter free models are rate-limited (≈50 requests/day/account) and can answer 429/overloaded, so this route may be flaky under load; a paid System One model would be steadier.
+
+## Preflight live-probes the LLM inference model (user decision, 2026-09-28)
+
+Preflight probed Jev live but only static-checked the LLM inference model (key present, model list non-empty), so a configured-but-dead or out-of-credit chat model passed preflight and failed later mid-job. The user asked preflight to probe the LLM inference engine live, like Jev.
+
+`cli._probe_llm_inference(cfg)` now calls `llm_inference.call_engine` once with a trivial empty page over the real strict-`json_schema` path (`config.chat_url`, the run's `Rotation` of `models.<chat_route>.llm_inference`, `PROBE_TIMEOUT = 60 s`). It raises `LLMInferenceError` when no configured model answers; `preflight()` turns that into a `PreflightError` ("the LLM inference model does not answer: …") and otherwise prints `✓ LLM inference <model> answers (via <route>)`. The probe logs to `_run/llm_inference_logs.json` like any other chat call.
+
+Deviation: this adds a preflight step (behaviour change), out of P0's "no behaviour change". It was the fixed-scope item flagged for P1 (`P1_infrastructure.md`), pulled forward at the user's request. No offline test change (no test calls `preflight()`); the probe itself is unit-tested via a monkeypatched `call_engine`. Cost: one extra chat call per preflight.
+
+## Config names Jev by its role, not the instance (user decision, 2026-09-28)
+
+"Jev" was used as if it were the decision-model role in config and code, but Jev (`typesafe-ai/jev`, `typesafe/jev-1.13`) is one *instance* of a System One decision model; another is `respan/span-01-lite`. Renamed the role, keeping Jev where it means the actual instance/package.
+
+- config keys: `models.jev_route` → `models.system_one_decision_provider`; `[models.<route>].jev` → `[models.<route>].system_one_decision_model`.
+- code: `ChatModels.jev` → `system_one_decision_model`; `Models.jev` property and `Models.jev_route` → `system_one_decision_model` / `system_one_decision_provider`; `config.jev_key` → `config.system_one_decision_key`; readers in `decide.for_config`, `jev.env_values`/`agent_route`, `cli` (preflight/report/`_static_checks`); prose in config.toml, config.py, decide.py, README.md, CLAUDE.md, the build spec, and the tests.
+- Kept as the Jev instance/package: the `jev.py` module, `Jev` driver class, `JevError`, `jevlib`, `jev_ultrafast_mcp`, `JEVMCP_*`, the model-id values (`typesafe-ai/jev`, `typesafe/jev-1.13`), and the browser worker thread name. `decide.adapt_questions_for` still keys on `"jev"` in the model id (Jev takes native structured questions). DISCOVERY's earlier entries keep the old names.
+
+Not a P0 goal (naming), done at the user's request alongside the earlier LLM inference work. 237 unit pass; contract_check + dry-run clean.
+
+## The System One decision model can run on this Mac: Kev (user decision, 2026-09-28)
+
+The user asked for the System One decision model to run locally instead of on a paid key, on a 16 GB M3 Mac, naming
+[github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev). Read: Kev's README, `kev/api.py` and `kev/serve.py`
+at `main` on 2026-09-28.
+
+**What Kev is.** Small decision models (0.8B, 4B, 9B, 27B: LoRA + a pointer head on Qwen3.5/3.8 bases) that serve
+**TypeSafe's own System One API**: `POST /v1/systemone` with `{state, model, questions}` in and typed `answers` out,
+plus `GET /v1/models`, `POST /v1/systemone/{permute,separate}` and the `x-typesafe-request-id` header. The server
+binds to `127.0.0.1`, is **open by default**, and requires `Authorization: Bearer <KEV_API_KEY>` only when started
+with that variable set. On Apple Silicon `uv sync --extra serve` installs MLX and the server uses it (bf16).
+
+**Why it drops in.** Its request models (`kev/api.py`) take exactly what we and the package already send:
+`state` is `str | dict | list | int | float | bool | None`, question `instructions` the same, and choice `criteria`
+is `dict[str, JSONContent]` with 1–255 options — so the package's nested criteria (`{ref: {element, current_value,
+context}}`, up to 120 refs) and our structured `instructions` need no flattening (`adapt_questions_for` is only for
+OpenRouter's respan models). Objects are rendered as **labeled text** (`api.render`), so a dict state reads better,
+and costs fewer tokens, than the JSON string the OpenRouter route needs.
+
+**Checked offline against Kev's own schema.** A stand-in server built on `kev/api.py`'s pydantic models
+(`SystemOneRequest`) answered both callers: `decide.Decider` and the package's own goal agent (`policy.choose`,
+with a real `Observation`). 0 rejections (422), state sent as an object, `model: "kev-latest"`.
+
+**What changed here.**
+- `[models.local]` in config.toml (`base_url`, `system_one_decision_model = "kev-latest"`, `state_chars`, `timeout`)
+  and `system_one_decision_provider = "local"`, the third value of that key. `config.LocalKev`;
+  `Models.system_one_decision_model` now reads the named table by attribute.
+- `config.local_key()` (`KEV_API_KEY`), `config.KEYLESS_PROVIDERS`: `cli._static_checks` no longer demands a key for
+  a keyless route, and `run_preflight` says "no key needed".
+- `decide.endpoint(cfg)` (base_url + `/v1/systemone`), `Decider(url=, state_chars=, timeout=, retry_waits=,
+  keep_object_state=)`, `fit_state(state, limit, keep_object)`, `decide.server_card()` (preflight's `GET /v1/models`,
+  which prints the loaded checkpoint and backend) and `decide.start_hint()` (how to start a server that is down).
+- `jev.agent_route` points `TYPESAFE_BASE_URL` at the server. The package refuses turbo mode on an empty key
+  (`policy.available`, `policy.choose`), so an open server gets the placeholder `TYPESAFE_API_KEY=local`, which it
+  ignores. `jev.clean_requests(string_state=False)` leaves the state an object on this route, and
+  `jev.set_call_timeout` replaces the package's fixed 30 s `policy.CLIENT` with `models.local.timeout`.
+- `run_kev_server.command`: clones or updates `~/kev`, `uv sync --extra serve`, serves `KEV_MODEL` (default
+  `jaredpalmer/kev-0.8b`) on `KEV_PORT` (8009).
+
+**The cost of it, from Kev's own numbers.** Accuracy on sources a model was not trained on: Jev 0.857, Kev-4B 0.817,
+**Kev-0.8B 0.648** — and 4B and 9B are "32 GB Mac" in Kev's table, so 0.8B is the size for 16 GB. Kev was trained on
+states of up to 384 tokens and loses accuracy on long ones (Kev-9B answers 0.556 of questions buried in 1k–6k tokens),
+which is why `models.local.state_chars` cuts our state to 12000 characters (~3000 tokens) from the cloud route's
+60000. At a 5% error budget Kev automates 0.45–0.57 of decisions against Jev's 0.70, and its calibration temperature
+is fitted in distribution, so `decide.THRESHOLDS` (set for Jev) are not measured for it. Expect more jobs in
+`Needs-Attention/`, not wrong answers: a decision that cannot be got is still never guessed.
+
+**Deviations and open items.**
+- Only the decision model moves. The LLM inference and the text helper still need `models.chat_route`'s key: Kev
+  serves no chat/completions endpoint.
+- The thresholds were not re-fitted for Kev; that needs the user's own labelled pages.
+- `jev_inference_logs.json` already records every request and answer (`inference_log.log_jev`), which is the training
+  file shape `kev.train` takes (`{state, questions, label}` per line): a fine-tune on the logged Jev answers is the
+  way back to Jev-level accuracy on these pages, and Kev's README measures 0.804 → 0.904 for one such run.
+- Not verified against a real Kev server (no Apple Silicon and no weights in this container): the wire contract was
+  verified against Kev's own request models, and the first real check is `preflight` on the user's Mac.

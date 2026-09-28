@@ -69,14 +69,47 @@ def test_run_without_key_fails_preflight_with_exit_1(workspace, monkeypatch, cap
 
 def test_a_key_both_routes_use_is_reported_once(workspace, monkeypatch, capsys):
     base, cfg = workspace
-    cfg.write_text(re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "vercel"', cfg.read_text()))
+    text = re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "vercel"', cfg.read_text())
+    cfg.write_text(re.sub(r'(?m)^system_one_decision_provider = "\w+"', 'system_one_decision_provider = "vercel"', text))   # both routes share the key
     monkeypatch.setattr(cli.config_mod, "gateway_key", lambda *a: "")
     assert cli.main(["--config", str(cfg), "run"]) == 1
     out = capsys.readouterr().out
-    assert out.count("AI_GATEWAY_API_KEY is missing") == 1 and "the answer engine and text helper and Jev" in out
+    assert out.count("AI_GATEWAY_API_KEY is missing") == 1 and \
+        "the LLM inference and text helper and the System One decision model" in out
 
 
 def test_bad_config_is_exit_1(tmp_path, capsys):
     bad = tmp_path / "c.toml"
     bad.write_text('[paths]\nbase = "x"\nnope = 1\n')
     assert cli.main(["--config", str(bad), "preflight"]) == 1
+
+
+def test_llm_inference_probe_uses_the_chat_route_and_reports_the_model(monkeypatch):
+    cfg = cli.config_mod.load()
+    seen = {}
+    monkeypatch.setattr(cli, "call_engine", lambda **kw: seen.update(url=kw["url"]) or None)
+    assert cli._probe_llm_inference(cfg) == cfg.models.llm_inference[0]
+    assert seen["url"] == cli.config_mod.chat_url(cfg)
+
+
+def test_llm_inference_probe_raises_when_no_model_answers(monkeypatch):
+    cfg = cli.config_mod.load()
+    def fake(**kw):
+        raise cli.LLMInferenceError("all models unavailable")
+    monkeypatch.setattr(cli, "call_engine", fake)
+    with pytest.raises(cli.LLMInferenceError):
+        cli._probe_llm_inference(cfg)
+
+
+def test_the_local_decision_route_asks_for_no_key(tmp_path, monkeypatch):
+    """A Kev server on this machine is keyless (config.KEYLESS_PROVIDERS): preflight demands only the chat
+    route's key, and never KEV_API_KEY."""
+    f = tmp_path / "c.toml"
+    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models]\nchat_route = "openrouter"\n'
+                 f'system_one_decision_provider = "local"\n'
+                 f'[models.openrouter]\nllm_inference = ["m"]\ntext_helper = ["t"]\n')
+    monkeypatch.setattr(cli.config_mod, "local_key", lambda *a: "")
+    cfg = cli.config_mod.load(f)
+    assert not [p for p in cli._static_checks(cfg, "chat-key") if "API_KEY" in p]
+    missing = [p for p in cli._static_checks(cfg, "") if "API_KEY" in p]
+    assert len(missing) == 1 and missing[0].startswith("OPENROUTER_API_KEY is missing") and "KEV_" not in missing[0]

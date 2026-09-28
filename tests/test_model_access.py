@@ -9,7 +9,7 @@ Each model gets a report (shown with -s, and in the failure message):
   account — credits bought vs used on the key's account (the 402 "can only afford N tokens" comes from here)
   model   — is the ID in OpenRouter's catalogue, its price, does it support structured outputs (the answer
             engine asks for json_schema)
-  reply   — one real completion, sent with the same max_tokens the answer engine reserves, so a too-small
+  reply   — one real completion, sent with the same max_tokens the LLM inference reserves, so a too-small
             balance fails here exactly as it does in a run
 The key itself is never printed.
 """
@@ -18,7 +18,7 @@ import time
 import httpx
 import pytest
 
-from assistant.answers import MAX_TOKENS, OPENROUTER_CHAT
+from assistant.llm_inference import MAX_TOKENS, OPENROUTER_CHAT
 
 #pytestmark = pytest.mark.live_model
 
@@ -57,7 +57,7 @@ def _error(body: dict) -> str:
 
 
 @pytest.mark.parametrize("model", [
-    "qwen/qwen3.7-flash",        # models.answer_engine in config.toml
+    "qwen/qwen3.7-flash",        # models.llm_inference in config.toml
     "deepseek/deepseek-chat",       # models.text_helper (the page goals' text helper)
 ])
 def test_model_is_accessible(model, api_key):
@@ -96,7 +96,7 @@ def test_model_is_accessible(model, api_key):
                      f"{'yes' if 'structured_outputs' in params else 'no'} · reasoning "
                      f"{'yes' if 'reasoning' in params else 'no'}")
 
-    # 4. One real completion, reserving max_tokens like the answer engine does.
+    # 4. One real completion, reserving max_tokens like the LLM inference does.
     reply_ok = False
     if key_ok:
         t0 = time.monotonic()

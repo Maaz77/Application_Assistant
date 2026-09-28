@@ -62,7 +62,7 @@ Tests (markers are defined in `pyproject.toml`; there is no linter configured):
 
 ## Keys and models
 
-`.env` (git-ignored) holds `OPENROUTER_API_KEY` and `AI_GATEWAY_API_KEY` (Vercel AI Gateway); which one each model call uses follows `models.chat_route` and `models.jev_route`. `config.toml` is strict: unknown keys are errors. `models.chat_route` (`openrouter` or `vercel`) picks who serves the chat models, and with it the `[models.openrouter]` or `[models.vercel]` table, the key (`config.chat_key`) and the URL (`config.chat_url`); `cfg.models.answer_engine`/`text_helper` are properties that read the active table. Each is a list of models tried in turn (`rotation.Rotation`; the text helper's rotation is a wrap of the package's `policy.text_for` installed by `jev.load()`). Each route names Jev differently: `typesafe-ai/jev` on Vercel AI Gateway, `typesafe/jev-1.13` on OpenRouter. Never print keys: `calls.jsonl` redacts the OpenRouter key, and decisions are logged without keys.
+`.env` (git-ignored) holds `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` (Vercel AI Gateway) and, only when the local Kev server was started with one, `KEV_API_KEY`; which one each model call uses follows `models.chat_route` and `models.system_one_decision_provider`. `config.toml` is strict: unknown keys are errors. `models.chat_route` (`openrouter` or `vercel`) picks who serves the chat models, and with it the `[models.openrouter]` or `[models.vercel]` table, the key (`config.chat_key`) and the URL (`config.chat_url`); `cfg.models.llm_inference`/`text_helper` are properties that read the active table. Each is a list of models tried in turn (`rotation.Rotation`; the text helper's rotation is a wrap of the package's `policy.text_for` installed by `jev.load()`). `models.system_one_decision_provider` picks who serves the System One decision model, and each route names it differently: `typesafe-ai/jev` on Vercel AI Gateway, `typesafe/jev-1.13` on OpenRouter, `kev-latest` on `local` — a [Kev](https://github.com/jaredpalmer/kev) server on the user's Mac (`[models.local]`: `base_url`, `state_chars`, `timeout`), which serves the same System One API (`POST /v1/systemone`) and needs no key, so only the URL changes (`decide.endpoint`, `jev.agent_route`). On that route the state is sent as an object, not as a JSON string (Kev renders objects as labeled text), the package's fixed 30 s client timeout is replaced (`jev.set_call_timeout`), and preflight first reads `GET /v1/models` (`decide.server_card`). Never print keys: `browser_actions.jsonl` redacts the OpenRouter key, and the inference logs (`llm_inference_logs.json`, `jev_inference_logs.json`) never contain a key.
 
 ## graphify
 
@@ -73,3 +73,22 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
+
+<!-- caveman-begin -->
+Respond terse like smart caveman. All technical substance stay. Only fluff die.
+
+Rules:
+- Drop: articles (a/an/the), filler (just/really/basically), pleasantries, hedging
+- Fragments OK. Short synonyms. Technical terms exact. Code unchanged.
+- Pattern: [thing] [action] [reason]. [next step].
+- Not: "Sure! I'd be happy to help you with that."
+- Yes: "Bug in auth middleware. Fix:"
+
+Switch level: /caveman lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra
+Stop: "stop caveman" or "normal mode"
+
+Auto-Clarity: drop caveman for security warnings, irreversible actions, user confused. Resume after.
+
+Boundaries: code/commits/PRs written normal.
+<!-- caveman-end -->

@@ -1,4 +1,4 @@
-"""Answer engine (§7): one chat call per form page (OpenRouter or Vercel AI Gateway), then deterministic checks
+"""LLM inference (§7): one chat call per form page (OpenRouter or Vercel AI Gateway), then deterministic checks
 in code."""
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from assistant import decide
+from assistant import decide, inference_log
 from assistant.decide import THRESHOLDS as T
 from assistant.pages import Page
 from assistant.rotation import NoModelAvailable, Rotation
 
 OPENROUTER_CHAT = "https://openrouter.ai/api/v1/chat/completions"   # the default route (config.chat_url)
-PROMPT = Path(__file__).resolve().parent.parent / "prompts" / "answer_engine.md"
+PROMPT = Path(__file__).resolve().parent.parent / "prompts" / "llm_inference.md"
 PAGE_TEXT_MAX = 12_000
 
 Kind = Literal["text", "longtext", "choice", "file", "other"]
@@ -85,11 +85,11 @@ MAX_TOKENS = 8192          # one page of answers; OpenRouter otherwise reserves 
 REASONING = {"enabled": False}
 
 
-class AnswerEngineError(RuntimeError):
-    """Blocker 'answer engine output invalid' (or unreachable)."""
+class LLMInferenceError(RuntimeError):
+    """Blocker 'LLM inference output invalid' (or unreachable)."""
 
 
-class ModelUnavailable(AnswerEngineError):
+class ModelUnavailable(LLMInferenceError):
     """This model cannot answer right now (rate-limited, overloaded, timed out, or wrong output); the next one may."""
 
 
@@ -146,13 +146,13 @@ def system_prompt(free_text_max_chars: int) -> str:
 
 # Mistral Nemo on Vercel took 58.6 s for a realistic page (5.3K tokens in, 970 out) and timed out at 60 s on
 # Linda AI's Easy Apply form (live 2026-09-24).
-ENGINE_TIMEOUT = 120.0
+LLM_INFERENCE_TIMEOUT = 120.0
 
 
 def call_engine(*, key: str, models: Rotation | str | list[str], system: str, user: dict,
-                url: str = OPENROUTER_CHAT, post: Callable | None = None, timeout: float = ENGINE_TIMEOUT,
+                url: str = OPENROUTER_CHAT, post: Callable | None = None, timeout: float = LLM_INFERENCE_TIMEOUT,
                 sleep: Callable[[float], None] = time.sleep) -> PageAnswers:
-    """Ask the models in turn (rotation.py) until one gives a valid answer; AnswerEngineError when none does.
+    """Ask the models in turn (rotation.py) until one gives a valid answer; LLMInferenceError when none does.
     `url` is the route's chat/completions (config.chat_url): OpenRouter and Vercel AI Gateway take the same request.
     `post(url, json, headers, timeout) -> (status, body)` is injectable for tests."""
     rotation = models if isinstance(models, Rotation) else Rotation(models)
@@ -161,7 +161,7 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
                                                 post=post or _httpx_post, timeout=timeout, sleep=sleep),
                            ModelUnavailable)
     except NoModelAvailable as exc:
-        raise AnswerEngineError(f"answer engine: {exc}") from None
+        raise LLMInferenceError(f"LLM inference: {exc}") from None
     pa.model = rotation.last
     return pa
 
@@ -169,24 +169,28 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
 def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post: Callable, timeout: float,
                sleep: Callable[[float], None]) -> PageAnswers:
     """One model: POST chat/completions, json_schema strict with a json_object fallback on HTTP 400. A rejected
-    key is AnswerEngineError (no other model would do better); anything else that fails is ModelUnavailable. A 429
+    key is LLMInferenceError (no other model would do better); anything else that fails is ModelUnavailable. A 429
     that names a short Retry-After is waited out once."""
     fmt: dict = {"type": "json_schema", "json_schema": {"name": "page_answers", "strict": True, "schema": SCHEMA}}
     body = {"model": model, "temperature": 0, "max_tokens": MAX_TOKENS, "reasoning": REASONING,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]}
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    gw = inference_log.gateway_of(url)
     waited = False
     while True:
+        sent = {**body, "response_format": fmt}
         try:
-            status, data = post(url, {**body, "response_format": fmt}, headers, timeout)
+            status, data = post(url, sent, headers, timeout)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
+            inference_log.log_llm(gw, sent, None, f"unreachable ({type(exc).__name__})")   # §6.2: every attempt
             raise ModelUnavailable(f"unreachable ({type(exc).__name__})") from None
+        inference_log.log_llm(gw, sent, data)
         if status == 400 and fmt["type"] == "json_schema":
             fmt = {"type": "json_object"}
             continue
         if status == 401:
-            raise AnswerEngineError(f"{urlparse(url).hostname} rejected the key (HTTP 401)")
+            raise LLMInferenceError(f"{urlparse(url).hostname} rejected the key (HTTP 401)")
         # OpenRouter passes an overloaded upstream through as HTTP 200 with an error body and an empty choice
         # (nemotron-3-super:free, live 2026-09-24), so an error body fails the model whatever the status.
         err = data.get("error") if isinstance(data, dict) else None

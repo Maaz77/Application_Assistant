@@ -14,16 +14,18 @@ max_actions = 2000
 max_pages_per_job = 15
 
 [models]                           # model IDs, as each route names them
-chat_route = "vercel"                     # who serves the answer engine and the text helper: "openrouter" (free
+chat_route = "vercel"                     # who serves the LLM inference and the text helper: "openrouter" (free
                                           # models below) or "vercel" (paid, for when OpenRouter's free quota is out)
-jev = "typesafe-ai/jev"                   # TypeSafe's decision model: the browser agent and every page decision
-jev_route = "vercel"                      # Jev through Vercel AI Gateway (AI_GATEWAY_API_KEY), or "openrouter"
+system_one_decision_provider = "local"    # who serves the System One decision model: "local" (a Kev server on
+                                          # this Mac: no key, no quota — [models.local] below), "openrouter"
+                                          # (models.openrouter.system_one_decision_model, OPENROUTER_API_KEY) or
+                                          # "vercel" (models.vercel.system_one_decision_model, AI_GATEWAY_API_KEY)
 
 # Each list is tried in turn: the model that answered last goes first, and one that is out (rate-limited,
 # overloaded, wrong output) hands over to the next; when none answers the job goes to Needs Attention.
 [models.openrouter]                # OPENROUTER_API_KEY. Free tier: 50 requests a day across all free models
 # Each one supports structured outputs and answered the engine's real request shape on 2026-09-24.
-answer_engine = [
+llm_inference = [
   "qwen/qwen3.8-27b:free",
   "dots-studio/dots-3-note-preview:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
@@ -36,12 +38,24 @@ text_helper = [                    # types the values the browser agent enters
   "nex-agi/nex-n2.5-mini:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
 ]
+system_one_decision_model = "typesafe/jev-1.13"   # TypeSafe System One via https://openrouter.ai/api/alpha/decisions
 
 [models.vercel]                    # AI_GATEWAY_API_KEY (Vercel AI Gateway, paid from its credit)
 # A realistic page (5.3K tokens in), 2026-09-24: Small 5.2 s and $0.0013; Nemo 58.6 s and $0.00013. Both answer in
 # strict JSON. Vercel allows a new team 5 requests a minute per model, so two models also double that.
-answer_engine = ["mistral/mistral-small", "mistral/mistral-nemo"]
+llm_inference = ["mistral/mistral-small", "mistral/mistral-nemo"]
 text_helper = ["mistral/mistral-small", "mistral/mistral-nemo"]
+system_one_decision_model = "typesafe-ai/jev"            # Vercel AI Gateway's Jev (now 403 for free-tier; needs a card)
+
+[models.local]                     # Kev (github.com/jaredpalmer/kev) on this Mac: the same System One API as Jev
+# Start the server before a run: ./run_kev_server.command (it downloads the weights on the first start). On a 16 GB
+# Mac use kev-0.8b; kev-4b and kev-9b are 32 GB machines. No key unless the server is started with KEV_API_KEY set.
+base_url = "http://127.0.0.1:8009"
+system_one_decision_model = "kev-latest"   # the name the server answers to; --run picks which checkpoint it serves
+# Kev was trained on states of up to 384 tokens and loses accuracy on long ones (its README, "What to Expect"), and
+# a short state is also much faster on an Apple GPU. 12000 characters is about 3000 tokens.
+state_chars = 12000
+timeout = 120.0                    # seconds; one pass on an M3 is seconds, not the milliseconds of an H100
 
 [policy]
 prefill = "keep-if-silent"         # or "strict"

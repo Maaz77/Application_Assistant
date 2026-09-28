@@ -2,7 +2,7 @@
 
 The browser agent (the package's browser_goal) finds its way: from the posting to the application form past
 pop-ups, cookie banners and job pages, and from one form step to the next. Code keeps what must not be left to a
-model: the answers (answers.py, checked against the files), the resume upload, the blockers, the final-step gate,
+model: the answers (llm_inference.py, checked against the files), the resume upload, the blockers, the final-step gate,
 and the one never-submit rule (jev.never_click): no "Submit" click, and no "Apply" click once the form is being
 filled. A refused click is never made; in the form it means the last step."""
 from __future__ import annotations
@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from typing import Callable
 
 from assistant import decide, pages, tabs
-from assistant.answers import (LONG_TEXT, AnswerEngineError, PageAnswers, Question, judge_questions,
+from assistant.llm_inference import (LONG_TEXT, LLMInferenceError, PageAnswers, Question, judge_questions,
                                uncovered_optional, uncovered_required)
 from assistant.decide import DecisionError
 from assistant.blockers import Attempts, NeedsAttention, OpenQuestion, Parked, RestartFromEntry, StopRun
@@ -155,7 +155,7 @@ RESUME_CONFIDENCE = 0.5     # below this, Jev cannot tell which of several uploa
 def resume_input(p: Page, engine_pick: str | None = None) -> str | None:
     """The control that uploads the resume (a file input, or LinkedIn's "Upload resume" button that opens the file
     chooser, aa6), as Jev picks it. Several uploads and Jev unsure: Jev is asked again over its two likeliest picks;
-    still unsure, the answer engine's pick (`engine_pick`, an LLM's ref for the resume question) settles it when it is
+    still unsure, the LLM inference's pick (`engine_pick`, an LLM's ref for the resume question) settles it when it is
     one of those two. Only when neither settles it is it a blocker (C25)."""
     j = pages.judge(p)
     if j.resume_ref is None:
@@ -174,7 +174,7 @@ def resume_input(p: Page, engine_pick: str | None = None) -> str | None:
 
 
 def _engine_resume_pick(pa: PageAnswers | None, p: Page) -> str | None:
-    """The answer engine's ref for the resume upload, when it names exactly one of the page's file inputs."""
+    """The LLM inference's ref for the resume upload, when it names exactly one of the page's file inputs."""
     files = {e.ref for e in p.elements if e.role == "file"}
     picks = {q.ref for q in (pa.questions if pa else []) if q.kind == "file" and q.resume_upload and q.ref in files}
     return picks.pop() if len(picks) == 1 else None
@@ -287,7 +287,7 @@ def _option_choices(p: Page) -> dict[str, str]:
 def plan_fill(items: list[Question], p: Page) -> list[dict | None]:
     """How and where each answer goes in, as Jev decides, in one round (jev-ultrafast's speculative fan-out: the
     operation, and a target for each kind of operation). The code then only checks that the pick can be carried out
-    and acts with the answer engine's own text, so no rule chooses by the kind of control (it replaces direct_op,
+    and acts with the LLM inference's own text, so no rule chooses by the kind of control (it replaces direct_op,
     2026-09-24). None: a page goal sets that answer (custom widgets)."""
     if not items:
         return []
@@ -295,7 +295,7 @@ def plan_fill(items: list[Question], p: Page) -> list[dict | None]:
     qs: dict[str, dict] = {}
     for i, q in enumerate(items):
         about = {"question": q.question, "answer": q.answer}
-        about.update({k: v for k, v in (("answer_engine_ref", q.ref), ("answer_engine_option_ref", q.option_ref)) if v})
+        about.update({k: v for k, v in (("llm_inference_ref", q.ref), ("llm_inference_option_ref", q.option_ref)) if v})
         qs[f"op_{i}"] = decide.choice({**about, "ask": "How does `answer` go into the form for `question`?"}, FILL_OPS)
         if fields:
             qs[f"field_{i}"] = decide.choice({**about, "ask": "Which field is the one for `question`?"},
@@ -360,7 +360,7 @@ def run_goal(ctx: JobCtx, items: list[Question], p: Page) -> GoalResult:
     goal, steps = page_goal([(q.question, q.answer) for q in items])
     g = parse_goal(ctx.browser.goal(goal, ctx.session, max_steps=steps, verify=_verify(items, p) or None))
     if "no decision-model key" in g.raw:
-        raise NeedsAttention("answer_engine", "page goal could not run: no decision-model key")
+        raise NeedsAttention("llm_inference", "page goal could not run: no decision-model key")
     # Anything else (text helper returned no value, a provider hiccup, a timeout) is a failed goal:
     # read-back decides what was set, and its retry/blocker rules apply (B5).
     check_goal_alarm(g, p.table)
@@ -398,8 +398,8 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
     jev.FORM.started = True          # from here on "Apply" is never clicked either (jev.never_click)
     try:
         pa = ctx.answer_fn(p)
-    except AnswerEngineError as exc:
-        raise NeedsAttention("answer_engine", str(exc)) from exc
+    except LLMInferenceError as exc:
+        raise NeedsAttention("llm_inference", str(exc)) from exc
     log_answers(ctx, p, pa)
     try:
         judge_questions(pa, p)                                   # Jev: resume and cover-letter questions
@@ -712,7 +712,7 @@ def _park(ctx: JobCtx) -> Parked:
     shot = ""
     if ctx.shots_dir:
         ctx.shots_dir.mkdir(parents=True, exist_ok=True)
-        shot = str(ctx.shots_dir / f"{ctx.folder}.jpg")
+        shot = str(ctx.shots_dir / "screenshot.jpg")
         ctx.browser.act([{"op": "screenshot", "path": shot, "full": True}], ctx.session, p.table,
                           observe_after=False, stop_on_error=False)
     return Parked(url=p.url, title=p.title, pages=ctx.pages + 1, generated=ctx.generated, prefills=ctx.prefills,

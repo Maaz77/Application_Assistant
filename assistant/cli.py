@@ -7,14 +7,16 @@ import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 from urllib.parse import urlparse
 
 from assistant import config as config_mod
 from assistant import decide
+from assistant import inference_log
 from assistant import jev as jevlib
 from assistant import pages, records, tabs
-from assistant.answers import Policy, Sources, answer_page, resume_text
+from assistant.llm_inference import (LLMInferenceError, Policy, Sources, answer_page, call_engine, resume_text,
+                                     system_prompt)
 from assistant.rotation import Rotation
 from assistant.blockers import NeedsAttention, Parked, RestartFromEntry, StopRun
 from assistant.fill import JobCtx, run_pages
@@ -64,22 +66,54 @@ class PreflightError(RuntimeError):
     pass
 
 
-def preflight(browser: Jev) -> list[str]:
-    """Decision model, server, capabilities, LinkedIn sign-in. Raises PreflightError. Writes nothing."""
-    done = []
+PROBE_TIMEOUT = 60.0   # a preflight LLM-inference probe: a trivial page should answer well within this
+
+
+def _probe_llm_inference(cfg: config_mod.Config) -> str:
+    """Live check that a configured LLM inference model answers with a valid PageAnswers, over the strict
+    json_schema path the real run uses. One trivial empty page; LLMInferenceError when no model answers. Returns
+    the model that answered."""
+    models = Rotation(cfg.models.llm_inference)
+    user = {"page": {"url": "about:blank", "title": "Preflight", "text": "", "fields": []},
+            "sources": {"profile": "", "job": "", "resume": ""}}
+    call_engine(key=config_mod.chat_key(cfg), models=models, system=system_prompt(cfg.policy.free_text_max_chars),
+                user=user, url=config_mod.chat_url(cfg), timeout=PROBE_TIMEOUT)
+    return models.last or cfg.models.llm_inference[0]
+
+
+def preflight(browser: Jev) -> Iterator[str]:
+    """LLM inference, decision model, server, capabilities, LinkedIn sign-in. Yields each check as it passes (so a
+    later failure does not hide an earlier ✓), and raises PreflightError on the first that fails. Writes only the
+    run's inference logs."""
+    try:
+        model = _probe_llm_inference(browser.cfg)
+    except LLMInferenceError as exc:
+        raise PreflightError(f"the LLM inference model does not answer: {exc}") from exc
+    yield f"LLM inference {model} answers (via {browser.cfg.models.chat_route})"
+    cfg = browser.cfg
+    name = cfg.models.system_one_decision_model
+    if cfg.models.system_one_decision_provider == "local":
+        try:
+            card = decide.server_card(cfg)
+        except decide.DecisionError as exc:
+            raise PreflightError(str(exc)) from exc
+        yield (f"Kev server on {cfg.models.local.base_url}: {card.get('run')} on {card.get('device')} "
+               f"via {card.get('backend')} ({card.get('dtype')})")
     try:
         a = decide.current().ask("preflight", "A job application form asks for the candidate's email address.",
                                  {"form": decide.noul("Is this about a job application?")})
     except decide.DecisionError as exc:
-        raise PreflightError(f"the decision model (Jev) does not answer: {exc}") from exc
+        hint = decide.start_hint(cfg)
+        raise PreflightError(f"the decision model ({name}) does not answer: {exc}"
+                             f"{'. ' + hint if hint else ''}") from exc
     if not a["form"].yes(0.5):
-        raise PreflightError("the decision model (Jev) answered a trivial question wrongly")
-    done.append(f"decision model {browser.cfg.models.jev} answers (via {browser.cfg.models.jev_route})")
+        raise PreflightError(f"the decision model ({name}) answered a trivial question wrongly")
+    yield f"decision model {name} answers (via {cfg.models.system_one_decision_provider})"
     doc = browser.doctor()
     for cap in ("text_model", "uploads", "js_eval"):
         if doc.get(cap) is not True:
             raise PreflightError(f"browser_doctor: {cap} is not enabled")
-    done.append("server started; text helper, uploads and JS eval enabled")
+    yield "server started; text helper, uploads and JS eval enabled"
     print("… connecting to Chrome — if Chrome shows “Allow remote debugging?”, click Allow", flush=True)
     try:
         browser.open(LINKEDIN_FEED, "preflight", timeout=CONNECT_TIMEOUT)
@@ -94,10 +128,10 @@ def preflight(browser: Jev) -> list[str]:
             pass
     if not pages.linkedin_feed_ok(table.url):
         raise PreflightError(f"LinkedIn is signed out in this Chrome (landed on {table.url})")
-    done.append("LinkedIn signed in")
+    yield "LinkedIn signed in"
     if (browser.doctor()).get("connected") is not True:
         raise PreflightError("browser_doctor: not connected after the LinkedIn probe")
-    done.append("attached to Chrome")
+    yield "attached to Chrome"
     try:
         book = tabs.TabBook(browser)
         browser.open("about:blank", "preflight-tabs")
@@ -106,8 +140,7 @@ def preflight(browser: Jev) -> list[str]:
         book.close()
     except (tabs.TabError, JevError) as exc:
         raise PreflightError(f"tab bookkeeping does not work in this Chrome: {exc}") from exc
-    done.append("tab release works")
-    return done
+    yield "tab release works"
 
 
 def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
@@ -115,9 +148,10 @@ def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
     problems = cfg.problems()
     missing: dict[str, list[str]] = {}
     if not key:
-        missing.setdefault(config_mod.KEY_NAMES[cfg.models.chat_route], []).append("the answer engine and text helper")
-    if not config_mod.jev_key(cfg):
-        missing.setdefault(config_mod.KEY_NAMES[cfg.models.jev_route], []).append("Jev")
+        missing.setdefault(config_mod.KEY_NAMES[cfg.models.chat_route], []).append("the LLM inference and text helper")
+    provider = cfg.models.system_one_decision_provider
+    if provider not in config_mod.KEYLESS_PROVIDERS and not config_mod.system_one_decision_key(cfg):
+        missing.setdefault(config_mod.KEY_NAMES[provider], []).append("the System One decision model")
     for name, users in missing.items():
         problems.append(f"{name} is missing ({' and '.join(users)} need it; put it in Tools/Application_Assistant/.env)")
     return problems
@@ -135,7 +169,7 @@ def process(job: records.Job, *, browser: Jev, book: tabs.TabBook, cfg: config_m
     baseline = book.handles()
     src = Sources(profile=profile, job=job.job_md.read_text(), resume=resume_text(pdf))
     policy = Policy(cfg.policy.prefill, cfg.policy.free_text_max_chars)
-    engines = engines or Rotation(cfg.models.answer_engine)
+    engines = engines or Rotation(cfg.models.llm_inference)
 
     def engine(p):
         return answer_page(p, src, key=key, models=engines, policy=policy, today=today,
@@ -143,7 +177,7 @@ def process(job: records.Job, *, browser: Jev, book: tabs.TabBook, cfg: config_m
 
     ctx = JobCtx(browser=browser, session=S, book=book, resume_pdf=pdf, answer_fn=engine, baseline=baseline,
                  google_email=cfg.google.account_email, max_pages=cfg.browser.max_pages_per_job,
-                 answers_log=run_dir / "answers" / f"{job.folder}.json", shots_dir=run_dir / "shots",
+                 answers_log=run_dir / job.folder / "answers.json", shots_dir=run_dir / job.folder,
                  folder=job.folder)
     opened = False
     try:
@@ -231,6 +265,7 @@ def run(cfg: config_mod.Config, args) -> int:
         return EXIT_PREFLIGHT
     started = datetime.now()
     run_dir = RUNS / started.strftime("%Y%m%d-%H%M%S")
+    inference_log.start_run(run_dir)                   # scope _run until a job starts (§6.1); preflight logs here
     report = Report(started)
 
     def on_timeout(msg: str) -> None:                  # §3: write the report, then the caller os._exit(3)s
@@ -249,8 +284,7 @@ def run(cfg: config_mod.Config, args) -> int:
         print(f"✗ preflight: {exc}")
         return EXIT_PREFLIGHT
     try:
-        browser.calls_log = run_dir / "calls.jsonl"
-        decide.current().log = run_dir / "decisions.jsonl"
+        browser.calls_log = run_dir / "_run" / "browser_actions.jsonl"   # preflight/queue calls; repointed per job
         book = tabs.TabBook(browser)                   # before any job tab exists (full IDs, §4.5)
         tracker.backup(run_dir / "tracker-backup.numbers")
         if not args.no_record:
@@ -260,38 +294,42 @@ def run(cfg: config_mod.Config, args) -> int:
         recorder = records.Recorder(tracker, records.Journal(run_dir / "journal.jsonl"), cfg.base_dir(),
                                     cfg.path("pending_review"), cfg.path("needs_attention"), set(q.new_rows))
         profile = cfg.path("profile").read_text()
-        engines = Rotation(cfg.models.answer_engine)   # one for the run: each page starts at the last model that answered
+        engines = Rotation(cfg.models.llm_inference)   # one for the run: each page starts at the last model that answered
         for job in q.jobs:
-            t0 = time.monotonic()
-            result = JobResult(job.company, job.title, job.linkedin_url, job.folder, 0,
-                               date=started.strftime("%Y-%m-%d"))
-            try:
-                result.parked = process(job, browser=browser, book=book, cfg=cfg, key=key, profile=profile, run_dir=run_dir,
-                                        today=started.date(), warn=report.warnings.append, engines=engines)
-            except NeedsAttention as na:
-                result.attention = na
-            result.seconds = time.monotonic() - t0
-            if not args.no_record:
-                if result.parked:
-                    dst = recorder.record(job, PENDING_REVIEW, records.parked_note(result.parked, datetime.now()),
-                                          None)
-                else:
-                    na = result.attention
-                    dst = recorder.record(job, NEEDS_ATTENTION, records.needs_attention_note(na, datetime.now()),
-                                          f"Needs Attention: {na.cls} — {na.what}"[:240])
-                result.folder = str(dst.relative_to(cfg.base_dir()))
-            report.results.append(result)
-            print(result.terminal_line())
+            with inference_log.scope(job.folder):      # §6.1: this job's logs land in run_dir/<job folder>/
+                browser.calls_log = run_dir / job.folder / "browser_actions.jsonl"
+                t0 = time.monotonic()
+                result = JobResult(job.company, job.title, job.linkedin_url, job.folder, 0,
+                                   date=started.strftime("%Y-%m-%d"))
+                try:
+                    result.parked = process(job, browser=browser, book=book, cfg=cfg, key=key, profile=profile,
+                                            run_dir=run_dir, today=started.date(), warn=report.warnings.append,
+                                            engines=engines)
+                except NeedsAttention as na:
+                    result.attention = na
+                result.seconds = time.monotonic() - t0
+                if not args.no_record:
+                    if result.parked:
+                        dst = recorder.record(job, PENDING_REVIEW, records.parked_note(result.parked, datetime.now()),
+                                              None)
+                    else:
+                        na = result.attention
+                        dst = recorder.record(job, NEEDS_ATTENTION, records.needs_attention_note(na, datetime.now()),
+                                              f"Needs Attention: {na.cls} — {na.what}"[:240])
+                    result.folder = str(dst.relative_to(cfg.base_dir()))
+                report.results.append(result)
+                print(result.terminal_line())
     except StopRun as exc:
         report.stopped = str(exc)
         print(f"■ run stopped: {exc}")
     finally:
+        browser.calls_log = run_dir / "_run" / "browser_actions.jsonl"   # tab cleanup is run-level, not a job's
         try:
             book.close()
         except (NameError, JevError):
             pass
         d = decide.current()
-        report.decisions = (d.calls, d.cost)
+        report.decisions, report.decision_model = (d.calls, d.cost), d.model
     path = report.write(run_dir)
     print(f"Report: {path}")
     return report.exit_code()
@@ -303,7 +341,10 @@ def run_preflight(cfg: config_mod.Config) -> int:
         for p in problems:
             print(f"✗ {p}")
         return EXIT_PREFLIGHT
-    print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, Jev via {cfg.models.jev_route})")
+    inference_log.start_run(RUNS / datetime.now().strftime("%Y%m%d-%H%M%S"))   # preflight's Jev call -> _run/ (§6.1)
+    provider = cfg.models.system_one_decision_provider
+    print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, System One decision model via "
+          f"{provider}{' — no key needed' if provider in config_mod.KEYLESS_PROVIDERS else ''})")
     try:
         _load_package(cfg, key)
         print("✓ jev-ultrafast-mcp loaded after apply_env()")

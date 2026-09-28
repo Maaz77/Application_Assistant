@@ -31,17 +31,29 @@ def cfg():
 
 @pytest.fixture(autouse=True)
 def decider(request):
-    """Every decision the program asks of Jev: the offline rule stand-in (tests/rule_decider.py), or — for a
-    live_model test with a key in .env — the real Jev on OpenRouter."""
+    """Every decision the program asks of the System One model: the offline rule stand-in
+    (tests/rule_decider.py), or — for a live_model test — the real thing: a route whose key is in .env, or a
+    keyless one (a Kev server on this machine, which the test then needs running)."""
     from assistant import decide
     from tests.rule_decider import RuleDecider
     jev.FORM.started = False                  # the never-submit rule's stage: each test starts before any form
     cfg = config.load()
-    live = "live_model" in request.keywords and config.jev_key(cfg)
+    live = "live_model" in request.keywords and (
+        cfg.models.system_one_decision_provider in config.KEYLESS_PROVIDERS
+        or config.system_one_decision_key(cfg))
     d = decide.for_config(cfg) if live else RuleDecider()
     decide.use(d)
     yield d
     decide.use(None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_inference_log():
+    """No active run by default: a test that never calls start_run gets no-op loggers, and no test writes into
+    another's run dir (preflight/run now start a run)."""
+    from assistant import inference_log
+    inference_log.start_run(None)
+    yield
 
 
 @pytest.fixture(scope="session")
@@ -79,7 +91,7 @@ class Secret(str):
 
 @pytest.fixture(scope="session")
 def chat_key(cfg):
-    """The key for models.chat_route: the answer engine and the text helper."""
+    """The key for models.chat_route: the LLM inference and the text helper."""
     key = config.chat_key(cfg)
     if not key:
         pytest.skip(f"no {config.KEY_NAMES[cfg.models.chat_route]} in .env")

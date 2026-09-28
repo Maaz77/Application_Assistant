@@ -1,13 +1,15 @@
 # Application Assistant v2: Build Spec, as built
 
-Spec v3 · 2026-09-24 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the package behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems.
+Spec v3.1 · 2026-09-28 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the package behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems.
+
+**v3.1 (re-core P0, 2026-09-28):** the component that writes the answers is renamed **LLM inference** everywhere (`answers.py` → `llm_inference.py`). Every HTTP attempt to a chat model or to a System One decision model is logged per run and per job under `runs/<ts>/{_run,<job folder>}/` (`llm_inference_logs.json` §6.2, `jev_inference_logs.json` §6.3); `decisions.jsonl`, `calls.jsonl`, `answers/` and `shots/` are gone (§8). The decision-model role is config `models.system_one_decision_provider` / `models.<route>.system_one_decision_model` — Jev is one instance; a **local Kev server** (`[models.local]`, keyless) is another. Preflight live-probes the LLM inference model and the System One model. See `recore/HANDOVER.md` for the full P0 change list and deviations.
 
 **The program**, *the wrapper*, lives in `Tools/Application_Assistant/`. For every job at Status "Resume Built" it fills the application in the user's own signed-in Chrome, **stops one click before submission**, leaves that tab open, and records the result.
 
 Who does what:
 - **The browser package** `jev-ultrafast-mcp` (a patched 0.1.5 wheel) is called in-process.
-- **Jev** is TypeSafe's decision model. It judges every page and plans every fill; the package's goal agent also uses it to pick each click.
-- **The answer engine**, a chat model, writes the answers, and only from the user's files.
+- **The System One decision model** (config `models.system_one_decision_provider`; TypeSafe's **Jev** instance, or a local **Kev** server) judges every page and plans every fill; the package's goal agent also uses it to pick each click.
+- **The LLM inference**, a chat model, writes the answers, and only from the user's files.
 - **The code keeps:** the answer checks, the resume upload, the records, and one fixed never-submit rule (§4.2).
 
 ## 0. Rules
@@ -61,7 +63,7 @@ Always:
 Tools/Application_Assistant/
   pyproject.toml  config.toml  .env (git-ignored)  run_application_assistant.command
   README.md  CLAUDE.md  DISCOVERY.md  LIVE_TEST.md  application_assistant_build_spec.md
-  prompts/  answer_engine.md  navigate_goal.md  next_step_goal.md  page_goal.md
+  prompts/  llm_inference.md  navigate_goal.md  next_step_goal.md  page_goal.md
   vendor/   jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl  jev_ultrafast_mcp-0.1.5+aa6.patch
   assistant/  __main__.py cli.py config.py jev.py guard.py probes.py pages.py decide.py fill.py answers.py
               rotation.py google_signin.py blockers.py tabs.py records.py tracker.py report.py contract_check.py
@@ -92,7 +94,7 @@ CLI (`python -m assistant [--config PATH] …`):
 - `python -m assistant.contract_check`: the package's `browser_*` signatures and the three hooks of §3.3.
 - `run_application_assistant.command`: double-click launcher for `run "$@"`, which explains the exit code.
 
-`config.toml` (pydantic models; unknown keys are an error; `models.answer_engine` / `models.text_helper` take one ID or a list):
+`config.toml` (pydantic models; unknown keys are an error; `models.llm_inference` / `models.text_helper` take one ID or a list):
 
 ```toml
 [paths]
@@ -111,18 +113,18 @@ max_actions = 2000
 max_pages_per_job = 15
 
 [models]
-chat_route = "vercel"              # who serves the answer engine and the text helper: "openrouter" | "vercel"
-jev = "typesafe-ai/jev"            # Jev's ID on its route: "typesafe-ai/jev" (Vercel), "typesafe/jev-1.13" (OpenRouter)
-jev_route = "vercel"               # who serves Jev: "vercel" | "openrouter"
+chat_route = "vercel"              # who serves the LLM inference and the text helper: "openrouter" | "vercel"
+system_one_decision_model = "typesafe-ai/jev"            # Jev's ID on its route: "typesafe-ai/jev" (Vercel), "typesafe/jev-1.13" (OpenRouter)
+system_one_decision_provider = "vercel"               # who serves Jev: "vercel" | "openrouter"
 
 [models.openrouter]                # OPENROUTER_API_KEY; free tier: 50 requests a day across all free models
-answer_engine = ["qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free",
+llm_inference = ["qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free",
                  "nvidia/nemotron-3-super-120b-a12b:free", "nex-agi/nex-n2.5-mini:free", "nex-agi/nex-n2.5-pro:free"]
 text_helper = ["qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free",
                "nex-agi/nex-n2.5-mini:free", "nvidia/nemotron-3-super-120b-a12b:free"]
 
 [models.vercel]                    # AI_GATEWAY_API_KEY
-answer_engine = ["mistral/mistral-small", "mistral/mistral-nemo"]
+llm_inference = ["mistral/mistral-small", "mistral/mistral-nemo"]
 text_helper = ["mistral/mistral-small", "mistral/mistral-nemo"]
 
 [policy]
@@ -134,9 +136,9 @@ account_email = "…"                # empty → every Google sign-in is a block
 ```
 
 The config code in `config.py`:
-- `cfg.models.answer_engine` / `.text_helper` read the active route's table.
+- `cfg.models.llm_inference` / `.text_helper` read the active route's table.
 - `config.chat_key(cfg)` / `config.chat_url(cfg)` give the chat route's key and `…/chat/completions`, from `CHAT_BASES = {openrouter: https://openrouter.ai/api/v1, vercel: https://ai-gateway.vercel.sh/v1}`.
-- `config.jev_key(cfg)` gives Jev's route's key.
+- `config.system_one_decision_key(cfg)` gives Jev's route's key.
 
 `.env`: `OPENROUTER_API_KEY=` and `AI_GATEWAY_API_KEY=` (read from `.env` first, then the process environment).
 
@@ -165,8 +167,8 @@ The wheel is 0.1.5 plus three observer fixes (`vendor/*.patch`, "aa"):
 | `JEVMCP_MODE` / `JEVMCP_CDP_URL` | `attach` / `browser.cdp_url` |
 | `JEVMCP_FOREGROUND` / `JEVMCP_MAX_ACTIONS` | `0` / `browser.max_actions` |
 | `JEVMCP_ALLOW_UPLOADS` / `JEVMCP_ALLOW_JS` | `1` / `1` |
-| `TYPESAFE_BASE_URL` (+ `TYPESAFE_API_KEY`) | vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone` + `AI_GATEWAY_API_KEY`; openrouter: `https://openrouter.ai/api/alpha/decisions` (paid with the OpenRouter key) |
-| `TYPESAFE_MODEL` | `models.jev` |
+| `TYPESAFE_BASE_URL` (+ `TYPESAFE_API_KEY`) | vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone` + `AI_GATEWAY_API_KEY`; openrouter: `https://openrouter.ai/api/alpha/decisions` (paid with the OpenRouter key); local: `models.local.base_url` + `/v1/systemone` + `KEV_API_KEY`, or the placeholder `local` when the Kev server is open (the package refuses turbo mode on an empty key) |
+| `TYPESAFE_MODEL` | `models.system_one_decision_model` |
 | `OPENROUTER_API_KEY` | `key` on the openrouter chat route, else the `.env` OpenRouter key |
 | `TEXT_MODEL_API_KEY` / `TEXT_MODEL_BASE_URL` | `key` / `CHAT_BASES[chat_route]` |
 | `TEXT_MODEL` / `TEXT_MODEL_REASONING` | `models.text_helper[0]` (the rest rotate in, §3.3) / `none` |
@@ -311,11 +313,16 @@ The outcome:
 
 ## 6. Page decisions (`pages.py` + `decide.py`, by Jev)
 
-**6.0 The Jev client** (`decide.Decider`, installed per run with `decide.use(decide.for_config(cfg))`).
+**6.0 The System One client** (`decide.Decider`, installed per run with `decide.use(decide.for_config(cfg))`).
 - **The request:** TypeSafe's System One shape, `{model, state, questions}`. Questions are `noul` (a yes/no probability), `choice` (criteria → choice, confidence, probabilities) or `score`.
 - **Endpoints:**
   - vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone`, model `typesafe-ai/jev`, `AI_GATEWAY_API_KEY`;
-  - openrouter: `https://openrouter.ai/api/v1/systemone`, model `typesafe/jev-1.13`.
+  - openrouter: `https://openrouter.ai/api/v1/systemone`, model `typesafe/jev-1.13`;
+  - local (user decision 2026-09-28): `models.local.base_url` + `/v1/systemone`, model `kev-latest`, no key — a
+    [Kev](https://github.com/jaredpalmer/kev) server on the user's Mac. Same request and answer shapes, so only the
+    URL changes; the state is sent as an object (Kev renders one as labeled text), the state limit is
+    `models.local.state_chars`, the timeout `models.local.timeout`, and the retry ladder `LOCAL_RETRY_WAITS = (2, 5)` s,
+    because a server on this machine is never rate-limited. Preflight reads `GET /v1/models` first.
 - **Batching:**
   - The state is cut to `STATE_CHARS = 60_000` characters, text first (Jev's context is 32K tokens).
   - Questions go in batches of `BATCH = 4`, `PARALLEL = 4` in flight. TypeSafe fails a whole request when one question fails (§13.1).
@@ -399,22 +406,22 @@ Derived answers:
 
 `settle(read)` re-reads once a second, up to `SETTLE_SECONDS = 10`, while the page is empty or `loading`. Each re-read is a new Page, so it gets a new judgment.
 
-## 7. Answer engine (`answers.py`)
+## 7. LLM inference (`answers.py`)
 
 **7.1 Models and routes.**
 - **One call per form page:** `POST config.chat_url(cfg)`, i.e. OpenRouter or Vercel AI Gateway's OpenAI-compatible `chat/completions`, with the same request on both.
-- **Model rotation:** `models.answer_engine` is a `rotation.Rotation`. A call tries the model that answered last first, then the others in configured order. One rotation lasts the whole run.
+- **Model rotation:** `models.llm_inference` is a `rotation.Rotation`. A call tries the model that answered last first, then the others in configured order. One rotation lasts the whole run.
 - **Per model:**
   - JSON-schema output, falling back to `json_object` on HTTP 400;
   - a 429 with `Retry-After` ≤ `RETRY_AFTER_MAX = 30` s is waited out once;
-  - any other failure hands over to the next model with no wait: 429/5xx, a 200 with an error body, a timeout (`ENGINE_TIMEOUT = 120` s), or invalid output;
+  - any other failure hands over to the next model with no wait: 429/5xx, a 200 with an error body, a timeout (`LLM_INFERENCE_TIMEOUT = 120` s), or invalid output;
   - a 401 fails at once, because every model would fail the same way.
-- **When none answers:** `AnswerEngineError("answer engine: none of N models answered (<each reason>)")`, and the job goes to Needs Attention (class `answer_engine`).
+- **When none answers:** `LLMInferenceError("LLM inference: none of N models answered (<each reason>)")`, and the job goes to Needs Attention (class `llm_inference`).
 - **The text helper** rotates the same way (§3.3).
 
 **7.2 Request.**
 - Parameters: `temperature: 0`, `max_tokens: 8192`, `reasoning: {"enabled": false}`, and `response_format` = the strict `page_answers` JSON schema.
-- System prompt: `prompts/answer_engine.md`, with `{free_text_max_chars}` filled in.
+- System prompt: `prompts/llm_inference.md`, with `{free_text_max_chars}` filled in.
 - User message (JSON):
   - `page`: url, title, elements, text (≤ 12,000 characters), maxlengths, required_empty;
   - `sources`: `Profile.md`, `job.md`, and the resume text read with pypdf.
@@ -471,15 +478,15 @@ Then:
 1. A required cover-letter upload (Jev) → Needs Attention (`broken_form`, C15).
 2. **Resume** (`resume_input`, then `upload`):
    - Jev's `resume_input` pick is used when it is the only file input or its confidence is ≥ `RESUME_CONFIDENCE = 0.5`.
-   - Otherwise `decide.narrow` asks again over the two likeliest options; then the answer engine's own ref for the resume question decides, if it is one of those two; else Needs Attention.
+   - Otherwise `decide.narrow` asks again over the two likeliest options; then the LLM inference's own ref for the resume question decides, if it is one of those two; else Needs Attention.
    - If the resume is already on the page (file name), only LinkedIn's resume card is selected.
-3. **Long text:** `generated` answers, and other text over `LONG_TEXT = 300` characters, are typed by the wrapper on the answer engine's ref (`clear: true`, `submit: false`). A stale ref is re-mapped by question once.
+3. **Long text:** `generated` answers, and other text over `LONG_TEXT = 300` characters, are typed by the wrapper on the LLM inference's ref (`clear: true`, `submit: false`). A stale ref is re-mapped by question once.
 4. **Every other answer** that differs from the current value goes to `plan_fill` (topic `fill`). Per answer, Jev picks:
    - the operation, a choice of type | select | check | widget;
    - the field, among text fields and lists;
    - the option, among radios, checkboxes and select options `eN:k`.
 
-   The answer engine's `ref` / `option_ref` go in only as hints. `_carry_out` turns a pick into a `browser_act` op only when the page allows it (typing needs an editable text field, a select needs a listed option label, check needs a radio or checkbox). The ops run in one `browser_act`.
+   The LLM inference's `ref` / `option_ref` go in only as hints. `_carry_out` turns a pick into a `browser_act` op only when the page allows it (typing needs an editable text field, a select needs a listed option label, check needs a radio or checkbox). The ops run in one `browser_act`.
 5. **The rest** (widgets, or picks that can't be carried out) go into one page goal (`prompts/page_goal.md`, `max_steps = 2 × len + 3`, `verify` = `checked` / `value_equals` where possible). The page goal sets exactly the listed answers and never clicks Submit, Send, Apply, Confirm, Done or Finish.
 6. If a goal left the page (the field fingerprint changed), that is a `broken_form` attempt and the page is refilled.
 7. **Read-back** (`mismatches`, topic `readback`): one Jev choice per answer on the fresh page, holds | different | empty (the top choice decides).
@@ -501,7 +508,7 @@ Then:
   - `## <date time> — Pending Review`, with the parked URL and title and page count, generated texts, kept pre-fills, and optional questions left empty.
 - **8.4 Journal** `runs/<ts>/journal.jsonl`: `record_start → tracker_saved → folder_moved → record_done`. At the start of a recorded run, every job in any journal without `record_done` is completed idempotently (`records.recover`).
 - **8.5 Report and exit.** `runs/<ts>/report.md` has these sections:
-  - Summary, including "Decisions by Jev: N calls, $X";
+  - Summary, including "Decisions by <model>: N calls, $X" (no cost on a route that charges none);
   - Parked;
   - Needs Attention (reason, where);
   - Queue anomalies;
@@ -578,11 +585,13 @@ T0–T10 of spec v2 were built and handed over on 2026-09-23. The main changes s
 
 ## 12. Fixed defaults (plan C-items, as built)
 
-C1 no tab groups · C4 tracker saved after every job · C7 the agent clicks the step's Next (one action per goal) · C8 a blocked job's tab stays open · C10 `policy.prefill` · C14 closed or already applied → Needs Attention, no retry · C15 cover letter: text → generated; optional file → empty; required file → blocker · C16 demographics only from the Scratch Pad · C19 LinkedIn signed out mid-run → exit 3, job untouched · C20 free text ≤ `free_text_max_chars` without a maxlength · C21 `JEVMCP_MAX_ACTIONS=2000` · C22 uncovered optional field → empty, listed in the note · C23 experience totals only as `computed` · C24 cookie banners: the agent declines optional cookies · C25 the resume input is Jev's pick, then narrowed, then the answer engine's.
+C1 no tab groups · C4 tracker saved after every job · C7 the agent clicks the step's Next (one action per goal) · C8 a blocked job's tab stays open · C10 `policy.prefill` · C14 closed or already applied → Needs Attention, no retry · C15 cover letter: text → generated; optional file → empty; required file → blocker · C16 demographics only from the Scratch Pad · C19 LinkedIn signed out mid-run → exit 3, job untouched · C20 free text ≤ `free_text_max_chars` without a maxlength · C21 `JEVMCP_MAX_ACTIONS=2000` · C22 uncovered optional field → empty, listed in the note · C23 experience totals only as `computed` · C24 cookie banners: the agent declines optional cookies · C25 the resume input is Jev's pick, then narrowed, then the LLM inference's.
 
 ## 13. Main problems and challenges
 
-As of 2026-09-24, **no job has yet reached the parked final step in a real run.** The problems, most severe first. The evidence is from `runs/20260924-233549`, the user's run of 23:35–23:54, which was stopped during its fifth job.
+**P0 update (2026-09-28):** P0 added observability (the per-run/per-job inference logs) and the rename, and made the System One provider configurable, but did **not** fix the problems below — they are P1–P4. Still true: no job has reached the parked final step in a real run. New blocker found this phase: on the working keyless route, **kev-0.8b misclassifies the LinkedIn entry page** (`kind="other"` at 0.12, flat distribution, although the Easy Apply control was in its State), so no job gets past the entry decision. Paid Jev is unavailable on the account (OpenRouter 402, Vercel 403). So a live end-to-end form-fill is still unproven; it needs a stronger or fine-tuned System One model (P3/P4). Details in `recore/HANDOVER.md`.
+
+The v3 problems below, most severe first. The evidence is from `runs/20260924-233549`, the user's run of 23:35–23:54, which was stopped during its fifth job.
 
 **13.1 Too many Jev requests, most of them failing (429 / 503).** The run sent 222 page-decision requests in 19 minutes, up to 29 a minute, plus 21 agent goals:
 - 61 decision requests succeeded only after one or more retries, with about 1,070 s of accumulated retry waiting;
@@ -641,5 +650,5 @@ Directions, not built:
 - The live tests (`--live`) use real model calls and are exposed to the same provider outages. One live tripwire status check failed once without recurring; nothing was sent.
 
 **13.8 Speed.**
-- A job takes minutes: retries, `settle`'s one-second re-reads, 8 s new-tab waits after agent clicks, and 5–60 s answer-engine calls.
+- A job takes minutes: retries, `settle`'s one-second re-reads, 8 s new-tab waits after agent clicks, and 5–60 s LLM inference calls.
 - The five-job run took about 19 minutes and parked nothing.

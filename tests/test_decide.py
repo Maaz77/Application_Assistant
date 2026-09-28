@@ -24,18 +24,16 @@ def fake_post(*replies):
     return post, calls
 
 
-def test_request_shape_answers_and_log(tmp_path):
+def test_request_shape_answers_and_cost():
     post, calls = fake_post((200, None))
-    d = decide.Decider("sk-secret", "typesafe/jev-1.13", log=tmp_path / "decisions.jsonl", post=post)
+    d = decide.Decider("sk-secret", "typesafe/jev-1.13", post=post)
     a = d.ask("page", {"url": "u"}, {"x": decide.noul("Is it?", true="yes", false="no"),
                                     "k": decide.choice("Which?", {"a": "A", "b": None})})
     url, body, headers = calls[0]
-    assert url == "https://openrouter.ai/api/v1/systemone" and body["model"] == "typesafe/jev-1.13"
+    assert url == "https://openrouter.ai/api/alpha/decisions" and body["model"] == "typesafe/jev-1.13"
     assert body["questions"]["x"] == {"type": "noul", "instructions": "Is it?", "criteria": {"true": "yes", "false": "no"}}
     assert a["x"].yes(0.5) and not a["x"].yes(0.95) and a["k"].choice == "a" and a["k"].confidence == 0.8
     assert headers["Authorization"] == "Bearer sk-secret" and d.calls == 1 and d.cost == pytest.approx(0.00002)
-    line = json.loads((tmp_path / "decisions.jsonl").read_text())
-    assert line["topic"] == "page" and line["answers"]["x"] == {"p": 0.9} and "sk-secret" not in json.dumps(line)
 
 
 def test_many_questions_are_split_into_small_batches_that_retry_on_their_own():
@@ -92,9 +90,9 @@ def test_no_decider_configured_is_an_error():
         decide.current()
 
 
-def test_a_long_state_is_cut_to_fit():
+def test_a_long_state_is_cut_to_fit_and_returned_as_a_string():
     state = decide.fit_state({"url": "u", "text": "x" * (decide.STATE_CHARS * 2)})
-    assert len(json.dumps(state)) <= decide.STATE_CHARS and state["url"] == "u"
+    assert isinstance(state, str) and len(state) <= decide.STATE_CHARS and '"url": "u"' in state
 
 
 def test_the_vercel_route_endpoint_cost_and_errors():
@@ -117,25 +115,174 @@ def test_the_decider_follows_the_config(monkeypatch):
     from assistant import config
     monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw")
     cfg = config.load()
-    vercel = cfg.model_copy(update={"models": cfg.models.model_copy(update={"jev": "typesafe-ai/jev",
-                                                                            "jev_route": "vercel"})})
+    vercel = cfg.model_copy(update={"models": cfg.models.model_copy(update={
+        "system_one_decision_provider": "vercel", "vercel": cfg.models.vercel.model_copy(update={"system_one_decision_model": "typesafe-ai/jev"})})})
     d = decide.for_config(vercel)
     assert d.url.startswith("https://ai-gateway.vercel.sh/") and d.model == "typesafe-ai/jev"
-    orouter = cfg.model_copy(update={"models": cfg.models.model_copy(update={"jev": "typesafe/jev-1.13",
-                                                                             "jev_route": "openrouter"})})
-    assert decide.for_config(orouter).url == "https://openrouter.ai/api/v1/systemone"
+    orouter = cfg.model_copy(update={"models": cfg.models.model_copy(update={
+        "system_one_decision_provider": "openrouter", "openrouter": cfg.models.openrouter.model_copy(update={"system_one_decision_model": "respan/span-01-lite:free"})})})
+    ora = decide.for_config(orouter)
+    assert ora.url == "https://openrouter.ai/api/alpha/decisions" and ora.model == "respan/span-01-lite:free"
 
 
 def test_the_browser_agent_follows_the_same_route(monkeypatch):
     from assistant import config, jev
     monkeypatch.setattr(config, "gateway_key", lambda *a: "gw-key")
     cfg = config.load()
-    vercel = cfg.model_copy(update={"models": cfg.models.model_copy(update={"jev": "typesafe-ai/jev",
-                                                                            "jev_route": "vercel"})})
+    vercel = cfg.model_copy(update={"models": cfg.models.model_copy(update={
+        "system_one_decision_provider": "vercel", "vercel": cfg.models.vercel.model_copy(update={"system_one_decision_model": "typesafe-ai/jev"})})})
     env = jev.env_values(vercel, "or-key")
     assert env["TYPESAFE_BASE_URL"] == "https://ai-gateway.vercel.sh/typesafe/v1/systemone"
     assert env["TYPESAFE_API_KEY"] == "gw-key" and env["TYPESAFE_MODEL"] == "typesafe-ai/jev"
     assert env["TEXT_MODEL_API_KEY"] == "or-key" and env["TEXT_MODEL_REASONING"] == "none"
-    orouter = cfg.model_copy(update={"models": cfg.models.model_copy(update={"jev_route": "openrouter"})})
+    orouter = cfg.model_copy(update={"models": cfg.models.model_copy(update={"system_one_decision_provider": "openrouter"})})
     env = jev.env_values(orouter, "or-key")
     assert env["TYPESAFE_BASE_URL"] == "https://openrouter.ai/api/alpha/decisions" and "TYPESAFE_API_KEY" not in env
+
+
+def test_respan_questions_flattens_instructions_and_criteria_to_strings():
+    qs = {"a": decide.noul({"form_question": "Q", "question": "ask?"}, true="yes", false="no"),
+          "b": decide.choice("plain?", {"x": "X", "y": {"nested": 1}})}
+    out = decide.respan_questions(qs)
+    assert isinstance(out["a"]["instructions"], str) and '"form_question"' in out["a"]["instructions"]
+    assert out["a"]["criteria"] == {"true": "yes", "false": "no"}      # already strings: unchanged
+    assert out["a"]["type"] == "noul" and out["b"]["type"] == "choice"  # type/ids preserved
+    assert out["b"]["instructions"] == "plain?"                         # a plain string is left alone
+    assert out["b"]["criteria"]["x"] == "X" and out["b"]["criteria"]["y"] == '{"nested": 1}'
+
+
+def test_decider_sends_string_state_and_plain_questions_on_the_openrouter_route():
+    post, calls = fake_post((200, None))
+    d = decide.Decider("k", "respan/span-01-lite:free", route="openrouter", post=post)
+    d.ask("t", {"page": "x"}, {"q": decide.noul({"field": "email", "question": "own?"})})
+    body = calls[0][1]
+    assert body["model"] == "respan/span-01-lite:free"
+    assert isinstance(body["state"], str) and isinstance(body["questions"]["q"]["instructions"], str)
+
+
+def test_jev_model_keeps_structured_questions_on_the_openrouter_route():
+    post, calls = fake_post((200, None))
+    d = decide.Decider("k", "typesafe/jev-1.13", route="openrouter", post=post)
+    d.ask("t", {"page": "x"}, {"q": decide.noul({"field": "email", "question": "own?"})})
+    assert calls[0][1]["questions"]["q"]["instructions"] == {"field": "email", "question": "own?"}  # not flattened
+    assert decide.adapt_questions_for("respan/span-01-lite:free")
+    assert not decide.adapt_questions_for("typesafe/jev-1.13") and not decide.adapt_questions_for("jev-latest")
+
+
+# ------------------------------------------------------------------ a Kev server on this machine (models.local)
+
+def local_post(*replies):
+    """Like fake_post, but keeps the timeout each attempt was given."""
+    post, calls = fake_post(*replies)
+    seen = []
+
+    def wrapper(url, body, headers, timeout):
+        seen.append(timeout)
+        return post(url, body, headers, timeout)
+    return wrapper, calls, seen
+
+
+def local_config(**kw):
+    from assistant import config
+    return config.Config(paths=config.Paths(base="."),
+                         models=config.Models(system_one_decision_provider="local",
+                                              local=config.LocalKev(**kw)))
+
+
+def test_local_route_posts_system_one_to_the_kev_server_with_no_key():
+    """A Kev server is open by default and ignores Authorization; the questions keep TypeSafe's structured shape,
+    which its API takes as well (criteria values are JSONContent)."""
+    post, calls, timeouts = local_post((200, None))
+    d = decide.Decider("", "kev-latest", url="http://127.0.0.1:8009/v1/systemone", timeout=120.0, post=post)
+    a = d.ask("page", {"page": "x"}, {"q": decide.noul({"field": "email", "question": "own?"})})
+    url, body, headers = calls[0]
+    assert url == "http://127.0.0.1:8009/v1/systemone" and body["model"] == "kev-latest"
+    assert body["questions"]["q"]["instructions"] == {"field": "email", "question": "own?"}   # not flattened
+    assert "Authorization" not in headers and timeouts == [120.0] and a["q"].yes(0.5)
+
+
+def test_local_route_sends_the_key_when_the_server_was_started_with_one():
+    post, calls = fake_post((200, None))
+    decide.Decider("kev-secret", "kev-latest", url="http://127.0.0.1:8009/v1/systemone", post=post) \
+        .ask("page", "x", {"q": decide.noul("own?")})
+    assert calls[0][2]["Authorization"] == "Bearer kev-secret"
+
+
+def test_a_short_state_is_cut_to_the_local_limit():
+    post, calls = fake_post((200, None))
+    d = decide.Decider("", "kev-latest", url="http://x/v1/systemone", state_chars=300, post=post)
+    d.ask("page", {"page": {"text": "long " * 500}, "elements": []}, {"q": decide.noul("own?")})
+    assert len(calls[0][1]["state"]) <= 300
+    assert len(decide.fit_state("x" * 900, 300)) == 300 and len(decide.fit_state("x" * 900)) == 900
+
+
+def test_a_server_that_is_down_fails_after_the_short_local_ladder():
+    post, calls = fake_post((0, {"error": "ConnectError"}))
+    waits = []
+    d = decide.Decider("", "kev-latest", url="http://127.0.0.1:8009/v1/systemone", post=post,
+                       retry_waits=decide.LOCAL_RETRY_WAITS, sleep=waits.append)
+    with pytest.raises(decide.DecisionError):
+        d.ask("page", "x", {"q": decide.noul("own?")})
+    assert waits == list(decide.LOCAL_RETRY_WAITS) and len(calls) == len(decide.LOCAL_RETRY_WAITS) + 1
+
+
+def test_for_config_wires_the_local_server_its_url_size_timeout_and_ladder(monkeypatch, tmp_path):
+    monkeypatch.delenv("KEV_API_KEY", raising=False)
+    from assistant import config
+    monkeypatch.setattr(config, "DEFAULT_ENV", tmp_path / "no.env")
+    d = decide.for_config(local_config(base_url="http://127.0.0.1:8010/", state_chars=5000, timeout=90.0))
+    assert d.url == "http://127.0.0.1:8010/v1/systemone" and d.model == "kev-latest" and d.key == ""
+    assert (d.state_chars, d.timeout, d.retry_waits) == (5000, 90.0, decide.LOCAL_RETRY_WAITS)
+
+
+def test_the_cloud_routes_are_unchanged():
+    from assistant import config
+    cfg = config.Config(paths=config.Paths(base="."),
+                        models=config.Models(system_one_decision_provider="vercel",
+                                             vercel=config.ChatModels(system_one_decision_model="typesafe-ai/jev")))
+    assert decide.endpoint(cfg) == decide.ENDPOINTS["vercel"] and decide.start_hint(cfg) == ""
+    d = decide.Decider("k", "typesafe-ai/jev", route="vercel")
+    assert (d.state_chars, d.timeout, d.retry_waits) == (decide.STATE_CHARS, decide.TIMEOUT, decide.RETRY_WAITS)
+
+
+def test_the_start_hint_names_the_command_and_the_configured_port():
+    hint = decide.start_hint(local_config(base_url="http://127.0.0.1:8123"))
+    assert "run_kev_server.command" in hint and "--port 8123" in hint
+
+
+def test_server_card_reports_the_loaded_checkpoint(monkeypatch):
+    import httpx
+
+    def get(url, timeout=None, headers=None):
+        assert url == "http://127.0.0.1:8009/v1/models" and not headers
+        return httpx.Response(200, json={"models": [{"name": "kev-latest", "run": "jaredpalmer/kev-0.8b",
+                                                     "backend": "mlx", "dtype": "bfloat16", "device": "mps"}]},
+                              request=httpx.Request("GET", url))
+    monkeypatch.setattr(httpx, "get", get)
+    from assistant import config
+    monkeypatch.setattr(config, "local_key", lambda *a: "")
+    assert decide.server_card(local_config())["run"] == "jaredpalmer/kev-0.8b"
+
+
+def test_server_card_says_how_to_start_a_server_that_is_not_running(monkeypatch):
+    import httpx
+
+    def get(url, timeout=None, headers=None):
+        raise httpx.ConnectError("Connection refused")
+    monkeypatch.setattr(httpx, "get", get)
+    from assistant import config
+    monkeypatch.setattr(config, "local_key", lambda *a: "")
+    with pytest.raises(decide.DecisionError, match="run_kev_server.command"):
+        decide.server_card(local_config())
+
+
+def test_the_local_route_keeps_a_dict_state_but_still_honours_the_limit():
+    post, calls = fake_post((200, None), (200, None))
+    d = decide.Decider("", "kev-latest", url="http://x/v1/systemone", state_chars=4000, keep_object_state=True,
+                       post=post)
+    d.ask("page", {"url": "u", "text": "x" * 9000}, {"q": decide.noul("own?")})
+    state = calls[0][1]["state"]      # a dict whose long text was cut to fit stays a dict (Kev labels its fields)
+    assert isinstance(state, dict) and len(json.dumps(state)) <= 4000 and state["url"] == "u"
+    d.ask("page", {"controls": [{"ref": f"e{i}"} for i in range(500)]}, {"q": decide.noul("own?")})
+    state = calls[1][1]["state"]      # the cut only shortens long string values: what is still over is serialised
+    assert isinstance(state, str) and len(state) <= 4000

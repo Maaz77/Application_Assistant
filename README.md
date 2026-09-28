@@ -12,11 +12,11 @@ Build spec (v2): [application_assistant_build_spec.md](application_assistant_bui
 
 Three pictures: what happens to one job, what happens on one form page, and which file does what. The names on the right are the files in `assistant/` that do each step.
 
-**Jev** (TypeSafe's decision model, reached through Vercel AI Gateway or OpenRouter: `models.jev_route`) makes the decisions, in two places:
-- **The browser agent** is the jev package's goal agent (`browser_goal`). Jev looks at the page and picks each click, one action at a time.
-- **The page decisions** are typed questions the code asks Jev in `decide.py`, all of them for a page in one call (about 0.3 s, $0.0003). What is this page? Is a pop-up in the way? Which fields belong to the application? Which upload takes the resume? Is there an error message? The code branches on the answers, with thresholds set in `decide.THRESHOLDS`.
+**The System One decision model** (`models.system_one_decision_provider`: a **Kev** server on this Mac, or TypeSafe's **Jev** through Vercel AI Gateway or OpenRouter — one API, so only the address changes) makes the decisions, in two places:
+- **The browser agent** is the jev package's goal agent (`browser_goal`). The decision model looks at the page and picks each click, one action at a time.
+- **The page decisions** are typed questions the code asks it in `decide.py`, all of them for a page in one call (about 0.3 s, $0.0003). What is this page? Is a pop-up in the way? Which fields belong to the application? Which upload takes the resume? Is there an error message? The code branches on the answers, with thresholds set in `decide.THRESHOLDS`.
 
-Jev decides and the code keeps only what must not be left to a model: the answers come only from your files, the resume is uploaded by the code, and one fixed rule in `guard.py` (no model call): a button or link labelled "Submit" or "Send" is never clicked, and one labelled "Apply" is not clicked once the form is being filled.
+"Jev" in the pictures below means whichever of the three the config names; the questions, the answers and the thresholds are the same. The model decides and the code keeps only what must not be left to a model: the answers come only from your files, the resume is uploaded by the code, and one fixed rule in `guard.py` (no model call): a button or link labelled "Submit" or "Send" is never clicked, and one labelled "Apply" is not clicked once the form is being filled.
 
 ### One job, start to finish
 
@@ -73,7 +73,7 @@ Jev decides and the code keeps only what must not be left to a model: the answer
  the page's questions + Profile.md + job.md + the resume's text
   │
   ▼
- the answer engine: one model call, reasoning off ................... answers.py
+ the LLM inference: one model call, reasoning off ................... answers.py
  for each question: an answer, its source, and a quote that proves it
   │
   ▼
@@ -111,7 +111,7 @@ Jev decides and the code keeps only what must not be left to a model: the answer
   └─ fill.py .............. the page loop: the agent's steps, and filling a page
       ├─ pages.py ......... reads a page, and Jev's judgment of it; the gate
       ├─ answers.py ....... asks the model, checks its answers ──► OpenRouter
-      ├─ decide.py ........ asks Jev typed questions ──► Vercel AI Gateway (Jev)
+      ├─ decide.py ........ asks typed questions ──► the System One route (Kev here, or Jev)
       ├─ google_signin.py . Google one-click sign-in
       └─ tabs.py .......... which tab is whose; leaves each job's tab open
   │
@@ -123,11 +123,11 @@ Jev decides and the code keeps only what must not be left to a model: the answer
   │
   ▼
  jev-ultrafast-mcp 0.1.5+aa6, patched, in vendor/ ──► your Chrome, port 9222
- (its goal agent picks each click with Jev, on the same route)
+ (its goal agent picks each click with the same decision model, on the same route)
 ```
 
 Also in this folder:
-- `prompts/`: what the models are told. `answer_engine.md` is used by `answers.py`; `navigate_goal.md`, `next_step_goal.md` and `page_goal.md` are the browser agent's goals.
+- `prompts/`: what the models are told. `llm_inference.md` is used by `answers.py`; `navigate_goal.md`, `next_step_goal.md` and `page_goal.md` are the browser agent's goals.
 - `vendor/`: the patched browser package, and the patch itself.
 - `tests/`: see [Tests](#tests).
 - `runs/`: one folder per run, see [Running](#running).
@@ -152,22 +152,25 @@ Also in this folder:
 
    The changes are in `vendor/jev_ultrafast_mcp-0.1.5+aa6.patch`, and preflight refuses to run on the stock package. Once Poetry works again, `poetry install` does the same from `pyproject.toml`.
 
-2. **Keys.** Create `.env` in this folder with two lines. It is git-ignored.
-   - `OPENROUTER_API_KEY=<key>`: the answer engine and the text helper when `models.chat_route = "openrouter"`.
-   - `AI_GATEWAY_API_KEY=<key>`: Jev through Vercel AI Gateway (`models.jev_route = "vercel"`), and the chat models when `models.chat_route = "vercel"`. Vercel serves requests only once a card is on file for the team, which also unlocks its free credits. With `jev_route = "openrouter"` the OpenRouter key pays for Jev instead.
- Keep some credit on the account: each form page costs one answer-engine call (about $0.001), plus the browser agent's decisions (about $0.00002 each) and the text helper's typed values. `tests/test_model_access.py` shows the key, the account's credit and whether a model answers. An account that has never bought credits gets 50 free-model requests a day across all free models, and rotation cannot get past that: HTTP 429 "free-models-per-day" from every model. $10 of credit raises it to 1,000 a day.
+2. **Keys.** Create `.env` in this folder. It is git-ignored. The decision model on the `local` route needs none
+   of them; the LLM inference and the text helper always need their route's key.
+   - `OPENROUTER_API_KEY=<key>`: the LLM inference and the text helper when `models.chat_route = "openrouter"`.
+   - `AI_GATEWAY_API_KEY=<key>`: Jev through Vercel AI Gateway (`models.system_one_decision_provider = "vercel"`), and the chat models when `models.chat_route = "vercel"`. Vercel serves requests only once a card is on file for the team, which also unlocks its free credits. With `system_one_decision_provider = "openrouter"` the OpenRouter key pays for Jev instead, and with `"local"` nothing pays for it.
+   - `KEV_API_KEY=<key>`: only when you started the local Kev server with `KEV_API_KEY` set (a Kev server on `127.0.0.1` is open by default and ignores the header).
+ Keep some credit on the account: each form page costs one LLM inference call (about $0.001), plus the browser agent's decisions (about $0.00002 each) and the text helper's typed values. `tests/test_model_access.py` shows the key, the account's credit and whether a model answers. An account that has never bought credits gets 50 free-model requests a day across all free models, and rotation cannot get past that: HTTP 429 "free-models-per-day" from every model. $10 of credit raises it to 1,000 a day.
 
 3. **Config.** `config.toml` is already filled in:
 
    | Key | Value |
    |---|---|
    | `paths.base` | the repo root |
-   | `models.chat_route` | who serves the answer engine and the text helper: `openrouter` (the free models below) or `vercel` (Vercel AI Gateway, paid from its credit, for when OpenRouter's free quota is out). Both take the same chat/completions request |
-   | `models.openrouter.answer_engine` | five free OpenRouter models, tried in turn (`rotation.py`): answers each form page from your files (sent with reasoning off). A call starts at the model that answered last; one that is out (rate-limited, overloaded, timed out, wrong output) hands over to the next at once. A 429 with a short `Retry-After` (30 s or less) is waited out once. When none answers, the job goes to Needs Attention with every model's reason. A single ID also works |
+   | `models.chat_route` | who serves the LLM inference and the text helper: `openrouter` (the free models below) or `vercel` (Vercel AI Gateway, paid from its credit, for when OpenRouter's free quota is out). Both take the same chat/completions request |
+   | `models.openrouter.llm_inference` | five free OpenRouter models, tried in turn (`rotation.py`): answers each form page from your files (sent with reasoning off). A call starts at the model that answered last; one that is out (rate-limited, overloaded, timed out, wrong output) hands over to the next at once. A 429 with a short `Retry-After` (30 s or less) is waited out once. When none answers, the job goes to Needs Attention with every model's reason. A single ID also works |
    | `models.openrouter.text_helper` | four free OpenRouter models, rotated the same way: types the values the browser agent enters |
-   | `models.vercel.answer_engine`, `models.vercel.text_helper` | `mistral/mistral-small` (about 5 s and $0.0013 a page), then `mistral/mistral-nemo` (cheaper, but about 60 s a page). Vercel limits a new team to 5 requests a minute per model |
-   | `models.jev` | `typesafe-ai/jev`: TypeSafe's decision model, for the browser agent and every page decision (`decide.py`). Each route names it its own way: `typesafe-ai/jev` on Vercel, `typesafe/jev-1.13` on OpenRouter |
-   | `models.jev_route` | `vercel` (Vercel AI Gateway's TypeSafe-compatible API) or `openrouter` |
+   | `models.vercel.llm_inference`, `models.vercel.text_helper` | `mistral/mistral-small` (about 5 s and $0.0013 a page), then `mistral/mistral-nemo` (cheaper, but about 60 s a page). Vercel limits a new team to 5 requests a minute per model |
+   | `models.<route>.system_one_decision_model` | the decision model of the route in use, for the browser agent and every page decision (`decide.py`). Each route names it its own way: `kev-latest` on a local Kev server, `typesafe-ai/jev` on Vercel, `typesafe/jev-1.13` on OpenRouter |
+   | `models.system_one_decision_provider` | `local` (a Kev server on this Mac: no key, no quota, and nothing leaves the machine), `vercel` (Vercel AI Gateway's TypeSafe-compatible API) or `openrouter` |
+   | `models.local` | the Kev server: `base_url` (`http://127.0.0.1:8009`), `system_one_decision_model` (`kev-latest`, the name the server answers to), `state_chars` (12000: Kev was trained on short states and loses accuracy on long ones) and `timeout` (120 s: one pass on an Apple GPU is seconds) |
    | `google.account_email` | `maaz1377.aa@gmail.com` |
 
    Unknown keys are an error.
@@ -182,11 +185,38 @@ Also in this folder:
 
    The assistant *attaches* to this Chrome through the jev package, which runs inside the assistant's own process. It never quits Chrome, and never closes a job tab.
 
-5. Check everything:
+5. **The decision model on this Mac** (only while `models.system_one_decision_provider = "local"`, which is what
+   `config.toml` ships with). [Kev](https://github.com/jaredpalmer/kev) is a family of small decision models that
+   serve TypeSafe's own System One API, so the assistant reaches them exactly as it reaches Jev. It needs
+   [uv](https://docs.astral.sh/uv) and git; the first start downloads the checkpoint and its Qwen base model into
+   `~/.cache/huggingface`, and the server then runs on MLX (Apple Silicon).
+
+   ```bash
+   ./run_kev_server.command          # clones/updates ~/kev, then serves kev-0.8b on http://127.0.0.1:8009
+   ```
+
+   Leave that window open while the assistant runs. **Kev-0.8B is the size for a 16 GB Mac**; `KEV_MODEL=jaredpalmer/kev-4b ./run_kev_server.command` is more accurate but is a 32 GB machine in Kev's own table. What this buys and what it costs:
+
+   | | Jev (Vercel / OpenRouter) | Kev-0.8B here | Kev-4B (32 GB Mac) |
+   |---|---|---|---|
+   | Accuracy on questions it was not trained on (Kev's README) | 0.857 | 0.648 | 0.817 |
+   | Cost and quota | about $0.00002 a decision, a key, a rate limit | none | none |
+   | Speed | about 0.3 s a page | hundreds of ms a pass, on your own GPU | slower, and it shares 16 GB with Chrome |
+   | Your pages | leave the machine | never leave the machine | never leave the machine |
+
+   A smaller model means more jobs in `Needs-Attention/`, not a wrong application: every threshold in
+   `decide.THRESHOLDS` still has to be met, and a decision that cannot be got is never guessed. `models.local.state_chars`
+   (12000) keeps each page short, because Kev was trained on states of up to 384 tokens and loses accuracy on long ones.
+   To go back to Jev, set `system_one_decision_provider = "vercel"` (or `"openrouter"`) in `config.toml`.
+
+6. Check everything:
 
    ```bash
    .venv/bin/python -m assistant preflight
    ```
+
+   On the local route preflight first reads `GET /v1/models` and prints which checkpoint the server loaded, on
+   which backend; if the server is not running it says so and how to start it, and writes nothing.
 
 ## Running
 
@@ -219,16 +249,18 @@ To try jobs again after a run, put the Needs-Attention ones back in the queue: t
 | `--job URL` | Only that job. |
 | `--limit N` | At most N jobs. |
 
-Each run writes `runs/<YYYYMMDD-HHMMSS>/`:
+Each run writes `runs/<YYYYMMDD-HHMMSS>/`, with a `_run/` folder for preflight and queue work and one `<job folder>/` per job:
 
 | File | Contents |
 |---|---|
 | `report.md` | parked jobs, jobs needing attention, queue anomalies, and questions for your Scratch Pad |
-| `answers/` | every answer with its source and quote |
-| `shots/` | a screenshot of each parked page |
-| `calls.jsonl` | every `browser_*` call to the jev package, key redacted |
 | `journal.jsonl` | the record events |
 | `tracker-backup.numbers` | the tracker as it was before the run |
+| `_run/`, `<job folder>/` → `jev_inference_logs.json` | every HTTP attempt to the System One decision model (§6.3) |
+| `_run/`, `<job folder>/` → `llm_inference_logs.json` | every HTTP attempt to a chat model — LLM inference, text helper (§6.2) |
+| `_run/`, `<job folder>/` → `browser_actions.jsonl` | every `browser_*` call to the jev package, key redacted |
+| `<job folder>/` → `answers.json` | every checked answer with its source and quote (when a form page was reached) |
+| `<job folder>/` → `screenshot.jpg` | a screenshot of the parked page (when the job parked) |
 
 **Exit codes:**
 
@@ -275,7 +307,7 @@ See [DISCOVERY.md](DISCOVERY.md):
 
 - `-m unit`: no browser, no network.
 - Plain `pytest`: adds `browser` tests, run against a throwaway headless Chrome on port 9223 and local fixture pages only. `tests/test_model_access.py` also runs here and calls OpenRouter.
-- `--live`: adds `live_model` tests. They call OpenRouter, still against local fixtures and saved pages only, and need `.env`. They include the end-to-end `process()` runs and `tests/test_decisions_live.py`, where Jev judges the fixture pages, pages saved from real sites, and the six pages of the run that went wrong on 2026-09-23.
-- Offline, Jev's questions are answered by `tests/rule_decider.py`, a stand-in built from the rules the program used before Jev. The program itself never uses those rules.
+- `--live`: adds `live_model` tests. They call the configured routes — the chat models over the network, and the decision model where `models.system_one_decision_provider` points, so on the `local` route the Kev server must be running — still against local fixtures and saved pages only, and need `.env` for the chat key. They include the end-to-end `process()` runs and `tests/test_decisions_live.py`, where Jev judges the fixture pages, pages saved from real sites, and the six pages of the run that went wrong on 2026-09-23.
+- Offline, the decision model's questions are answered by `tests/rule_decider.py`, a stand-in built from the rules the program used before Jev. The program itself never uses those rules.
 
 Real pages for the classifier tests come from `capture` (see [LIVE_TEST.md](LIVE_TEST.md)).

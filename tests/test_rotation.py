@@ -51,25 +51,25 @@ def test_one_model_is_a_rotation_of_one_and_none_is_an_error():
 def test_config_takes_one_model_or_a_list(tmp_path):
     from assistant import config
     f = tmp_path / "c.toml"
-    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models.openrouter]\nanswer_engine = "x/one"\n'
+    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models.openrouter]\nllm_inference = "x/one"\n'
                  f'text_helper = ["y/a", "y/b"]\n')
     m = config.load(f).models
-    assert m.answer_engine == ("x/one",) and m.text_helper == ("y/a", "y/b")
+    assert m.llm_inference == ("x/one",) and m.text_helper == ("y/a", "y/b")
 
 
 def test_chat_route_picks_the_provider_its_models_url_and_key(tmp_path, monkeypatch):
-    """models.chat_route switches the answer engine and the text helper between OpenRouter and Vercel AI Gateway
+    """models.chat_route switches the LLM inference and the text helper between OpenRouter and Vercel AI Gateway
     (for when OpenRouter's free quota is out), each with its own model table and key."""
     from assistant import config, jev
     monkeypatch.setattr(config, "api_key", lambda *a: "or-key")
     monkeypatch.setattr(config, "gateway_key", lambda *a: "gw-key")
     f = tmp_path / "c.toml"
     body = (f'[paths]\nbase = "{tmp_path}"\n[models]\nchat_route = "ROUTE"\n'
-            '[models.openrouter]\nanswer_engine = ["q:free"]\ntext_helper = ["q:free"]\n'
-            '[models.vercel]\nanswer_engine = ["mistral/mistral-nemo"]\ntext_helper = ["mistral/mistral-nemo"]\n')
+            '[models.openrouter]\nllm_inference = ["q:free"]\ntext_helper = ["q:free"]\n'
+            '[models.vercel]\nllm_inference = ["mistral/mistral-nemo"]\ntext_helper = ["mistral/mistral-nemo"]\n')
     f.write_text(body.replace("ROUTE", "vercel"))
     cfg = config.load(f)
-    assert cfg.models.answer_engine == ("mistral/mistral-nemo",)
+    assert cfg.models.llm_inference == ("mistral/mistral-nemo",)
     assert config.chat_url(cfg) == "https://ai-gateway.vercel.sh/v1/chat/completions"
     assert config.chat_key(cfg) == "gw-key"
     env = jev.env_values(cfg, config.chat_key(cfg))
@@ -77,10 +77,10 @@ def test_chat_route_picks_the_provider_its_models_url_and_key(tmp_path, monkeypa
     assert env["TEXT_MODEL"] == "mistral/mistral-nemo" and env["OPENROUTER_API_KEY"] == "or-key"
     f.write_text(body.replace("ROUTE", "openrouter"))
     cfg = config.load(f)
-    assert cfg.models.answer_engine == ("q:free",) and config.chat_key(cfg) == "or-key"
+    assert cfg.models.llm_inference == ("q:free",) and config.chat_key(cfg) == "or-key"
     assert config.chat_url(cfg) == "https://openrouter.ai/api/v1/chat/completions"
-    f.write_text(body.replace("ROUTE", "vercel").replace('answer_engine = ["mistral/mistral-nemo"]\n', ""))
-    assert any("models.vercel.answer_engine is empty" in p for p in config.load(f).problems())
+    f.write_text(body.replace("ROUTE", "vercel").replace('llm_inference = ["mistral/mistral-nemo"]\n', ""))
+    assert any("models.vercel.llm_inference is empty" in p for p in config.load(f).problems())
 
 
 def test_the_text_helper_rotates_inside_the_package():

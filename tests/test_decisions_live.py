@@ -1,12 +1,12 @@
 """Live: Jev (typesafe/jev-1.13 on OpenRouter) makes the program's decisions on real pages — the six pages of the run
 that sent every job to Needs-Attention (runs/20260923-224945), pages captured from real sites, every fixture page,
-and the question checks of answers.py. Runs with --live; about $0.0003 per page."""
+and the question checks of llm_inference.py. Runs with --live; about $0.0003 per page."""
 from pathlib import Path
 
 import pytest
 
 from assistant import pages, probes
-from assistant.answers import PageAnswers, judge_answers, judge_questions
+from assistant.llm_inference import PageAnswers, judge_answers, judge_questions
 from assistant.jev import Table
 from assistant.pages import FORM_KINDS, Page, classify, classify_entry, judge, page_from_capture, read_page
 from tests.test_pages_browser import ENTRY, KINDS
@@ -119,7 +119,7 @@ def test_fixture_posting_states(new_browser, fixture_server, name):
     assert classify_entry(p) == ENTRY[name], (name, judge(p))
 
 
-# ------------------------------------------------------------------ answers.py's questions
+# ------------------------------------------------------------------ llm_inference.py's questions
 
 def _q(question, *, source=None, kind="text", options=None):
     return {"id": "q", "question": question, "kind": kind, "ref": None, "option_ref": None, "options": options,
@@ -149,7 +149,7 @@ def test_resume_and_cover_letter_questions():
 def test_read_back_on_toasts_filled_greenhouse_form():
     """Toast, live 2026-09-24: "No" was selected in e31 (named by its option ref e31:3) and the phone widget showed
     the typed "351 935 8813" as "+393519358813". The old rules failed the first; exact matching would fail the second."""
-    from assistant.answers import Question
+    from assistant.llm_inference import Question
     from assistant.fill import mismatches
     p = captured("run-20260924-toast-filled")
     base = dict(id="x", kind="choice", options=None, required=True, source="profile", quote="x", relies_on=None)
@@ -164,13 +164,13 @@ def test_read_back_on_toasts_filled_greenhouse_form():
 
 
 def _q(question, answer, ref=None, option_ref=None):
-    from assistant.answers import Question
+    from assistant.llm_inference import Question
     return Question(id="x", kind="text", options=None, required=True, source="profile", quote="x", relies_on=None,
                     question=question, answer=answer, ref=ref, option_ref=option_ref)
 
 
 def test_fill_plan_on_toasts_greenhouse_form():
-    """Jev picks the operation and the field, with or without the answer engine's refs as hints (2026-09-24)."""
+    """Jev picks the operation and the field, with or without the LLM inference's refs as hints (2026-09-24)."""
     from assistant.fill import plan_fill
     p = captured("run-20260924-toast-filled")
     plan = plan_fill([_q("Legal First Name (required)", "Amin", "e21"),
