@@ -20,6 +20,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 from typing import Any, Callable
 
+import httpx
 from pydantic import BaseModel, ConfigDict
 
 from assistant import guard, inference_log, probes
@@ -33,6 +34,7 @@ STRIPPED_PREFIXES = ("JEVMCP_", "TYPESAFE_", "TEXT_MODEL_", "OPENROUTER_")
 # 0.1.5 plus three vendored observer fixes (vendor/*.patch): display:contents wrappers hide nothing; while a
 # modal <dialog> is open only the topmost one's content is listed; opacity-0 native radio/checkbox/file inputs are listed. Stock 0.1.5 cannot see LinkedIn's job card or Easy Apply dialog.
 EXPECTED_PACKAGE_VERSION = "0.1.5+aa6"
+LOCAL_PLACEHOLDER_KEY = "local"      # an open Kev server wants no key; the package wants a non-empty one
 DEFAULT_TIMEOUT = 60.0
 GOAL_TIMEOUT = 300.0
 EXIT_STOPPED = 3
@@ -123,11 +125,17 @@ def env_values(cfg: Config, key: str, cdp_url: str | None = None) -> dict[str, s
 
 
 def agent_route(cfg: Config, key: str) -> dict[str, str]:
-    """Where the goal agent's decision model (Jev) is reached. The package takes a non-OpenRouter TYPESAFE_BASE_URL
+    """Where the goal agent's decision model is reached. The package takes a non-OpenRouter TYPESAFE_BASE_URL
     as the full System One endpoint, with TYPESAFE_API_KEY (its config._turbo_backend); OpenRouter's route is its
-    alpha decisions endpoint, paid with the OpenRouter key."""
+    alpha decisions endpoint, paid with the OpenRouter key. A Kev server on this machine is just another such
+    endpoint (same request and answer shapes), named by config models.local.base_url."""
     from assistant import decide
-    if cfg.models.system_one_decision_provider == "vercel":
+    provider = cfg.models.system_one_decision_provider
+    if provider == "local":
+        # The package refuses turbo mode on an empty key (policy.available / policy.choose), and a Kev server
+        # started without KEV_API_KEY is open and ignores the header: send a placeholder in that case.
+        return {"TYPESAFE_BASE_URL": decide.endpoint(cfg), "TYPESAFE_API_KEY": config.local_key() or LOCAL_PLACEHOLDER_KEY}
+    if provider == "vercel":
         return {"TYPESAFE_BASE_URL": decide.ENDPOINTS["vercel"], "TYPESAFE_API_KEY": config.gateway_key()}
     return {"TYPESAFE_BASE_URL": "https://openrouter.ai/api/alpha/decisions"}
 
@@ -169,8 +177,8 @@ def clean_json(value: Any) -> Any:
     return value
 
 
-def clean_requests(policy) -> None:
-    """Every request the package sends (Jev's decisions, option picks, the text helper) goes through
+def clean_requests(policy, string_state: bool = True) -> None:
+    """Every request the package sends (the decisions, option picks, the text helper) goes through
     `policy._post(url, key, body)`, and httpx encodes the body as UTF-8: a page whose text was cut inside a
     surrogate pair made every browser_goal fail with UnicodeEncodeError (Genesys and Mastercard, live 2026-09-24).
     Wrap it so the body is cleaned first. Calls inside policy.py look `_post` up at call time (contract_check)."""
@@ -182,7 +190,9 @@ def clean_requests(policy) -> None:
             # OpenRouter decisions models (respan/span-01-lite) require a string state and plain-string question
             # instructions/criteria (HTTP 400 otherwise); TypeSafe accepts both too. cf. decide.fit_state /
             # respan_questions. Only the package's own System One bodies (state+questions) are touched.
-            if not isinstance(cleaned.get("state"), str):
+            # A Kev server on this machine (string_state=False) is given the object: it renders one as labeled
+            # text, so the escaped quotes of a JSON string would only cost a small model tokens (kev/api.py).
+            if string_state and not isinstance(cleaned.get("state"), str):
                 cleaned = {**cleaned, "state": json.dumps(cleaned.get("state"), ensure_ascii=False)}
             if ("alpha/decisions" in url and isinstance(cleaned.get("questions"), dict)
                     and adapt_questions_for(str(cleaned.get("model", "")))):
@@ -213,17 +223,22 @@ def _log_package_request(url: str, body, resp, reason: str | None) -> None:
 _server = None
 _applied: dict[str, str] | None = None
 _text_helpers: tuple[str, ...] = ()
+_call_timeout: float | None = None
+_string_state: bool = True
 
 
 def apply_env(cfg: Config, key: str, cdp_url: str | None = None) -> None:
     """Scrub stray package variables from os.environ, then set the §3 values. Must precede load()."""
-    global _applied, _text_helpers
+    global _applied, _text_helpers, _call_timeout, _string_state
     if _server is not None:
         raise RuntimeError("apply_env() after the package was loaded has no effect (config is fixed per process)")
     for k in [k for k in os.environ if k.startswith(STRIPPED_PREFIXES)]:
         del os.environ[k]
     _applied = env_values(cfg, key, cdp_url)
     _text_helpers = cfg.models.text_helper
+    local = cfg.models.system_one_decision_provider == "local"
+    _call_timeout = cfg.models.local.timeout if local else None
+    _string_state = not local
     os.environ.update(_applied)
 
 
@@ -254,6 +269,18 @@ def package_version() -> str:
     return version("jev-ultrafast-mcp")
 
 
+def set_call_timeout(policy, seconds: float) -> None:
+    """The package sends every request through one httpx client with a fixed 30 s timeout (policy.CLIENT). A
+    decision model on this Mac answers in seconds, not in the milliseconds of a data-centre GPU, and the first call
+    after the server starts is the slowest, so the local route replaces that client with one of its own timeout
+    (config models.local.timeout). Same flags as the package's, so only the deadline changes."""
+    old = getattr(policy, "CLIENT", None)
+    if not isinstance(old, httpx.Client):
+        raise RuntimeError("jev_ultrafast_mcp.policy.CLIENT is not an httpx.Client: cannot set the call timeout")
+    policy.CLIENT = httpx.Client(http2=True, timeout=seconds)
+    old.close()
+
+
 def load():
     """Import jev_ultrafast_mcp.server (once per process), after apply_env()."""
     global _server
@@ -266,7 +293,9 @@ def load():
         from jev_ultrafast_mcp import server
         _server = server
         rotate_text_helper(server.policy, _text_helpers)
-        clean_requests(server.policy)
+        clean_requests(server.policy, string_state=_string_state)
+        if _call_timeout is not None:
+            set_call_timeout(server.policy, _call_timeout)
         from jev_ultrafast_mcp import browser as package_browser
         guard_clicks(package_browser)
         # Importing the server turns on INFO logging, and httpx then prints every request ("HTTP Request: POST

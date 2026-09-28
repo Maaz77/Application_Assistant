@@ -31,13 +31,16 @@ def cfg():
 
 @pytest.fixture(autouse=True)
 def decider(request):
-    """Every decision the program asks of Jev: the offline rule stand-in (tests/rule_decider.py), or — for a
-    live_model test with a key in .env — the real Jev on OpenRouter."""
+    """Every decision the program asks of the System One model: the offline rule stand-in
+    (tests/rule_decider.py), or — for a live_model test — the real thing: a route whose key is in .env, or a
+    keyless one (a Kev server on this machine, which the test then needs running)."""
     from assistant import decide
     from tests.rule_decider import RuleDecider
     jev.FORM.started = False                  # the never-submit rule's stage: each test starts before any form
     cfg = config.load()
-    live = "live_model" in request.keywords and config.system_one_decision_key(cfg)
+    live = "live_model" in request.keywords and (
+        cfg.models.system_one_decision_provider in config.KEYLESS_PROVIDERS
+        or config.system_one_decision_key(cfg))
     d = decide.for_config(cfg) if live else RuleDecider()
     decide.use(d)
     yield d

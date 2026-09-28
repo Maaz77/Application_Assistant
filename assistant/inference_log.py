@@ -59,13 +59,15 @@ def scope(name: str | None):
 
 
 def gateway_of(url: str) -> str:
-    """The gateway a chat/Jev URL points at, from its host (00_common §6.2): openrouter.ai -> openrouter,
-    ai-gateway.vercel.sh -> vercel."""
+    """The gateway a chat or decision URL points at, from its host (00_common §6.2): openrouter.ai -> openrouter,
+    ai-gateway.vercel.sh -> vercel, a server on this machine -> local."""
     host = urlparse(url).hostname or ""
     if "openrouter" in host:
         return "openrouter"
     if "vercel" in host:
         return "vercel"
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return "local"
     return host or "unknown"
 
 

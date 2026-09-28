@@ -50,9 +50,12 @@ def test_stray_typesafe_key_and_package_vars_are_removed():
     r = child("""
         import json, os
         from assistant import config, jev
-        jev.apply_env(config.load(), "k-123")
-        # the stray value is gone; on the Vercel route the gateway key from .env takes its place
-        assert os.environ.get("TYPESAFE_API_KEY") in (None, config.gateway_key()) != "stray"
+        cfg = config.load()
+        jev.apply_env(cfg, "k-123")
+        # the stray value is gone; what takes its place is the configured route's key (the gateway key on Vercel,
+        # nothing on OpenRouter, the Kev server's key or its placeholder on the local route)
+        key = os.environ.get("TYPESAFE_API_KEY")
+        assert key != "stray" and key == jev.agent_route(cfg, "k-123").get("TYPESAFE_API_KEY")
         assert "JEVMCP_ALLOW_DOMAINS" not in os.environ
         assert "TEXT_MODEL_EXTRA" not in os.environ
         assert os.environ["TEXT_MODEL_API_KEY"] == "k-123"      # the chat route's key, whichever route is set
@@ -191,3 +194,63 @@ def test_a_goal_the_decision_model_could_not_serve_is_asked_again_then_is_a_deci
     assert b.goal("x", "s") == acted                     # it already acted: its caller reads the page again
     replies[:] = ["goal: x\nstatus: turbo_unavailable: no decision-model key\nsteps: 0\n"]
     assert "no decision-model key" in b.goal("x", "s")   # a setup problem is not retried
+
+
+# ------------------------------------------------------------------ the decision route the package is given
+
+def route_config(provider: str, **local):
+    from assistant import config
+    return config.Config(paths=config.Paths(base="."),
+                         models=config.Models(system_one_decision_provider=provider,
+                                              local=config.LocalKev(**local),
+                                              vercel=config.ChatModels(system_one_decision_model="typesafe-ai/jev"),
+                                              openrouter=config.ChatModels(llm_inference="m", text_helper="t")))
+
+
+def test_the_package_agent_is_pointed_at_the_local_kev_server(monkeypatch):
+    """A non-OpenRouter TYPESAFE_BASE_URL is used by the package as the full System One endpoint
+    (config._turbo_backend), so the Kev server needs no other change."""
+    from assistant import config
+    monkeypatch.setattr(config, "local_key", lambda *a: "")
+    env = jev.env_values(route_config("local", base_url="http://127.0.0.1:8010"), "chat-key")
+    assert env["TYPESAFE_BASE_URL"] == "http://127.0.0.1:8010/v1/systemone"
+    assert env["TYPESAFE_MODEL"] == "kev-latest"
+    # the package refuses turbo mode on an empty key; an open Kev server ignores this placeholder
+    assert env["TYPESAFE_API_KEY"] == jev.LOCAL_PLACEHOLDER_KEY
+    assert env["TEXT_MODEL_API_KEY"] == "chat-key"          # the chat models stay on models.chat_route
+
+
+def test_a_kev_server_with_a_key_gets_that_key(monkeypatch):
+    from assistant import config
+    monkeypatch.setattr(config, "local_key", lambda *a: "kev-secret")
+    assert jev.env_values(route_config("local"), "chat-key")["TYPESAFE_API_KEY"] == "kev-secret"
+
+
+def test_the_vercel_route_is_unchanged(monkeypatch):
+    from assistant import config
+    monkeypatch.setattr(config, "gateway_key", lambda *a: "gw")
+    env = jev.env_values(route_config("vercel"), "chat-key")
+    assert env["TYPESAFE_BASE_URL"] == "https://ai-gateway.vercel.sh/typesafe/v1/systemone"
+    assert env["TYPESAFE_API_KEY"] == "gw" and env["TYPESAFE_MODEL"] == "typesafe-ai/jev"
+
+
+def test_the_local_route_sends_the_state_as_an_object():
+    """Kev renders an object as labeled text (kev/api.py render()); a JSON string would spend a small model's
+    tokens on escaped quotes. The cloud routes keep the string OpenRouter's decisions models require."""
+    import json
+    import types
+    sent = []
+
+    def _post(url, key, body):
+        sent.append(body)
+        return {"ok": True}
+    body = {"model": "kev-latest", "state": {"page": {"text": "Apply"}}, "questions": {"q": {"type": "noul"}}}
+    local = types.SimpleNamespace(_post=_post)
+    jev.clean_requests(local, string_state=False)
+    local._post("http://127.0.0.1:8009/v1/systemone", "local", body)
+    assert sent[-1]["state"] == {"page": {"text": "Apply"}}
+
+    cloud = types.SimpleNamespace(_post=_post)
+    jev.clean_requests(cloud)
+    cloud._post("https://openrouter.ai/api/alpha/decisions", "k", body)
+    assert json.loads(sent[-1]["state"]) == {"page": {"text": "Apply"}}

@@ -54,11 +54,23 @@ class ChatModels(_Strict):
         return (v,) if isinstance(v, str) else v
 
 
+class LocalKev(_Strict):
+    """A System One decision server on this machine: Kev (github.com/jaredpalmer/kev), which serves TypeSafe's
+    System One API (POST /v1/systemone) with the same request and answer shapes as Jev, so only the URL changes.
+    It serves the decision model only; the chat models (llm_inference, text_helper) stay on models.chat_route."""
+    base_url: str = "http://127.0.0.1:8009"
+    system_one_decision_model: str = "kev-latest"       # the name the server answers to; --run picks the checkpoint
+    state_chars: int = 12_000       # Kev was trained on states of <=384 tokens: a short state is faster and better
+    timeout: float = 120.0          # one pass on an Apple GPU is seconds, not the milliseconds of a data-centre GPU
+
+
 class Models(_Strict):
     chat_route: Literal["openrouter", "vercel"] = "openrouter"   # who serves the chat models: the table below
     openrouter: ChatModels = ChatModels()
     vercel: ChatModels = ChatModels()
-    system_one_decision_provider: Literal["vercel", "openrouter"] = "vercel"   # serves the System One decision model
+    local: LocalKev = LocalKev()                                 # a Kev server on this machine (decision model only)
+    # Serves the System One decision model. "local" needs no key and no quota; the cloud routes need theirs.
+    system_one_decision_provider: Literal["vercel", "openrouter", "local"] = "vercel"
 
     @model_validator(mode="before")
     @classmethod
@@ -80,7 +92,7 @@ class Models(_Strict):
     def system_one_decision_model(self) -> str:
         """The System One decision model on models.system_one_decision_provider
         (models.<system_one_decision_provider>.system_one_decision_model)."""
-        return (self.vercel if self.system_one_decision_provider == "vercel" else self.openrouter).system_one_decision_model
+        return getattr(self, self.system_one_decision_provider).system_one_decision_model
 
     @property
     def llm_inference(self) -> tuple[str, ...]:
@@ -126,6 +138,9 @@ class Config(_Strict):
             if not getattr(self.models.chat, name):
                 out.append(f"models.{route}.{name} is empty (models.chat_route is {route!r}: list one or more "
                            f"model IDs as {route} names them)")
+        if self.models.system_one_decision_provider == "local" and not self.models.local.base_url:
+            out.append("models.local.base_url is empty (the address of the Kev server on this machine, "
+                       "e.g. http://127.0.0.1:8009)")
         if not self.models.system_one_decision_model:
             out.append(f"models.{self.models.system_one_decision_provider}.system_one_decision_model is empty "
                        f"(models.system_one_decision_provider is {self.models.system_one_decision_provider!r}: set "
@@ -158,9 +173,16 @@ def gateway_key(env_file: Path = DEFAULT_ENV) -> str:
     return _env("AI_GATEWAY_API_KEY", env_file)
 
 
+def local_key(env_file: Path = DEFAULT_ENV) -> str:
+    """KEV_API_KEY: only when the local Kev server was started with one. A Kev server is open by default, and then
+    it ignores the Authorization header, so this is empty for most local setups."""
+    return _env("KEV_API_KEY", env_file)
+
+
 def system_one_decision_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
-    """The key for the System One decision provider's route."""
-    return gateway_key(env_file) if cfg.models.system_one_decision_provider == "vercel" else api_key(env_file)
+    """The key for the System One decision provider's route ("" for a local server that asks for none)."""
+    return {"vercel": gateway_key, "openrouter": api_key, "local": local_key}[
+        cfg.models.system_one_decision_provider](env_file)
 
 
 def chat_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
@@ -173,4 +195,5 @@ def chat_url(cfg: "Config") -> str:
     return CHAT_BASES[cfg.models.chat_route] + "/chat/completions"
 
 
-KEY_NAMES = {"openrouter": "OPENROUTER_API_KEY", "vercel": "AI_GATEWAY_API_KEY"}
+KEY_NAMES = {"openrouter": "OPENROUTER_API_KEY", "vercel": "AI_GATEWAY_API_KEY", "local": "KEV_API_KEY"}
+KEYLESS_PROVIDERS = ("local",)   # a server on this machine: a key only when it was started with KEV_API_KEY set

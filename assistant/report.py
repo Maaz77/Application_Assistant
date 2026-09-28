@@ -39,7 +39,8 @@ class Report:
     warnings: list[str] = field(default_factory=list)
     recovered: list[str] = field(default_factory=list)
     stopped: str | None = None
-    decisions: tuple[int, float] | None = None      # Jev: calls and cost in USD (jev_inference_logs.json has each one)
+    decisions: tuple[int, float] | None = None      # the decision model: calls and cost in USD (each one is in
+    decision_model: str = ""                        # jev_inference_logs.json); a model on this machine costs nothing
 
     def exit_code(self) -> int:
         if self.stopped:
@@ -71,7 +72,9 @@ class Report:
         if self.recovered:
             L += ["- Journal recovery: " + "; ".join(self.recovered)]
         if self.decisions:
-            L.append(f"- Decisions by Jev: {self.decisions[0]} calls, ${self.decisions[1]:.4f}")
+            cost = f", ${self.decisions[1]:.4f}" if self.decisions[1] else ""
+            L.append(f"- Decisions by {self.decision_model or 'the System One model'}: "
+                     f"{self.decisions[0]} calls{cost}")
         L += ["", "## Parked", ""]
         for r in parked:
             L.append(f"### {r.label}")

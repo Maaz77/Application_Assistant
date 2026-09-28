@@ -435,3 +435,60 @@ Deviation: this adds a preflight step (behaviour change), out of P0's "no behavi
 - Kept as the Jev instance/package: the `jev.py` module, `Jev` driver class, `JevError`, `jevlib`, `jev_ultrafast_mcp`, `JEVMCP_*`, the model-id values (`typesafe-ai/jev`, `typesafe/jev-1.13`), and the browser worker thread name. `decide.adapt_questions_for` still keys on `"jev"` in the model id (Jev takes native structured questions). DISCOVERY's earlier entries keep the old names.
 
 Not a P0 goal (naming), done at the user's request alongside the earlier LLM inference work. 237 unit pass; contract_check + dry-run clean.
+
+## The System One decision model can run on this Mac: Kev (user decision, 2026-09-28)
+
+The user asked for the System One decision model to run locally instead of on a paid key, on a 16 GB M3 Mac, naming
+[github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev). Read: Kev's README, `kev/api.py` and `kev/serve.py`
+at `main` on 2026-09-28.
+
+**What Kev is.** Small decision models (0.8B, 4B, 9B, 27B: LoRA + a pointer head on Qwen3.5/3.8 bases) that serve
+**TypeSafe's own System One API**: `POST /v1/systemone` with `{state, model, questions}` in and typed `answers` out,
+plus `GET /v1/models`, `POST /v1/systemone/{permute,separate}` and the `x-typesafe-request-id` header. The server
+binds to `127.0.0.1`, is **open by default**, and requires `Authorization: Bearer <KEV_API_KEY>` only when started
+with that variable set. On Apple Silicon `uv sync --extra serve` installs MLX and the server uses it (bf16).
+
+**Why it drops in.** Its request models (`kev/api.py`) take exactly what we and the package already send:
+`state` is `str | dict | list | int | float | bool | None`, question `instructions` the same, and choice `criteria`
+is `dict[str, JSONContent]` with 1–255 options — so the package's nested criteria (`{ref: {element, current_value,
+context}}`, up to 120 refs) and our structured `instructions` need no flattening (`adapt_questions_for` is only for
+OpenRouter's respan models). Objects are rendered as **labeled text** (`api.render`), so a dict state reads better,
+and costs fewer tokens, than the JSON string the OpenRouter route needs.
+
+**Checked offline against Kev's own schema.** A stand-in server built on `kev/api.py`'s pydantic models
+(`SystemOneRequest`) answered both callers: `decide.Decider` and the package's own goal agent (`policy.choose`,
+with a real `Observation`). 0 rejections (422), state sent as an object, `model: "kev-latest"`.
+
+**What changed here.**
+- `[models.local]` in config.toml (`base_url`, `system_one_decision_model = "kev-latest"`, `state_chars`, `timeout`)
+  and `system_one_decision_provider = "local"`, the third value of that key. `config.LocalKev`;
+  `Models.system_one_decision_model` now reads the named table by attribute.
+- `config.local_key()` (`KEV_API_KEY`), `config.KEYLESS_PROVIDERS`: `cli._static_checks` no longer demands a key for
+  a keyless route, and `run_preflight` says "no key needed".
+- `decide.endpoint(cfg)` (base_url + `/v1/systemone`), `Decider(url=, state_chars=, timeout=, retry_waits=,
+  keep_object_state=)`, `fit_state(state, limit, keep_object)`, `decide.server_card()` (preflight's `GET /v1/models`,
+  which prints the loaded checkpoint and backend) and `decide.start_hint()` (how to start a server that is down).
+- `jev.agent_route` points `TYPESAFE_BASE_URL` at the server. The package refuses turbo mode on an empty key
+  (`policy.available`, `policy.choose`), so an open server gets the placeholder `TYPESAFE_API_KEY=local`, which it
+  ignores. `jev.clean_requests(string_state=False)` leaves the state an object on this route, and
+  `jev.set_call_timeout` replaces the package's fixed 30 s `policy.CLIENT` with `models.local.timeout`.
+- `run_kev_server.command`: clones or updates `~/kev`, `uv sync --extra serve`, serves `KEV_MODEL` (default
+  `jaredpalmer/kev-0.8b`) on `KEV_PORT` (8009).
+
+**The cost of it, from Kev's own numbers.** Accuracy on sources a model was not trained on: Jev 0.857, Kev-4B 0.817,
+**Kev-0.8B 0.648** — and 4B and 9B are "32 GB Mac" in Kev's table, so 0.8B is the size for 16 GB. Kev was trained on
+states of up to 384 tokens and loses accuracy on long ones (Kev-9B answers 0.556 of questions buried in 1k–6k tokens),
+which is why `models.local.state_chars` cuts our state to 12000 characters (~3000 tokens) from the cloud route's
+60000. At a 5% error budget Kev automates 0.45–0.57 of decisions against Jev's 0.70, and its calibration temperature
+is fitted in distribution, so `decide.THRESHOLDS` (set for Jev) are not measured for it. Expect more jobs in
+`Needs-Attention/`, not wrong answers: a decision that cannot be got is still never guessed.
+
+**Deviations and open items.**
+- Only the decision model moves. The LLM inference and the text helper still need `models.chat_route`'s key: Kev
+  serves no chat/completions endpoint.
+- The thresholds were not re-fitted for Kev; that needs the user's own labelled pages.
+- `jev_inference_logs.json` already records every request and answer (`inference_log.log_jev`), which is the training
+  file shape `kev.train` takes (`{state, questions, label}` per line): a fine-tune on the logged Jev answers is the
+  way back to Jev-level accuracy on these pages, and Kev's README measures 0.804 → 0.904 for one such run.
+- Not verified against a real Kev server (no Apple Silicon and no weights in this container): the wire contract was
+  verified against Kev's own request models, and the first real check is `preflight` on the user's Mac.

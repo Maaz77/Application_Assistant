@@ -165,7 +165,7 @@ The wheel is 0.1.5 plus three observer fixes (`vendor/*.patch`, "aa"):
 | `JEVMCP_MODE` / `JEVMCP_CDP_URL` | `attach` / `browser.cdp_url` |
 | `JEVMCP_FOREGROUND` / `JEVMCP_MAX_ACTIONS` | `0` / `browser.max_actions` |
 | `JEVMCP_ALLOW_UPLOADS` / `JEVMCP_ALLOW_JS` | `1` / `1` |
-| `TYPESAFE_BASE_URL` (+ `TYPESAFE_API_KEY`) | vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone` + `AI_GATEWAY_API_KEY`; openrouter: `https://openrouter.ai/api/alpha/decisions` (paid with the OpenRouter key) |
+| `TYPESAFE_BASE_URL` (+ `TYPESAFE_API_KEY`) | vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone` + `AI_GATEWAY_API_KEY`; openrouter: `https://openrouter.ai/api/alpha/decisions` (paid with the OpenRouter key); local: `models.local.base_url` + `/v1/systemone` + `KEV_API_KEY`, or the placeholder `local` when the Kev server is open (the package refuses turbo mode on an empty key) |
 | `TYPESAFE_MODEL` | `models.system_one_decision_model` |
 | `OPENROUTER_API_KEY` | `key` on the openrouter chat route, else the `.env` OpenRouter key |
 | `TEXT_MODEL_API_KEY` / `TEXT_MODEL_BASE_URL` | `key` / `CHAT_BASES[chat_route]` |
@@ -311,11 +311,16 @@ The outcome:
 
 ## 6. Page decisions (`pages.py` + `decide.py`, by Jev)
 
-**6.0 The Jev client** (`decide.Decider`, installed per run with `decide.use(decide.for_config(cfg))`).
+**6.0 The System One client** (`decide.Decider`, installed per run with `decide.use(decide.for_config(cfg))`).
 - **The request:** TypeSafe's System One shape, `{model, state, questions}`. Questions are `noul` (a yes/no probability), `choice` (criteria → choice, confidence, probabilities) or `score`.
 - **Endpoints:**
   - vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone`, model `typesafe-ai/jev`, `AI_GATEWAY_API_KEY`;
-  - openrouter: `https://openrouter.ai/api/v1/systemone`, model `typesafe/jev-1.13`.
+  - openrouter: `https://openrouter.ai/api/v1/systemone`, model `typesafe/jev-1.13`;
+  - local (user decision 2026-09-28): `models.local.base_url` + `/v1/systemone`, model `kev-latest`, no key — a
+    [Kev](https://github.com/jaredpalmer/kev) server on the user's Mac. Same request and answer shapes, so only the
+    URL changes; the state is sent as an object (Kev renders one as labeled text), the state limit is
+    `models.local.state_chars`, the timeout `models.local.timeout`, and the retry ladder `LOCAL_RETRY_WAITS = (2, 5)` s,
+    because a server on this machine is never rate-limited. Preflight reads `GET /v1/models` first.
 - **Batching:**
   - The state is cut to `STATE_CHARS = 60_000` characters, text first (Jev's context is 32K tokens).
   - Questions go in batches of `BATCH = 4`, `PARALLEL = 4` in flight. TypeSafe fails a whole request when one question fails (§13.1).
@@ -501,7 +506,7 @@ Then:
   - `## <date time> — Pending Review`, with the parked URL and title and page count, generated texts, kept pre-fills, and optional questions left empty.
 - **8.4 Journal** `runs/<ts>/journal.jsonl`: `record_start → tracker_saved → folder_moved → record_done`. At the start of a recorded run, every job in any journal without `record_done` is completed idempotently (`records.recover`).
 - **8.5 Report and exit.** `runs/<ts>/report.md` has these sections:
-  - Summary, including "Decisions by Jev: N calls, $X";
+  - Summary, including "Decisions by <model>: N calls, $X" (no cost on a route that charges none);
   - Parked;
   - Needs Attention (reason, where);
   - Queue anomalies;

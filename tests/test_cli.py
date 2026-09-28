@@ -99,3 +99,17 @@ def test_llm_inference_probe_raises_when_no_model_answers(monkeypatch):
     monkeypatch.setattr(cli, "call_engine", fake)
     with pytest.raises(cli.LLMInferenceError):
         cli._probe_llm_inference(cfg)
+
+
+def test_the_local_decision_route_asks_for_no_key(tmp_path, monkeypatch):
+    """A Kev server on this machine is keyless (config.KEYLESS_PROVIDERS): preflight demands only the chat
+    route's key, and never KEV_API_KEY."""
+    f = tmp_path / "c.toml"
+    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models]\nchat_route = "openrouter"\n'
+                 f'system_one_decision_provider = "local"\n'
+                 f'[models.openrouter]\nllm_inference = ["m"]\ntext_helper = ["t"]\n')
+    monkeypatch.setattr(cli.config_mod, "local_key", lambda *a: "")
+    cfg = cli.config_mod.load(f)
+    assert not [p for p in cli._static_checks(cfg, "chat-key") if "API_KEY" in p]
+    missing = [p for p in cli._static_checks(cfg, "") if "API_KEY" in p]
+    assert len(missing) == 1 and missing[0].startswith("OPENROUTER_API_KEY is missing") and "KEV_" not in missing[0]

@@ -90,14 +90,25 @@ def preflight(browser: Jev) -> Iterator[str]:
     except LLMInferenceError as exc:
         raise PreflightError(f"the LLM inference model does not answer: {exc}") from exc
     yield f"LLM inference {model} answers (via {browser.cfg.models.chat_route})"
+    cfg = browser.cfg
+    name = cfg.models.system_one_decision_model
+    if cfg.models.system_one_decision_provider == "local":
+        try:
+            card = decide.server_card(cfg)
+        except decide.DecisionError as exc:
+            raise PreflightError(str(exc)) from exc
+        yield (f"Kev server on {cfg.models.local.base_url}: {card.get('run')} on {card.get('device')} "
+               f"via {card.get('backend')} ({card.get('dtype')})")
     try:
         a = decide.current().ask("preflight", "A job application form asks for the candidate's email address.",
                                  {"form": decide.noul("Is this about a job application?")})
     except decide.DecisionError as exc:
-        raise PreflightError(f"the decision model (Jev) does not answer: {exc}") from exc
+        hint = decide.start_hint(cfg)
+        raise PreflightError(f"the decision model ({name}) does not answer: {exc}"
+                             f"{'. ' + hint if hint else ''}") from exc
     if not a["form"].yes(0.5):
-        raise PreflightError("the decision model (Jev) answered a trivial question wrongly")
-    yield f"decision model {browser.cfg.models.system_one_decision_model} answers (via {browser.cfg.models.system_one_decision_provider})"
+        raise PreflightError(f"the decision model ({name}) answered a trivial question wrongly")
+    yield f"decision model {name} answers (via {cfg.models.system_one_decision_provider})"
     doc = browser.doctor()
     for cap in ("text_model", "uploads", "js_eval"):
         if doc.get(cap) is not True:
@@ -138,9 +149,9 @@ def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
     missing: dict[str, list[str]] = {}
     if not key:
         missing.setdefault(config_mod.KEY_NAMES[cfg.models.chat_route], []).append("the LLM inference and text helper")
-    if not config_mod.system_one_decision_key(cfg):
-        missing.setdefault(config_mod.KEY_NAMES[cfg.models.system_one_decision_provider], []).append(
-            "the System One decision model")
+    provider = cfg.models.system_one_decision_provider
+    if provider not in config_mod.KEYLESS_PROVIDERS and not config_mod.system_one_decision_key(cfg):
+        missing.setdefault(config_mod.KEY_NAMES[provider], []).append("the System One decision model")
     for name, users in missing.items():
         problems.append(f"{name} is missing ({' and '.join(users)} need it; put it in Tools/Application_Assistant/.env)")
     return problems
@@ -318,7 +329,7 @@ def run(cfg: config_mod.Config, args) -> int:
         except (NameError, JevError):
             pass
         d = decide.current()
-        report.decisions = (d.calls, d.cost)
+        report.decisions, report.decision_model = (d.calls, d.cost), d.model
     path = report.write(run_dir)
     print(f"Report: {path}")
     return report.exit_code()
@@ -331,8 +342,9 @@ def run_preflight(cfg: config_mod.Config) -> int:
             print(f"✗ {p}")
         return EXIT_PREFLIGHT
     inference_log.start_run(RUNS / datetime.now().strftime("%Y%m%d-%H%M%S"))   # preflight's Jev call -> _run/ (§6.1)
-    print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, "
-          f"System One decision model via {cfg.models.system_one_decision_provider})")
+    provider = cfg.models.system_one_decision_provider
+    print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, System One decision model via "
+          f"{provider}{' — no key needed' if provider in config_mod.KEYLESS_PROVIDERS else ''})")
     try:
         _load_package(cfg, key)
         print("✓ jev-ultrafast-mcp loaded after apply_env()")
