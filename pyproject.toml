@@ -3,7 +3,7 @@ name = "application-assistant"
 version = "0.1.0"
 description = "Fills job applications in the user's Chrome and parks them one click before submission."
 authors = [
-    {name = "Maaz77", email = "abbaszadehmohammadamin@yahoo.com"}
+    {name = "Maaz", email = "abbaszadehmohammadamin@yahoo.com"}
 ]
 requires-python = ">=3.11"
 dependencies = [

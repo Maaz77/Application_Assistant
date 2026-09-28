@@ -417,3 +417,11 @@ The user supplied a TypeSafe-compatible System One model on OpenRouter — `resp
 Deviations, recorded per 00_common §3/§5.2:
 - **P0 is "no behaviour change"**, but this changes the decision model, route and endpoint. It is a user-directed fix to unblock the P0 live gate, kept minimal (config + one endpoint string + the offline tests that pinned the old endpoint/model). T6 is unaffected (it runs offline on RuleDecider; the LLM inference request bodies it snapshots do not involve Jev).
 - **D14** named Jev `typesafe/jev-1.13` on OpenRouter and "no `:free` models". The user overrode both. Caveat from earlier findings: OpenRouter free models are rate-limited (≈50 requests/day/account) and can answer 429/overloaded, so this route may be flaky under load; a paid System One model would be steadier.
+
+## Preflight live-probes the LLM inference model (user decision, 2026-09-28)
+
+Preflight probed Jev live but only static-checked the LLM inference model (key present, model list non-empty), so a configured-but-dead or out-of-credit chat model passed preflight and failed later mid-job. The user asked preflight to probe the LLM inference engine live, like Jev.
+
+`cli._probe_llm_inference(cfg)` now calls `llm_inference.call_engine` once with a trivial empty page over the real strict-`json_schema` path (`config.chat_url`, the run's `Rotation` of `models.<chat_route>.llm_inference`, `PROBE_TIMEOUT = 60 s`). It raises `LLMInferenceError` when no configured model answers; `preflight()` turns that into a `PreflightError` ("the LLM inference model does not answer: …") and otherwise prints `✓ LLM inference <model> answers (via <route>)`. The probe logs to `_run/llm_inference_logs.json` like any other chat call.
+
+Deviation: this adds a preflight step (behaviour change), out of P0's "no behaviour change". It was the fixed-scope item flagged for P1 (`P1_infrastructure.md`), pulled forward at the user's request. No offline test change (no test calls `preflight()`); the probe itself is unit-tested via a monkeypatched `call_engine`. Cost: one extra chat call per preflight.

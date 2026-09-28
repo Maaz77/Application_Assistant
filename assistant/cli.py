@@ -15,7 +15,8 @@ from assistant import decide
 from assistant import inference_log
 from assistant import jev as jevlib
 from assistant import pages, records, tabs
-from assistant.llm_inference import Policy, Sources, answer_page, resume_text
+from assistant.llm_inference import (LLMInferenceError, Policy, Sources, answer_page, call_engine, resume_text,
+                                     system_prompt)
 from assistant.rotation import Rotation
 from assistant.blockers import NeedsAttention, Parked, RestartFromEntry, StopRun
 from assistant.fill import JobCtx, run_pages
@@ -65,8 +66,24 @@ class PreflightError(RuntimeError):
     pass
 
 
+PROBE_TIMEOUT = 60.0   # a preflight LLM-inference probe: a trivial page should answer well within this
+
+
+def _probe_llm_inference(cfg: config_mod.Config) -> str:
+    """Live check that a configured LLM inference model answers with a valid PageAnswers, over the strict
+    json_schema path the real run uses. One trivial empty page; LLMInferenceError when no model answers. Returns
+    the model that answered."""
+    models = Rotation(cfg.models.llm_inference)
+    user = {"page": {"url": "about:blank", "title": "Preflight", "text": "", "fields": []},
+            "sources": {"profile": "", "job": "", "resume": ""}}
+    call_engine(key=config_mod.chat_key(cfg), models=models, system=system_prompt(cfg.policy.free_text_max_chars),
+                user=user, url=config_mod.chat_url(cfg), timeout=PROBE_TIMEOUT)
+    return models.last or cfg.models.llm_inference[0]
+
+
 def preflight(browser: Jev) -> list[str]:
-    """Decision model, server, capabilities, LinkedIn sign-in. Raises PreflightError. Writes nothing."""
+    """Decision model, LLM inference, server, capabilities, LinkedIn sign-in. Raises PreflightError. Writes only
+    the run's inference logs."""
     done = []
     try:
         a = decide.current().ask("preflight", "A job application form asks for the candidate's email address.",
@@ -76,6 +93,11 @@ def preflight(browser: Jev) -> list[str]:
     if not a["form"].yes(0.5):
         raise PreflightError("the decision model (Jev) answered a trivial question wrongly")
     done.append(f"decision model {browser.cfg.models.jev} answers (via {browser.cfg.models.jev_route})")
+    try:
+        model = _probe_llm_inference(browser.cfg)
+    except LLMInferenceError as exc:
+        raise PreflightError(f"the LLM inference model does not answer: {exc}") from exc
+    done.append(f"LLM inference {model} answers (via {browser.cfg.models.chat_route})")
     doc = browser.doctor()
     for cap in ("text_model", "uploads", "js_eval"):
         if doc.get(cap) is not True:

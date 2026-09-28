@@ -81,3 +81,20 @@ def test_bad_config_is_exit_1(tmp_path, capsys):
     bad = tmp_path / "c.toml"
     bad.write_text('[paths]\nbase = "x"\nnope = 1\n')
     assert cli.main(["--config", str(bad), "preflight"]) == 1
+
+
+def test_llm_inference_probe_uses_the_chat_route_and_reports_the_model(monkeypatch):
+    cfg = cli.config_mod.load()
+    seen = {}
+    monkeypatch.setattr(cli, "call_engine", lambda **kw: seen.update(url=kw["url"]) or None)
+    assert cli._probe_llm_inference(cfg) == cfg.models.llm_inference[0]
+    assert seen["url"] == cli.config_mod.chat_url(cfg)
+
+
+def test_llm_inference_probe_raises_when_no_model_answers(monkeypatch):
+    cfg = cli.config_mod.load()
+    def fake(**kw):
+        raise cli.LLMInferenceError("all models unavailable")
+    monkeypatch.setattr(cli, "call_engine", fake)
+    with pytest.raises(cli.LLMInferenceError):
+        cli._probe_llm_inference(cfg)
