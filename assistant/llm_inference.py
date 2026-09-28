@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Callable, Literal
 from urllib.parse import urlparse
 
-import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from assistant import decide, gateway as gateway_mod, inference_log
@@ -77,7 +76,6 @@ SCHEMA = {"type": "object", "additionalProperties": False, "required": ["questio
 LONG_TEXT = 300
 # Vercel AI Gateway caps a new team at 5 requests a minute per model and says when to come back (HTTP 429 with
 # `Retry-After: 22`, mistral-nemo, live 2026-09-24). A wait that short beats failing the page; longer ones rotate on.
-RETRY_AFTER_MAX = 30.0
 MAX_TOKENS = 8192          # one page of answers; OpenRouter otherwise reserves the model maximum (HTTP 402)
 # Extraction with quotes needs no hidden reasoning, and a reasoning model spends MAX_TOKENS on it: qwen3.7-flash
 # returned an empty and then a cut-off answer on The Flex's 43-field form (live 2026-09-23, finish_reason=length).
@@ -215,14 +213,6 @@ def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post:
             raise ModelUnavailable("output invalid") from None
 
 
-def _retry_after(data) -> float | None:
-    """Seconds from the Retry-After header, which _httpx_post keeps under "_retry_after"."""
-    try:
-        return float(data.get("_retry_after")) if isinstance(data, dict) else None
-    except (TypeError, ValueError):
-        return None
-
-
 def _code(status: int, err) -> int:
     return err.get("code", status) if isinstance(err, dict) and isinstance(err.get("code"), int) else status
 
@@ -240,17 +230,6 @@ def _strip_fences(s: str) -> str:
     s = (s or "").strip()
     m = re.match(r"^```(?:json)?\s*(.*?)\s*```$", s, re.S)
     return m.group(1) if m else s
-
-
-def _httpx_post(url, payload, headers, timeout):
-    r = httpx.post(url, json=payload, headers=headers, timeout=timeout)
-    try:
-        body = r.json()
-    except ValueError:
-        body = {"raw": r.text[:500]}
-    if isinstance(body, dict) and r.headers.get("retry-after"):
-        body["_retry_after"] = r.headers["retry-after"]
-    return r.status_code, body
 
 
 # ------------------------------------------------------------------ computed years

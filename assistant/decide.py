@@ -196,6 +196,9 @@ class Decider:
         self.keep_object_state = keep_object_state
         self.max_questions = max(1, max_questions)
         self.fallback = fallback
+        if fallback is not None:
+            # T4: the pair is one request as far as the breaker is concerned, and this Decider reports its verdict.
+            fallback.defer_verdict = True
         self.timeout = timeout
         # `post` is for a caller that sends with its own client (the tests). It does not bypass the Gateway: it gets
         # a Gateway of its own, so the queue, the retry rule and the log apply to it as well (A2).
@@ -243,8 +246,9 @@ class Decider:
             return answers
         if self.fallback is not None:
             try:
-                with gateway.release():          # max_in_flight = 1: the nested chat call needs the slot back
-                    answers = self.fallback.ask(topic, state, questions)
+                # The queue slot was released when `send` returned, so the fallback's own send is not nested
+                # inside this request and cannot wait on a slot we are holding.
+                answers = self.fallback.ask(topic, state, questions)
             except DecisionError as exc:
                 gateway.note_failure(True)       # both failed: one failure for the breaker
                 raise DecisionError(f"decision model HTTP {out.status}: {_error(out.body)}; "
@@ -285,10 +289,13 @@ class ChatDecider:
               "an even spread of probabilities is the honest answer when the state does not say.")
 
     def __init__(self, key: str, models, *, url: str, max_tokens: int = 4096,
-                 gateway: "gateway_mod.Gateway | None" = None):
+                 gateway: "gateway_mod.Gateway | None" = None, defer_verdict: bool = False):
         self.key, self.models, self.url = key, models, url
         self.max_tokens = max_tokens
         self._gateway = gateway
+        # As a fallback, its verdict belongs to the System One request it is rescuing: the Decider reports the pair
+        # once, so a rescued decision is not a failure and a lost one is not two (T4).
+        self.defer_verdict = defer_verdict
         self.calls = 0
 
     @property
@@ -316,7 +323,8 @@ class ChatDecider:
                 "messages": [{"role": "system", "content": self.SYSTEM},
                              {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]}
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
-        out = self.gateway.send(gateway_mod.CHAT, self.url, body, headers, model=model)
+        out = self.gateway.send(gateway_mod.CHAT, self.url, body, headers, model=model,
+                                defer_verdict=self.defer_verdict)
         if not out.ok:
             raise _ChatAttemptFailed(f"HTTP {out.status}: {_error(out.body)}")
         try:

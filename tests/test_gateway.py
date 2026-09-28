@@ -1,0 +1,389 @@
+"""gateway.py (P1 T7): the queue, the one retry layer, the timeouts, the logging and the three clean stops.
+
+The HTTP-level tests run against a real local server (`http.server` on a free port), so the retry rule is exercised
+through httpx and a real `Retry-After` header rather than through a stub that only pretends to be one. Nothing here
+reaches a real provider.
+"""
+from __future__ import annotations
+
+import json
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from types import SimpleNamespace
+
+import pytest
+
+from assistant import gateway as G
+from assistant import inference_log
+
+pytestmark = pytest.mark.unit
+
+
+# ------------------------------------------------------------------ a local server
+
+
+class _Server:
+    """Answers each request from a script of (status, body, headers, hold) and records what it was sent."""
+
+    def __init__(self, script):
+        self.script = list(script)
+        self.seen: list[dict] = []
+        self.starts: list[float] = []
+        self.live = 0
+        self.peak = 0
+        self._lock = threading.Lock()
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.0"
+
+            def do_POST(self):
+                with outer._lock:
+                    outer.live += 1
+                    outer.peak = max(outer.peak, outer.live)
+                    outer.starts.append(time.monotonic())
+                    status, payload, headers, hold = outer.script[min(len(outer.seen), len(outer.script) - 1)]
+                raw_in = self.rfile.read(int(self.headers.get("content-length") or 0))
+                with outer._lock:
+                    outer.seen.append(json.loads(raw_in or b"{}"))
+                if hold:
+                    time.sleep(hold)
+                raw = json.dumps(payload).encode() if payload is not None else b""
+                self.send_response(status)
+                self.send_header("content-type", "application/json")
+                for k, v in (headers or {}).items():
+                    self.send_header(k, v)
+                self.send_header("content-length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                with outer._lock:
+                    outer.live -= 1
+
+            def log_message(self, *a):
+                pass
+
+        self.http = HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.http.server_port}/v1/systemone"
+        self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
+        self.thread.start()
+
+    def close(self):
+        self.http.shutdown()
+        self.http.server_close()
+
+
+def step(status=200, body=None, headers=None, hold=0.0):
+    return (status, {"answers": {}} if body is None else body, headers, hold)
+
+
+@pytest.fixture
+def server():
+    made = []
+
+    def make(*script):
+        s = _Server(script or [step()])
+        made.append(s)
+        return s
+    yield make
+    for s in made:
+        s.close()
+
+
+def gw(*, max_in_flight=1, min_interval_s=0.0, max_attempts=3, budget=0.0, prices=None, **kw) -> G.Gateway:
+    return G.Gateway(limits=SimpleNamespace(max_in_flight=max_in_flight, min_interval_s=min_interval_s,
+                                            max_attempts=max_attempts),
+                     budget=SimpleNamespace(max_usd_per_run=budget), prices=prices, **kw)
+
+
+def send(gateway, url, kind=G.JEV, body=None, **kw):
+    return gateway.send(kind, url, body or {"model": "m", "state": "s", "questions": {}}, {}, **kw)
+
+
+# ------------------------------------------------------------------ the queue
+
+
+def test_only_one_request_is_in_flight_at_a_time(server):
+    """P1 T2: limits.max_in_flight. The server itself counts how many arrived at once, so this proves the queue
+    rather than the counter that reports it."""
+    s = server(step(hold=0.05))
+    gateway = gw()
+    threads = [threading.Thread(target=send, args=(gateway, s.url)) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(s.seen) == 6 and s.peak == 1 and gateway.run.in_flight == 1
+
+
+def test_requests_start_at_least_the_minimum_interval_apart():
+    """P1 T2: limits.min_interval_s. Timed where the Gateway decides it, with a real sleep — over a socket the
+    connect latency of each request adds more jitter than the interval being measured."""
+    starts = []
+
+    def post(url, body, headers, timeout):
+        starts.append(time.monotonic())
+        return 200, {"answers": {}}
+    gateway = gw(min_interval_s=0.15, post=post)
+    for _ in range(4):
+        send(gateway, "http://127.0.0.1:1/v1/systemone")
+    gaps = [b - a for a, b in zip(starts, starts[1:])]
+    # time.sleep may return a millisecond or two early; what matters is that the interval is not skipped.
+    assert len(starts) == 4 and all(g >= 0.145 for g in gaps), gaps
+    assert sum(gaps) >= 3 * 0.145
+
+
+def test_a_slow_request_does_not_add_its_duration_to_the_interval():
+    """The interval is between request STARTS: a request that took a second does not then wait another 0.25 s."""
+    starts = []
+
+    def post(url, body, headers, timeout):
+        starts.append(time.monotonic())
+        time.sleep(0.2)
+        return 200, {"answers": {}}
+    slept = []
+    gateway = gw(min_interval_s=0.1, post=post, sleep=slept.append)
+    for _ in range(3):
+        send(gateway, "http://127.0.0.1:1/v1/systemone")
+    assert slept == []                       # each request already outlasted the interval
+
+
+# ------------------------------------------------------------------ the one retry layer
+
+
+def test_a_retryable_status_is_retried_up_to_max_attempts(server):
+    for status in (429, 500, 503, 529):
+        s = server(step(status, {"error": "busy"}))
+        slept = []
+        out = send(gw(sleep=slept.append), s.url)
+        assert not out.ok and out.attempts == 3 and len(s.seen) == 3 and slept == list(G.BACKOFF)
+
+
+def test_a_retry_succeeds_and_the_answer_comes_back(server):
+    s = server(step(503, {"error": "busy"}), step(200, {"answers": {"x": 1}}))
+    out = send(gw(sleep=lambda _: None), s.url)
+    assert out.ok and out.attempts == 2 and out.body == {"answers": {"x": 1}}
+
+
+def test_retry_after_is_waited_out_when_it_is_short_enough(server):
+    s = server(step(429, {"error": "slow down"}, {"retry-after": "7"}), step(200))
+    slept = []
+    out = send(gw(sleep=slept.append), s.url)
+    assert out.ok and slept == [7.0]
+
+
+def test_a_retry_after_over_the_cap_falls_back_to_the_backoff(server):
+    s = server(step(429, {"error": "slow down"}, {"retry-after": "600"}), step(200))
+    slept = []
+    send(gw(sleep=slept.append), s.url)
+    assert slept == [G.BACKOFF[0]]           # 600 s is the provider saying stop, not wait
+
+
+def test_another_4xx_is_never_retried(server):
+    for status in (400, 404, 422):
+        s = server(step(status, {"error": "no"}))
+        out = send(gw(sleep=lambda _: None), s.url)
+        assert not out.ok and out.attempts == 1 and len(s.seen) == 1
+
+
+def test_a_timeout_counts_as_a_retryable_failure(server):
+    s = server(step(hold=0.4))
+    out = send(gw(sleep=lambda _: None), s.url, timeout=0.05)
+    assert not out.ok and out.status == 0 and out.attempts == 3
+
+
+def test_an_unreachable_server_is_retried_then_reported():
+    dead = "http://127.0.0.1:9/v1/systemone"          # discard port: nothing listens
+    out = send(gw(sleep=lambda _: None), dead)
+    assert not out.ok and out.status == 0 and out.attempts == 3
+
+
+def test_a_caller_with_another_model_to_try_gets_one_attempt(server):
+    """A rotation's next model is cheaper than retrying a rate-limited model, so `attempts=1` caps this request."""
+    s = server(step(429, {"error": "busy"}))
+    out = send(gw(sleep=lambda _: None), s.url, attempts=1)
+    assert not out.ok and out.attempts == 1 and len(s.seen) == 1
+
+
+def test_the_attempt_cap_never_raises_the_configured_limit(server):
+    s = server(step(503, {"error": "busy"}))
+    out = send(gw(max_attempts=2, sleep=lambda _: None), s.url, attempts=9)
+    assert out.attempts == 2
+
+
+# ------------------------------------------------------------------ logging (§6.4, D4)
+
+
+def _entries(tmp_path, name):
+    return json.loads((tmp_path / "_run" / name).read_text())
+
+
+@pytest.fixture
+def logs(tmp_path):
+    inference_log.start_run(tmp_path)
+    yield tmp_path
+    inference_log.start_run(None)
+
+
+def test_every_attempt_is_logged_not_only_the_last(server, logs):
+    s = server(step(503, {"error": "busy"}), step(503, {"error": "busy"}), step(200, {"answers": {"x": 1}}))
+    send(gw(sleep=lambda _: None), s.url)
+    entries = _entries(logs, "jev_inference_logs.json")
+    assert len(entries) == 3 and entries[-1]["Response"] == {"answers": {"x": 1}}
+    assert entries[0]["Response"] == {"error": "busy"}
+
+
+def test_a_chat_request_lands_in_the_llm_log_and_a_system_one_request_in_the_other(server, logs):
+    s = server(step(200, {"choices": [{"message": {"content": "hi"}}]}))
+    gateway = gw()
+    send(gateway, s.url, G.CHAT, body={"model": "m", "messages": [{"role": "user", "content": "q"}]})
+    send(gateway, s.url, G.JEV)
+    assert len(_entries(logs, "llm_inference_logs.json")) == 1
+    assert len(_entries(logs, "jev_inference_logs.json")) == 1
+
+
+def test_a_request_that_never_got_a_body_says_so(logs):
+    """§6.2/§6.3: with no response body the entry reads "<no response body: …>", not our own error object."""
+    send(gw(sleep=lambda _: None), "http://127.0.0.1:9/v1/systemone")
+    assert _entries(logs, "jev_inference_logs.json")[0]["Response"].startswith("<no response body:")
+
+
+def test_no_key_reaches_a_log(server, logs):
+    s = server(step())
+    gw().send(G.JEV, s.url, {"model": "m", "state": "s", "questions": {}},
+              {"Authorization": "Bearer sk-secret-value"})
+    assert "sk-secret-value" not in (logs / "_run" / "jev_inference_logs.json").read_text()
+
+
+# ------------------------------------------------------------------ counters
+
+
+def test_counters_count_requests_attempts_failures_and_cost(server):
+    s = server(step(503, {"error": "busy"}), step(200, {"answers": {}, "usage": {"cost": 0.002}}))
+    gateway = gw(sleep=lambda _: None)
+    send(gateway, s.url)
+    assert (gateway.run.requests, gateway.run.attempts, gateway.run.failures) == (1, 2, 0)
+    assert gateway.run.cost == pytest.approx(0.002) and not gateway.run.estimated
+
+
+def test_a_cost_the_gateway_does_not_report_is_estimated_and_marked(server):
+    s = server(step(200, {"answers": {}, "usage": {"prompt_tokens": 1_000_000, "completion_tokens": 0}}))
+    gateway = gw(prices={"m": (0.5, 1.0)})
+    send(gateway, s.url)
+    assert gateway.run.cost == pytest.approx(0.5) and gateway.run.estimated
+
+
+def test_per_job_counters_reset_while_the_runs_keep_counting(server):
+    s = server(step())
+    gateway = gw()
+    send(gateway, s.url)
+    job = gateway.start_job()
+    send(gateway, s.url)
+    assert job.requests == 1 and gateway.run.requests == 2
+
+
+# ------------------------------------------------------------------ the breaker and the caps (T3)
+
+
+def test_three_failed_requests_in_a_row_are_a_provider_outage(server):
+    s = server(step(503, {"error": "down"}))
+    gateway = gw(sleep=lambda _: None)
+    send(gateway, s.url)
+    send(gateway, s.url)
+    with pytest.raises(G.ProviderOutage, match="3 requests in a row"):
+        send(gateway, s.url)
+
+
+def test_five_of_the_last_ten_are_a_provider_outage():
+    gateway = gw(sleep=lambda _: None)
+    for verdict in [True, False, True, False, True, False, True, False, False]:
+        gateway.note_failure(verdict)
+    with pytest.raises(G.ProviderOutage, match="5 of the last 10"):
+        gateway.note_failure(True)
+
+
+def test_a_run_of_successes_does_not_trip_the_breaker():
+    gateway = gw()
+    for _ in range(30):
+        gateway.note_failure(False)
+    assert gateway.tripped is None
+
+
+def test_the_outage_names_the_route_and_the_status(server):
+    s = server(step(503, {"error": "down"}))
+    gateway = gw(sleep=lambda _: None)
+    send(gateway, s.url)
+    send(gateway, s.url)
+    with pytest.raises(G.ProviderOutage, match="HTTP 503"):
+        send(gateway, s.url)
+
+
+def test_the_spend_cap_stops_the_run_before_the_next_request(server):
+    s = server(step(200, {"answers": {}, "usage": {"cost": 0.6}}))
+    gateway = gw(budget=1.0)
+    send(gateway, s.url)                     # 0.6
+    send(gateway, s.url)                     # 1.2 — over, but this one was already allowed
+    with pytest.raises(G.BudgetExceeded, match=r"spend cap \$1.00 reached"):
+        send(gateway, s.url)
+    assert len(s.seen) == 2                  # the third never left
+
+
+def test_no_key_or_no_credit_stops_the_run_and_is_never_retried(server):
+    for status in (401, 402, 403):
+        s = server(step(status, {"error": {"message": "nope"}}))
+        with pytest.raises(G.CreditOrKey) as ei:
+            send(gw(sleep=lambda _: None), s.url)
+        assert f"HTTP {status}" in str(ei.value) and len(s.seen) == 1
+
+
+def test_a_stop_is_sticky_and_comes_back_at_every_later_entry_point(server):
+    """A stop can be raised inside the package's own thread, where a broad `except Exception` turns it into a
+    string. The Gateway keeps it so `Jev.call` can raise it on the run's thread instead (T3)."""
+    s = server(step(402, {"error": {"message": "no credit"}}))
+    gateway = gw(sleep=lambda _: None)
+    with pytest.raises(G.CreditOrKey):
+        send(gateway, s.url)
+    with pytest.raises(G.CreditOrKey):
+        gateway.check()
+    with pytest.raises(G.CreditOrKey):
+        send(gateway, s.url)
+    assert len(s.seen) == 1                  # nothing was sent after the stop
+
+
+def test_every_stop_is_a_stop_run_so_the_run_writes_no_record():
+    """cli.run already turns StopRun into exit 3 with no folder move, no tracker write and no job.md note. Being a
+    subclass is what keeps the three stops out of the NeedsAttention paths, which would record the job."""
+    from assistant.blockers import NeedsAttention, StopRun
+    for cls in (G.ProviderOutage, G.BudgetExceeded, G.CreditOrKey):
+        assert issubclass(cls, StopRun) and issubclass(cls, G.GatewayStop)
+        assert not issubclass(cls, NeedsAttention)
+
+
+# ------------------------------------------------------------------ the slot the fallback needs
+
+
+def test_the_slot_is_free_again_as_soon_as_a_request_is_done(server):
+    """max_in_flight = 1 plus a fallback that itself sends would self-deadlock if the slot outlived the request.
+    It does not: `send` releases it before returning, so a second send from the same caller goes straight out (T4)."""
+    s = server(step(503, {"error": "busy"}), step(200))
+    gateway = gw(sleep=lambda _: None)
+    send(gateway, s.url)
+    assert gateway._live == 0
+    assert send(gateway, s.url).ok and len(s.seen) == 3
+
+
+# ------------------------------------------------------------------ wiring
+
+
+def test_for_config_takes_its_limits_from_the_config():
+    from assistant import config
+    cfg = config.load()
+    gateway = G.for_config(cfg)
+    assert gateway.limits is cfg.limits and gateway.budget is cfg.budget
+    assert gateway.prices == cfg.prices and gateway.timeouts[G.CHAT] == 45.0
+
+
+def test_a_sender_without_a_gateway_is_refused():
+    G.use(None)
+    with pytest.raises(RuntimeError, match="may not bypass"):
+        G.required()

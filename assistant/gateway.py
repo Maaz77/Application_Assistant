@@ -155,11 +155,12 @@ class Gateway:
         self._slots = threading.BoundedSemaphore(max(1, limits.max_in_flight))
         self._lock = threading.Lock()
         self._live = 0                      # requests holding a slot right now
-        self._last_start = 0.0
+        self._next_start = 0.0
         self.run = Counters()
         self.job = Counters()
         self._recent: list[bool] = []       # the last 10 request verdicts, True = failed
         self.tripped: GatewayStop | None = None   # sticky: set once, re-raised at every later entry point
+        self._last_failure = ""                   # "<route> HTTP <status>", for the outage message (T3)
 
     # -------------------------------------------------------------- scope
 
@@ -177,6 +178,9 @@ class Gateway:
              attempts: int | None = None) -> Outcome:
         """One request: at most `max_attempts` attempts, `min_interval_s` apart, one at a time. Every attempt is
         logged (§6.4) before anything is returned. Raises a GatewayStop for the three stop conditions.
+
+        The queue slot is held only for the attempts of this one request and is free again when `send` returns, so
+        a caller may send again (the chat fallback) without waiting on a slot it is itself holding.
 
         `attempts` caps this request below `limits.max_attempts`. A caller with an untried model behind it passes 1:
         another model is a cheaper answer to "this one is rate-limited" than waiting 8 s to ask the same one again,
@@ -226,8 +230,11 @@ class Gateway:
             if attempt == limit or not _retryable(status):
                 break
             self.sleep(self._wait(attempt, response))
+        where = f"{inference_log.gateway_of(url)} HTTP {status}" if status else \
+            f"{inference_log.gateway_of(url)} unreachable"
+        self._last_failure = where
         if not defer:
-            self.note_failure(True)
+            self.note_failure(True, where)
         return Outcome(status, response, False, used)
 
     # -------------------------------------------------------------- queue
@@ -252,31 +259,13 @@ class Gateway:
 
         return _Slot()
 
-    def release(self):
-        """Give the slot back for the duration of a nested send — the chat fallback runs inside the Decider's
-        request, and with max_in_flight = 1 it would otherwise wait for a slot it is itself holding (T4)."""
-        gateway = self
-
-        class _Released:
-            def __enter__(self):
-                with gateway._lock:
-                    gateway._live -= 1
-                gateway._slots.release()
-                return self
-
-            def __exit__(self, *exc):
-                gateway._slots.acquire()
-                with gateway._lock:
-                    gateway._live += 1
-                return False
-
-        return _Released()
-
     def _space(self) -> None:
-        """At least min_interval_s between the starts of two attempts."""
+        """At least min_interval_s between the starts of two attempts. Tracked as the next time an attempt may
+        start, so a slow request does not add its own duration on top of the interval."""
         with self._lock:
-            gap = self.limits.min_interval_s - (self.monotonic() - self._last_start)
-            self._last_start = self.monotonic() + max(0.0, gap)
+            now = self.monotonic()
+            gap = self._next_start - now
+            self._next_start = max(now, self._next_start) + self.limits.min_interval_s
         if gap > 0:
             self.sleep(gap)
 
@@ -311,8 +300,10 @@ class Gateway:
         else:
             inference_log.log_llm(inference_log.gateway_of(url), body, logged, reason)
 
-    def note_failure(self, failed: bool) -> None:
+    def note_failure(self, failed: bool, where: str = "") -> None:
         """One request's verdict. D21: three failures in a row, or five of the last ten, is a provider outage."""
+        if where:
+            self._last_failure = where
         with self._lock:
             if failed:
                 for counter in self._both():
@@ -322,8 +313,8 @@ class Gateway:
             row = len(self._recent) >= 3 and all(self._recent[-3:])
             of_ten = len(self._recent) >= 10 and sum(self._recent) >= 5
         if failed and (row or of_ten):
-            raise self._trip(ProviderOutage("provider outage — "
-                                            + ("3 requests in a row failed" if row else "5 of the last 10 failed")))
+            rule = "3 requests in a row failed" if row else "5 of the last 10 failed"
+            raise self._trip(ProviderOutage(f"provider outage — {self._last_failure or 'model requests'}: {rule}"))
 
     def note_fallback(self) -> None:
         for counter in self._both():
