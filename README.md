@@ -249,16 +249,18 @@ To try jobs again after a run, put the Needs-Attention ones back in the queue: t
 | `--job URL` | Only that job. |
 | `--limit N` | At most N jobs. |
 
-Each run writes `runs/<YYYYMMDD-HHMMSS>/`:
+Each run writes `runs/<YYYYMMDD-HHMMSS>/`, with a `_run/` folder for preflight and queue work and one `<job folder>/` per job:
 
 | File | Contents |
 |---|---|
 | `report.md` | parked jobs, jobs needing attention, queue anomalies, and questions for your Scratch Pad |
-| `answers/` | every answer with its source and quote |
-| `shots/` | a screenshot of each parked page |
-| `calls.jsonl` | every `browser_*` call to the jev package, key redacted |
 | `journal.jsonl` | the record events |
 | `tracker-backup.numbers` | the tracker as it was before the run |
+| `_run/`, `<job folder>/` → `jev_inference_logs.json` | every HTTP attempt to the System One decision model (§6.3) |
+| `_run/`, `<job folder>/` → `llm_inference_logs.json` | every HTTP attempt to a chat model — LLM inference, text helper (§6.2) |
+| `_run/`, `<job folder>/` → `browser_actions.jsonl` | every `browser_*` call to the jev package, key redacted |
+| `<job folder>/` → `answers.json` | every checked answer with its source and quote (when a form page was reached) |
+| `<job folder>/` → `screenshot.jpg` | a screenshot of the parked page (when the job parked) |
 
 **Exit codes:**
 

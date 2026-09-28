@@ -1,4 +1,30 @@
-# Live test plan (you run these; T10)
+# Live test plan (you run these)
+
+## P0 re-core gate (2026-09-28)
+
+The P0 gate checks the logs and the run-folder layout, not decision quality — the job need not park. Start the local Kev server first (`./run_kev_server.command`), Chrome open on 9222 and signed in.
+
+**1. Preflight**
+```bash
+.venv/bin/python -m assistant preflight
+```
+`runs/<ts>/_run/` then holds `jev_inference_logs.json` (the System One probe — exactly `State, Score, Noul, Choice, Response`) and `llm_inference_logs.json` (the LLM inference probe — exactly `model, provider, parameters, messages, completion`; `provider` like `vercel/<upstream>`). No key string in either.
+
+**2. One job, not recorded**
+```bash
+.venv/bin/python -m assistant run --no-record --job "<a Resume-Built Easy Apply URL>"
+```
+In `runs/<ts>/<job folder>/`:
+- `jev_inference_logs.json` and (if a form page was reached) `llm_inference_logs.json`, with exactly the key sets above; full prompt/page text and full completion.
+- `browser_actions.jsonl` exists; `answers.json` if a form was reached; `screenshot.jpg` if it parked.
+- No `decisions.jsonl` / `calls.jsonl` / `answers/` / `shots/` anywhere in `runs/<ts>/`.
+- `report.md` has its sections; nothing was submitted; the job tab is still open.
+
+Known: with `kev-0.8b` the job may stop at the entry decision (Needs Attention `load_failure`) — that still passes the P0 gate (logs + layout + nothing submitted + tab open).
+
+---
+
+## v3 live test plan (T10 — pre-P0 paths: `answers/<folder>.json`, `shots/<folder>.jpg` are now `<job>/answers.json`, `<job>/screenshot.jpg`)
 
 Everything so far was tested only against local fixture pages. These steps are the first contact with real sites, in order of increasing risk. Stop at the first surprise and send me the run folder.
 

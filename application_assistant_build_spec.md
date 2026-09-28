@@ -1,12 +1,14 @@
 # Application Assistant v2: Build Spec, as built
 
-Spec v3 · 2026-09-24 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the package behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems.
+Spec v3.1 · 2026-09-28 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the package behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems.
+
+**v3.1 (re-core P0, 2026-09-28):** the component that writes the answers is renamed **LLM inference** everywhere (`answers.py` → `llm_inference.py`). Every HTTP attempt to a chat model or to a System One decision model is logged per run and per job under `runs/<ts>/{_run,<job folder>}/` (`llm_inference_logs.json` §6.2, `jev_inference_logs.json` §6.3); `decisions.jsonl`, `calls.jsonl`, `answers/` and `shots/` are gone (§8). The decision-model role is config `models.system_one_decision_provider` / `models.<route>.system_one_decision_model` — Jev is one instance; a **local Kev server** (`[models.local]`, keyless) is another. Preflight live-probes the LLM inference model and the System One model. See `recore/HANDOVER.md` for the full P0 change list and deviations.
 
 **The program**, *the wrapper*, lives in `Tools/Application_Assistant/`. For every job at Status "Resume Built" it fills the application in the user's own signed-in Chrome, **stops one click before submission**, leaves that tab open, and records the result.
 
 Who does what:
 - **The browser package** `jev-ultrafast-mcp` (a patched 0.1.5 wheel) is called in-process.
-- **Jev** is TypeSafe's decision model. It judges every page and plans every fill; the package's goal agent also uses it to pick each click.
+- **The System One decision model** (config `models.system_one_decision_provider`; TypeSafe's **Jev** instance, or a local **Kev** server) judges every page and plans every fill; the package's goal agent also uses it to pick each click.
 - **The LLM inference**, a chat model, writes the answers, and only from the user's files.
 - **The code keeps:** the answer checks, the resume upload, the records, and one fixed never-submit rule (§4.2).
 
@@ -587,7 +589,9 @@ C1 no tab groups · C4 tracker saved after every job · C7 the agent clicks the 
 
 ## 13. Main problems and challenges
 
-As of 2026-09-24, **no job has yet reached the parked final step in a real run.** The problems, most severe first. The evidence is from `runs/20260924-233549`, the user's run of 23:35–23:54, which was stopped during its fifth job.
+**P0 update (2026-09-28):** P0 added observability (the per-run/per-job inference logs) and the rename, and made the System One provider configurable, but did **not** fix the problems below — they are P1–P4. Still true: no job has reached the parked final step in a real run. New blocker found this phase: on the working keyless route, **kev-0.8b misclassifies the LinkedIn entry page** (`kind="other"` at 0.12, flat distribution, although the Easy Apply control was in its State), so no job gets past the entry decision. Paid Jev is unavailable on the account (OpenRouter 402, Vercel 403). So a live end-to-end form-fill is still unproven; it needs a stronger or fine-tuned System One model (P3/P4). Details in `recore/HANDOVER.md`.
+
+The v3 problems below, most severe first. The evidence is from `runs/20260924-233549`, the user's run of 23:35–23:54, which was stopped during its fifth job.
 
 **13.1 Too many Jev requests, most of them failing (429 / 503).** The run sent 222 page-decision requests in 19 minutes, up to 29 a minute, plus 21 agent goals:
 - 61 decision requests succeeded only after one or more retries, with about 1,070 s of accumulated retry waiting;
