@@ -298,6 +298,11 @@ def run(cfg: config_mod.Config, args) -> int:
         connect_once(cfg)                              # one "Allow remote debugging?" click for the whole run
         for line in preflight(browser):
             print(f"✓ {line}")
+    except gateway_mod.GatewayStop as exc:     # T3: a stop during preflight is a stop, not a preflight failure
+        report.stopped = str(exc)
+        print(f"■ run stopped: {exc}")
+        print(f"Report: {report.write(run_dir)}")
+        return EXIT_STOPPED
     except (PreflightError, TrackerError, JevError) as exc:
         print(f"✗ preflight: {exc}")
         return EXIT_PREFLIGHT

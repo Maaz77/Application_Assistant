@@ -1,6 +1,8 @@
 # Application Assistant v2: Build Spec, as built
 
-Spec v3.1 · 2026-09-28 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the package behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems.
+Spec v3.2 · 2026-09-28 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the package behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems.
+
+**v3.2 (re-core P1, 2026-09-28):** every model request — the System One client, the LLM inference, the chat fallback and the browser package's own requests — now leaves through **one `Gateway`** (`assistant/gateway.py`, §3.3): one request in flight at a time, one retry layer, one timeout per kind, one logging point, and the counters the report prints. Batching (`BATCH`/`PARALLEL`) and both retry ladders are gone. A run stops cleanly on a **provider outage**, the **spend cap** or a **key/credit** failure (§4.3), leaving the current job untouched and exiting 3. A **chat fallback** (`decide.ChatDecider`) answers the same typed questions when the System One model fails. The run's single CDP connection is opened before preflight, so one "Allow remote debugging?" click covers the whole run (§3.4). New config sections `[limits]`, `[budget]`, `[jev]`, `[decider]`, `[prices]`. See `recore/HANDOVER.md` for the P1 change list and deviations.
 
 **v3.1 (re-core P0, 2026-09-28):** the component that writes the answers is renamed **LLM inference** everywhere (`answers.py` → `llm_inference.py`). Every HTTP attempt to a chat model or to a System One decision model is logged per run and per job under `runs/<ts>/{_run,<job folder>}/` (`llm_inference_logs.json` §6.2, `jev_inference_logs.json` §6.3); `decisions.jsonl`, `calls.jsonl`, `answers/` and `shots/` are gone (§8). The decision-model role is config `models.system_one_decision_provider` / `models.<route>.system_one_decision_model` — Jev is one instance; a **local Kev server** (`[models.local]`, keyless) is another. Preflight live-probes the LLM inference model and the System One model. See `recore/HANDOVER.md` for the full P0 change list and deviations.
 
@@ -65,10 +67,13 @@ Tools/Application_Assistant/
   README.md  CLAUDE.md  DISCOVERY.md  LIVE_TEST.md  application_assistant_build_spec.md
   prompts/  llm_inference.md  navigate_goal.md  next_step_goal.md  page_goal.md
   vendor/   jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl  jev_ultrafast_mcp-0.1.5+aa6.patch
-  assistant/  __main__.py cli.py config.py jev.py guard.py probes.py pages.py decide.py fill.py answers.py
-              rotation.py google_signin.py blockers.py tabs.py records.py tracker.py report.py contract_check.py
+  assistant/  __main__.py cli.py config.py jev.py gateway.py guard.py probes.py pages.py decide.py fill.py
+              llm_inference.py inference_log.py rotation.py google_signin.py blockers.py tabs.py records.py
+              tracker.py report.py contract_check.py
   tests/      fixtures/ golden/ captured/ conftest.py support.py fake_mcp.py rule_decider.py test_*.py
-  runs/<YYYYMMDD-HHMMSS>/  report.md calls.jsonl decisions.jsonl journal.jsonl answers/ shots/ tracker-backup.numbers
+  runs/<YYYYMMDD-HHMMSS>/  report.md journal.jsonl tracker-backup.numbers
+                           _run/ and <job folder>/: jev_inference_logs.json llm_inference_logs.json
+                           browser_actions.jsonl, plus answers.json and screenshot.jpg per job
 ```
 
 Dependencies (`pyproject.toml`, Python ≥ 3.11):
@@ -114,18 +119,44 @@ max_pages_per_job = 15
 
 [models]
 chat_route = "vercel"              # who serves the LLM inference and the text helper: "openrouter" | "vercel"
-system_one_decision_model = "typesafe-ai/jev"            # Jev's ID on its route: "typesafe-ai/jev" (Vercel), "typesafe/jev-1.13" (OpenRouter)
-system_one_decision_provider = "vercel"               # who serves Jev: "vercel" | "openrouter"
+system_one_decision_provider = "local"    # who serves the System One decision model: "local" | "openrouter" | "vercel"
 
-[models.openrouter]                # OPENROUTER_API_KEY; free tier: 50 requests a day across all free models
-llm_inference = ["qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free",
-                 "nvidia/nemotron-3-super-120b-a12b:free", "nex-agi/nex-n2.5-mini:free", "nex-agi/nex-n2.5-pro:free"]
-text_helper = ["qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free",
-               "nex-agi/nex-n2.5-mini:free", "nvidia/nemotron-3-super-120b-a12b:free"]
+[models.openrouter]                # OPENROUTER_API_KEY. Paid: no `:free` model is configured (D14)
+llm_inference = ["deepseek/deepseek-v4.1-flash", "openai/gpt-5.4-mini"]
+text_helper   = ["deepseek/deepseek-v4.1-flash", "openai/gpt-5.4-mini"]
+system_one_decision_model = "typesafe/jev-1.13"
 
 [models.vercel]                    # AI_GATEWAY_API_KEY
 llm_inference = ["mistral/mistral-small", "mistral/mistral-nemo"]
 text_helper = ["mistral/mistral-small", "mistral/mistral-nemo"]
+system_one_decision_model = "typesafe-ai/jev"
+
+[models.local]                     # a Kev server on this Mac: the same System One API, no key
+base_url = "http://127.0.0.1:8009"
+system_one_decision_model = "kev-latest"
+state_chars = 12000
+timeout = 120.0
+
+[limits]                           # v3.2: one queue for every model request (§3.3)
+max_in_flight = 1
+min_interval_s = 0.25
+max_attempts = 3
+
+[budget]
+max_usd_per_run = 1.00             # D15: the run stops cleanly at this spend
+
+[jev]
+max_questions_per_request = 24     # above this a judgment is split, and the parts go one after another
+
+[decider]
+fallback = "chat"                  # "chat" | "none": who answers when the System One model fails (§6.0b)
+
+[prices]                           # USD per million tokens [input, output]; only when the gateway reports no cost
+"mistral/mistral-small"        = [0.20, 0.60]
+"mistral/mistral-nemo"         = [0.02, 0.04]
+"typesafe/jev-1.13"            = [0.042, 0.0]
+"deepseek/deepseek-v4.1-flash" = [0.099, 0.60]
+"openai/gpt-5.4-mini"          = [0.75, 4.50]
 
 [policy]
 prefill = "keep-if-silent"         # or "strict"
@@ -138,7 +169,9 @@ account_email = "…"                # empty → every Google sign-in is a block
 The config code in `config.py`:
 - `cfg.models.llm_inference` / `.text_helper` read the active route's table.
 - `config.chat_key(cfg)` / `config.chat_url(cfg)` give the chat route's key and `…/chat/completions`, from `CHAT_BASES = {openrouter: https://openrouter.ai/api/v1, vercel: https://ai-gateway.vercel.sh/v1}`.
-- `config.system_one_decision_key(cfg)` gives Jev's route's key.
+- `config.system_one_decision_key(cfg)` gives the System One route's key; `config.local_key()` reads the
+  optional `KEV_API_KEY`, and `config.KEYLESS_PROVIDERS` is why preflight asks for no key on the local route.
+- `cfg.limits`, `cfg.budget`, `cfg.jev`, `cfg.decider` and `cfg.prices` configure the Gateway (§3.3).
 
 `.env`: `OPENROUTER_API_KEY=` and `AI_GATEWAY_API_KEY=` (read from `.env` first, then the process environment).
 
@@ -156,7 +189,7 @@ The wheel is 0.1.5 plus three observer fixes (`vendor/*.patch`, "aa"):
 - **The call path:** `Jev.call(name, **kwargs)` runs `getattr(server, name)(**kwargs)` on one dedicated worker thread (one call at a time, B7) with a timeout: 60 s, or 300 s for `browser_goal`, or `_timeout` for preflight's first connection.
 - **Every result:**
   - passes `clean_text` (lone UTF-16 surrogates → `?`: the package cuts page text in JavaScript, and a half pair crashed UTF-8 logging);
-  - is logged to `calls.jsonl` with the chat key redacted.
+  - is logged to `browser_actions.jsonl` with the chat key redacted.
 - **On timeout:** write the report, flush stdout, then `os._exit(3)`. A blocked call can't be cancelled, and `os._exit` skips the package's tab-closing exit hook (B3), so the job's tab stays open.
 - **Failures:** `Jev.checked()` raises `JevError` on a result starting with `browser_unavailable:`, `blocked_by_policy:`, `stale:`, `browser_error:`, `turbo_unavailable:` or `error(`.
 
@@ -167,7 +200,7 @@ The wheel is 0.1.5 plus three observer fixes (`vendor/*.patch`, "aa"):
 | `JEVMCP_MODE` / `JEVMCP_CDP_URL` | `attach` / `browser.cdp_url` |
 | `JEVMCP_FOREGROUND` / `JEVMCP_MAX_ACTIONS` | `0` / `browser.max_actions` |
 | `JEVMCP_ALLOW_UPLOADS` / `JEVMCP_ALLOW_JS` | `1` / `1` |
-| `TYPESAFE_BASE_URL` (+ `TYPESAFE_API_KEY`) | vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone` + `AI_GATEWAY_API_KEY`; openrouter: `https://openrouter.ai/api/alpha/decisions` (paid with the OpenRouter key); local: `models.local.base_url` + `/v1/systemone` + `KEV_API_KEY`, or the placeholder `local` when the Kev server is open (the package refuses turbo mode on an empty key) |
+| `TYPESAFE_BASE_URL` (+ `TYPESAFE_API_KEY`) | vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone` + `AI_GATEWAY_API_KEY`; openrouter: `https://openrouter.ai/api/alpha/decisions` (paid with the OpenRouter key); local: `models.local.base_url` + `/v1/systemone` + `KEV_API_KEY`, or the placeholder `local` when the Kev server is open (the package refuses turbo mode on an empty key). The URL still selects the route, but the request itself is sent by the Gateway (§3.3), not by the package's client |
 | `TYPESAFE_MODEL` | `models.system_one_decision_model` |
 | `OPENROUTER_API_KEY` | `key` on the openrouter chat route, else the `.env` OpenRouter key |
 | `TEXT_MODEL_API_KEY` / `TEXT_MODEL_BASE_URL` | `key` / `CHAT_BASES[chat_route]` |
@@ -196,7 +229,7 @@ The wheel is 0.1.5 plus three observer fixes (`vendor/*.patch`, "aa"):
 | `browser_tabs` | `action="list"\|"new"\|"switch"\|"close"`, `index=-1`, `target_id=""`, `url="about:blank"` |
 | `browser_close` | `shutdown_browser=False` |
 
-**`Jev.goal`** always passes `verbose=True`: the trace is the only place a refused label shows. When the result's status is `turbo_unavailable: Decision model returned HTTP 429/5xx | unreachable | not JSON | unavailable` and `steps: 0`, it asks again after each of `decide.RETRY_WAITS` = 2, 5, 15, 30, 60 s. If Jev is still out after that, it raises `DecisionError`. A `no decision-model key` status is not retried.
+**`Jev.goal`** always passes `verbose=True`: the trace is the only place a refused label shows. When the result's status is `turbo_unavailable: Decision model returned HTTP 429/5xx | unreachable | not JSON | unavailable` and `steps: 0`, it asks again **once** after `jev.GOAL_RETRY_WAIT` = 2 s (v3.2: the Gateway has already spent this request's attempts, so a second ladder here only multiplied them — §13.1). If the decision model is still out, it raises `DecisionError`. A `no decision-model key` status is not retried.
 
 **Ops** (`browser_act`), as the program sends them:
 
@@ -225,6 +258,48 @@ The wheel is 0.1.5 plus three observer fixes (`vendor/*.patch`, "aa"):
   - Status: `done` · `blocked` · `failed:<error>` · `stopped: hit max_steps=N` · `turbo_unavailable: …`.
   - No `status:` line → failed.
 - **B9** `browser_doctor` may report `connected: false` until a tool first needs the browser.
+
+## 3.3 The model gateway (`assistant/gateway.py`, v3.2)
+
+Every model request leaves through one `Gateway`, installed per run with `gateway.use(gateway.for_config(cfg))`.
+Three senders route through it and none of them can send on its own: `decide.Decider`, `decide.ChatDecider`,
+`llm_inference._ask_model`, and the package's `policy._post` (wrapped by `jev.clean_requests`, which never calls the
+package's own sender, so the package's internal `range(3)` retries and its fixed 30 s `policy.CLIENT` are off the
+path). `gateway.required()` raises rather than fall back to an HTTP client of its own.
+
+| What | Where it comes from | Value |
+|---|---|---|
+| requests in flight | `limits.max_in_flight` | 1 |
+| minimum gap between request starts | `limits.min_interval_s` | 0.25 s |
+| attempts per request | `limits.max_attempts` | 3 |
+| retried on | — | 429, 529, any 5xx, a timeout, no connection |
+| never retried | — | every other 4xx, and 401/402/403 (§4.3) |
+| wait before a retry | `Retry-After` if ≤ 30 s, else | 2 s, then 6 s |
+| timeout, System One | `gateway.timeouts[JEV]` | 20 s, or `models.local.timeout` on the local route |
+| timeout, chat | `gateway.timeouts[CHAT]` | 45 s (`LLM_INFERENCE_TIMEOUT`) |
+| questions per System One request | `jev.max_questions_per_request` | 24; above it the judgment is split and the parts go one after another |
+
+- **A model rotation hands over before it retries.** A chat request passes `attempts=1` while the rotation still has
+  an untried model, so a rate-limited model costs one attempt rather than three and 8 s of waiting; only the last
+  model in the order gets the full ladder. This is still one retry layer — another model is a different request.
+- **One logging point.** The Gateway logs every attempt (§6.2, §6.3) and picks the file by body shape: `state` +
+  `questions` is a System One request, `messages` is a chat request. No sender logs for itself.
+- **Counters**, per run and per job: requests, attempts, failures, cost and the highest number in flight, plus the
+  System One / chat split and the number of fallback decisions. Cost is what the gateway reported (`usage.cost`, or
+  Vercel's `provider_metadata.gateway.cost`); OpenRouter needs no usage-accounting flag. With no reported cost it is
+  estimated from `[prices]` and marked "estimated" in the report.
+- **`provider.require_parameters`** is added to chat requests on the OpenRouter route only, so the request is routed
+  only to a provider that supports every parameter sent.
+
+## 3.4 One Chrome connection per run (D13, v3.2)
+
+The package holds one CDP websocket per process and shares it across sessions, so a run was always one connection;
+what it lacked was a handshake long enough for a person to click "Allow remote debugging?" (its own budget is
+`max(60, call_timeout)` = 60 s, with no environment variable to change it). `jev.connect_chrome(cfg, 180)` opens
+that socket before preflight, with `cli.CONNECT_TIMEOUT`, after `cli.connect_once` prints
+`Chrome will ask "Allow remote debugging?" — click Allow (waiting up to 180 s).` It sets `MANAGER._cdp` directly
+instead of raising `call_timeout`, which is also every later CDP call's deadline. This is the fourth touch of the
+package's internals and is covered by `contract_check`.
 
 ## 4. Safety layer
 
@@ -265,6 +340,23 @@ The wheel is 0.1.5 plus three observer fixes (`vendor/*.patch`, "aa"):
   - `CAPTCHA_PRESENT` (assert): a reCAPTCHA, hCaptcha or Turnstile iframe or container.
 
   A unit test forbids DOM assignment, `.submit`, `.click`, `dispatchEvent`, `fetch`, `XMLHttpRequest` and `location` in any probe.
+
+- **4.3 Clean stops** (`gateway.py`, v3.2; D15, D21). Three conditions end a run instead of one job. Each is a
+  `blockers.StopRun` subclass, which is what keeps it out of the `NeedsAttention` paths — a `NeedsAttention` writes a
+  record (folder move, tracker row, `job.md` note), and a stopped run must leave its current job untouched.
+
+  | Stop | Condition | Reason in the report |
+  |---|---|---|
+  | `ProviderOutage` | 3 requests in a row fail after all attempts, or 5 of the last 10 | `provider outage — <route> HTTP <status>: <rule>` |
+  | `BudgetExceeded` | the run's model spend reaches `budget.max_usd_per_run`, checked before each request | `spend cap $1.00 reached` |
+  | `CreditOrKey` | HTTP 401, 402 or 403, never retried | `<host> rejected the key / refused the account (HTTP n: <what the provider said>) — check the key / add credit on <route>` |
+
+  In every case: the current job gets no record, its tab stays as it is, queued jobs stay at "Resume Built", the
+  report names the reason and the exit code is 3. A stop during preflight is a stop too, not a preflight failure.
+  403 is included because Vercel AI Gateway answers it for an account with no card, which no retry or other model
+  fixes. Because a stop can be raised inside the package's own worker thread — where `Jev.call`'s broad
+  `except Exception` would turn it into an `error(...)` string — the Gateway keeps the first stop and `Jev.call`
+  re-raises it on the run's thread after every browser call.
 
 ## 5. Per-job algorithm
 
@@ -317,23 +409,35 @@ The outcome:
 - **The request:** TypeSafe's System One shape, `{model, state, questions}`. Questions are `noul` (a yes/no probability), `choice` (criteria → choice, confidence, probabilities) or `score`.
 - **Endpoints:**
   - vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone`, model `typesafe-ai/jev`, `AI_GATEWAY_API_KEY`;
-  - openrouter: `https://openrouter.ai/api/v1/systemone`, model `typesafe/jev-1.13`;
+  - openrouter: `https://openrouter.ai/api/alpha/decisions`, model `typesafe/jev-1.13` (the System One
+    route on OpenRouter; `api/v1/systemone` is not one — DISCOVERY 2026-09-28);
   - local (user decision 2026-09-28): `models.local.base_url` + `/v1/systemone`, model `kev-latest`, no key — a
     [Kev](https://github.com/jaredpalmer/kev) server on the user's Mac. Same request and answer shapes, so only the
     URL changes; the state is sent as an object (Kev renders one as labeled text), the state limit is
-    `models.local.state_chars`, the timeout `models.local.timeout`, and the retry ladder `LOCAL_RETRY_WAITS = (2, 5)` s,
-    because a server on this machine is never rate-limited. Preflight reads `GET /v1/models` first.
-- **Batching:**
-  - The state is cut to `STATE_CHARS = 60_000` characters, text first (Jev's context is 32K tokens).
-  - Questions go in batches of `BATCH = 4`, `PARALLEL = 4` in flight. TypeSafe fails a whole request when one question fails (§13.1).
-  - Each batch retries on 0/429/5xx after `RETRY_WAITS = (2, 5, 15, 30, 60)` s.
-- **Failure:** any other error, or a missing or malformed answer, raises `DecisionError`.
-- **The log:** every batch goes to `runs/<ts>/decisions.jsonl` (topic, ms, questions, compact answers, usage, error), with no key.
-- **Totals:** calls and cost (`usage.cost` or `provider_metadata.gateway.cost`) go into the report.
+    `models.local.state_chars` and the timeout `models.local.timeout` (which is the Gateway's System One timeout on
+    this route, in place of the 20 s a cloud route gets). Preflight reads `GET /v1/models` first.
+- **One request per judgment** (v3.2). The state is cut to `STATE_CHARS = 60_000` characters, text first (Jev's
+  context is 32K tokens), or to `models.local.state_chars` on the local route. A judgment is **one** request, split
+  only above `jev.max_questions_per_request = 24` and sent in parts one after another — TypeSafe fails a whole
+  request when any one question fails (§13.1). `BATCH`, `PARALLEL`, the thread pool and the `RETRY_WAITS` /
+  `LOCAL_RETRY_WAITS` ladders are gone: the queue, the attempts and the timeout are the Gateway's (§3.3).
+- **Failure:** a request that fails after all attempts goes to the chat fallback (§6.0b); with no fallback, or when
+  that fails too, it raises `DecisionError`. A missing or malformed answer is a `DecisionError` and never a guess —
+  and it does not count as a provider failure, because the model did answer.
+- **The log:** every attempt goes to `jev_inference_logs.json` (§6.3), written by the Gateway.
+- **Totals:** calls, fallback decisions and cost go into the report (§8.5).
 - **Topics:** `page`, `answers`, `questions`, `fill`, `readback`, `preflight`.
 - **Thresholds** (`decide.THRESHOLDS`, yes/no questions): submitted 0.7 · applied 0.7 · covered 0.5 · actionable 0.5 · validation 0.6 · app_field 0.5 · cover_letter 0.6 · submit_button 0.5 · registration 0.6 · placeholder 0.6 · must_not_generate 0.4 · resume_upload 0.6.
 - **Choices:** the top choice decides.
 - **`decide.narrow`:** asks a choice again over only its two likeliest options (plus "none").
+
+**6.0b The chat fallback** (`decide.ChatDecider`, v3.2; D19). When a System One request fails after all of the
+Gateway's attempts, the same typed questions go **once** to the chat route's models. The answer JSON is per question
+— `{"type": "noul", "noul": p}` or `{"type": "choice", "choice": k, "probabilities": {...}, "confidence": c}` — so
+`Answer.parse` reads it unchanged and nothing downstream knows which backend answered. Its calls are chat calls and
+go to `llm_inference_logs.json` (D4). The breaker counts the pair as **one** request: a decision the fallback
+rescued is not a failure, and one both lost is not two. `decider.fallback = "none"` turns it off. The report shows
+`Decisions by fallback: N`.
 
 **6.1 LinkedIn job page** (`classify_entry`):
 - `signed_out`: the URL contains `/login`, `/authwall`, `/checkpoint` or `/uas/`;
@@ -518,9 +622,13 @@ Then:
 
   Terminal line per job: `✓ parked  <Company> – <Title>` or `⚠ needs attention  <Company> – <Title>: <reason>`, then the report path.
 
-  Exit codes: 0 all parked · 1 preflight failed · 2 at least one needs attention · 3 stopped (alarm, signed out, tracker changed on disk, folder clash, hung call).
+  Exit codes: 0 all parked · 1 preflight failed · 2 at least one needs attention · 3 stopped (alarm, signed out,
+  tracker changed on disk, folder clash, hung call, or one of the three clean stops of §4.3 — a provider outage,
+  the spend cap, or a key/credit failure).
 
-  Logs: `calls.jsonl` (every package call), `decisions.jsonl` (every Jev batch), `answers/`, `shots/`.
+  Logs, per run (`_run/`) and per job (`<job folder>/`): `browser_actions.jsonl` (every package call),
+  `jev_inference_logs.json` (§6.3) and `llm_inference_logs.json` (§6.2), both written by the Gateway,
+  plus `answers.json` and `screenshot.jpg` for a job that reached a form.
 - **8.6 Requeue** (`records.requeue`): for each job folder in `Needs-Attention/` (or one job):
   - Status → "Resume Built";
   - the "Needs Attention: …" Notes line is removed;
@@ -588,6 +696,25 @@ T0–T10 of spec v2 were built and handed over on 2026-09-23. The main changes s
 C1 no tab groups · C4 tracker saved after every job · C7 the agent clicks the step's Next (one action per goal) · C8 a blocked job's tab stays open · C10 `policy.prefill` · C14 closed or already applied → Needs Attention, no retry · C15 cover letter: text → generated; optional file → empty; required file → blocker · C16 demographics only from the Scratch Pad · C19 LinkedIn signed out mid-run → exit 3, job untouched · C20 free text ≤ `free_text_max_chars` without a maxlength · C21 `JEVMCP_MAX_ACTIONS=2000` · C22 uncovered optional field → empty, listed in the note · C23 experience totals only as `computed` · C24 cookie banners: the agent declines optional cookies · C25 the resume input is Jev's pick, then narrowed, then the LLM inference's.
 
 ## 13. Main problems and challenges
+
+**P1 update (2026-09-28).** P1 fixed the request volume and the failure handling below; it did **not** get a job
+parked, and could not, for a reason the user chose knowingly:
+
+- **13.1 is fixed.** One `Gateway` (§3.3) is the only sender: one request in flight, one retry layer of 3 attempts,
+  0.25 s apart. A goal step is now at most 6 HTTP requests, down from ~18; batching is gone, so a judgment is one
+  request per 24 questions rather than one 5-wait ladder per 4. Measured in `tests/test_gateway.py` against a local
+  HTTP server, not live.
+- **13.2 is handled, not removed.** A provider that is out now stops the run cleanly instead of sending jobs to
+  Needs Attention one by one (§4.3), and a chat model answers the System One questions when the System One model
+  fails (§6.0b). The free models are out of the defaults (D14).
+- **13.6 is fixed.** One "Allow remote debugging?" click per run, with a 180 s budget (§3.4).
+- **Still open, and the blocker for a parked job:** the account has no paid System One credit (OpenRouter 402,
+  Vercel 403), so the working route is a **kev-0.8b** server on this Mac, which answers `kind="other"` at 0.12 on a
+  real LinkedIn posting. No job passes the entry decision, and the chat fallback does not help — Kev answers badly
+  rather than failing, and the fallback fires only on a failure. A stronger or fine-tuned System One model is P3/P4.
+- **Not verified live this phase, by user instruction** (no test may reach a real API): the System One contract test
+  and the per-model LLM inference calls of P1 T7, and whether large requests fail on OpenRouter. Details and the
+  full deviation list are in `DISCOVERY.md` (2026-09-28) and `recore/HANDOVER.md`.
 
 **P0 update (2026-09-28):** P0 added observability (the per-run/per-job inference logs) and the rename, and made the System One provider configurable, but did **not** fix the problems below — they are P1–P4. Still true: no job has reached the parked final step in a real run. New blocker found this phase: on the working keyless route, **kev-0.8b misclassifies the LinkedIn entry page** (`kind="other"` at 0.12, flat distribution, although the Easy Apply control was in its State), so no job gets past the entry decision. Paid Jev is unavailable on the account (OpenRouter 402, Vercel 403). So a live end-to-end form-fill is still unproven; it needs a stronger or fine-tuned System One model (P3/P4). Details in `recore/HANDOVER.md`.
 

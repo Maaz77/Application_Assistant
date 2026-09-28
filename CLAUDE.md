@@ -47,7 +47,7 @@ A plain venv is used, because Poetry's pyenv shim is broken on this Mac. The bro
 .venv/bin/python -m assistant.contract_check             # package browser_* signatures vs what jev.py expects
 ```
 
-Exit codes: 0 all parked, 1 preflight failed (nothing written), 2 some job needs attention, 3 run stopped (alarm, signed out, tracker changed on disk, folder clash, hung browser call).
+Exit codes: 0 all parked, 1 preflight failed (nothing written), 2 some job needs attention, 3 run stopped (alarm, signed out, tracker changed on disk, folder clash, hung browser call, or one of the three clean stops: a provider outage, the spend cap, a key/credit failure).
 
 Tests (markers are defined in `pyproject.toml`; there is no linter configured):
 
@@ -60,9 +60,28 @@ Tests (markers are defined in `pyproject.toml`; there is no linter configured):
 
 `tests/test_model_access.py` has no `live_model` marker on purpose (the user removed it; do not restore it), so a plain `pytest` makes real OpenRouter calls through it. Deselect it with `--deselect tests/test_model_access.py` when that isn't wanted.
 
+## The model gateway
+
+Every model request — `decide.Decider`, `decide.ChatDecider`, `llm_inference`, and the browser package's own
+`policy._post` — leaves through one `Gateway` (`assistant/gateway.py`, installed per run by `gateway.use`). Nothing
+else may send: `gateway.required()` raises instead of falling back to an HTTP client, and `tests/test_no_bypass.py`
+seals off both `httpx.post` and the package's `policy.CLIENT` to prove it. The Gateway owns the queue
+(`[limits] max_in_flight`, `min_interval_s`), the **only** retry layer (`max_attempts`, on 429/5xx/timeout/no
+connection, waiting `Retry-After` ≤ 30 s else 2 s then 6 s), the per-kind timeout (System One 20 s, or
+`models.local.timeout` on the local route; chat 45 s), the counters the report prints, and the single call to
+`inference_log`. Do not add a retry, a queue or a log line to a sender — they all belong here.
+
+Three conditions end a run instead of one job (`[budget]`, `gateway.ProviderOutage/BudgetExceeded/CreditOrKey`).
+Each subclasses `blockers.StopRun`, which is what keeps it out of the `NeedsAttention` paths in `cli.py` and
+`fill.py` — a `NeedsAttention` writes a record, and a stopped run must leave its job untouched. A stop raised on the
+package's worker thread is kept in `gateway.tripped` and re-raised by `Jev.call` on the run's own thread.
+
+`decide.ChatDecider` (`[decider] fallback`) answers the same typed questions with the chat models when the System
+One model fails; the breaker counts the pair as one request.
+
 ## Keys and models
 
-`.env` (git-ignored) holds `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` (Vercel AI Gateway) and, only when the local Kev server was started with one, `KEV_API_KEY`; which one each model call uses follows `models.chat_route` and `models.system_one_decision_provider`. `config.toml` is strict: unknown keys are errors. `models.chat_route` (`openrouter` or `vercel`) picks who serves the chat models, and with it the `[models.openrouter]` or `[models.vercel]` table, the key (`config.chat_key`) and the URL (`config.chat_url`); `cfg.models.llm_inference`/`text_helper` are properties that read the active table. Each is a list of models tried in turn (`rotation.Rotation`; the text helper's rotation is a wrap of the package's `policy.text_for` installed by `jev.load()`). `models.system_one_decision_provider` picks who serves the System One decision model, and each route names it differently: `typesafe-ai/jev` on Vercel AI Gateway, `typesafe/jev-1.13` on OpenRouter, `kev-latest` on `local` — a [Kev](https://github.com/jaredpalmer/kev) server on the user's Mac (`[models.local]`: `base_url`, `state_chars`, `timeout`), which serves the same System One API (`POST /v1/systemone`) and needs no key, so only the URL changes (`decide.endpoint`, `jev.agent_route`). On that route the state is sent as an object, not as a JSON string (Kev renders objects as labeled text), the package's fixed 30 s client timeout is replaced (`jev.set_call_timeout`), and preflight first reads `GET /v1/models` (`decide.server_card`). Never print keys: `browser_actions.jsonl` redacts the OpenRouter key, and the inference logs (`llm_inference_logs.json`, `jev_inference_logs.json`) never contain a key.
+`.env` (git-ignored) holds `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` (Vercel AI Gateway) and, only when the local Kev server was started with one, `KEV_API_KEY`; which one each model call uses follows `models.chat_route` and `models.system_one_decision_provider`. `config.toml` is strict: unknown keys are errors. `models.chat_route` (`openrouter` or `vercel`) picks who serves the chat models, and with it the `[models.openrouter]` or `[models.vercel]` table, the key (`config.chat_key`) and the URL (`config.chat_url`); `cfg.models.llm_inference`/`text_helper` are properties that read the active table. Each is a list of models tried in turn (`rotation.Rotation`; the text helper's rotation is a wrap of the package's `policy.text_for` installed by `jev.load()`). `models.system_one_decision_provider` picks who serves the System One decision model, and each route names it differently: `typesafe-ai/jev` on Vercel AI Gateway, `typesafe/jev-1.13` on OpenRouter, `kev-latest` on `local` — a [Kev](https://github.com/jaredpalmer/kev) server on the user's Mac (`[models.local]`: `base_url`, `state_chars`, `timeout`), which serves the same System One API (`POST /v1/systemone`) and needs no key, so only the URL changes (`decide.endpoint`, `jev.agent_route`). On that route the state is sent as an object, not as a JSON string (Kev renders objects as labeled text), and preflight first reads `GET /v1/models` (`decide.server_card`). Never print keys: `browser_actions.jsonl` redacts the OpenRouter key, and the inference logs (`llm_inference_logs.json`, `jev_inference_logs.json`) never contain a key.
 
 ## graphify
 

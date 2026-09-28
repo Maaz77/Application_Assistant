@@ -1,65 +1,150 @@
-# Re-core HANDOVER — end of P0
+# Re-core HANDOVER — end of P1 (code complete, live gate not yet run)
 
-- **Phase:** P0 — rename "answer engine" → "LLM inference"; per-run/per-job Jev and LLM inference logs; per-job run folder. No behaviour change was the phase rule; several infrastructure changes were pulled in at the user's request (see Deviations).
-- **Date:** 2026-09-28
-- **Branch:** `recore/p0-rename-and-inference-logs`
-- **Build spec:** v3.1
+- **Phase:** P1 — paid routes, one model gateway, circuit breaker, spend cap, one Chrome connection per run.
+- **Date:** 2026-09-29 (the work and the DISCOVERY entries are dated 2026-09-28/29)
+- **Branch:** `recore/p1-infrastructure`
+- **Build spec:** v3.2
+- **State:** every task implemented, the offline suite green. The user has **not** yet run the live gate.
 
-`recore/` did not exist; the user chose not to copy the phase files into the repo, so this HANDOVER.md is the only file in `recore/`. The phase files live in `~/Downloads/` (`00_common.md`, `P0_…` … `P5_…`).
+The phase files still live in `~/Downloads/` (`00_common.md`, `P0_…` … `P5_…`); `recore/` holds only this file.
+
+## The three user decisions that shaped this phase
+
+P1's text assumes paid OpenRouter Jev (D14) and a `--live` contract test. Asked before any code was written, the
+user chose otherwise, and everything below follows from that:
+
+1. **System One stays `local`** (a Kev server on this Mac), not paid OpenRouter Jev.
+2. **The chat route stays `vercel`** (`mistral/mistral-small`, `mistral/mistral-nemo`), not P1's
+   `deepseek/deepseek-v4.1-flash` + `openai/gpt-5.4-mini`. The paid OpenRouter models are configured but are not the
+   default, and no `:free` model remains anywhere (T7).
+3. **No test may reach a real API.** "Use vercel for any LLM text inference completion. The tests and fixtures must
+   not hit the real api. … manage it so that it is best economic-wise."
+
+Consequence, stated to the user before starting and repeated here: **A3 (the live gate's three jobs) cannot be met
+this phase.** kev-0.8b answers `kind="other"` at 0.12 on a real LinkedIn posting (P0 finding), so no job passes the
+entry decision, and the chat fallback does not rescue it — Kev answers *badly*, not *failingly*, and the fallback
+fires only on a failure. P1 itself says "the jobs do not have to park in P1", so the gate is reduced to what T2–T6
+can show (see the live gate below).
 
 ## What changed
 
-**Modules**
-- `assistant/answers.py` → `assistant/llm_inference.py`; `prompts/answer_engine.md` → `prompts/llm_inference.md` (content unchanged). `AnswerEngineError` → `LLMInferenceError`, `ENGINE_TIMEOUT` → `LLM_INFERENCE_TIMEOUT`. Value/action names kept "answer" (`Question.answer`, `PageAnswers`, `check_answers`, `judge_answers`, `judge_questions`, `answers.json`, `call_engine`, `answer_page`).
-- **New** `assistant/inference_log.py` (stdlib only): `start_run`, `set_scope`, `scope`, `gateway_of`, `log_llm` (§6.2), `log_jev` (§6.3). Module-level scope (not a contextvar, §6.4); atomic rewrite per append; strings scrubbed of lone surrogates.
-- `decide.py`: `log_jev` in the retry loop; `decisions.jsonl` and its writer removed; state sent as a string (OpenRouter) / object (local Kev); `respan_questions` flattening for non-Jev decisions models; `adapt_questions_for`; `endpoint`/`start_hint`/`server_card` and a route-aware `Decider` (url, state limit, timeout, retries from the route) for the Kev commit.
-- `llm_inference.py`: `log_llm` per HTTP attempt (json_schema, json_object fallback, transport error).
-- `jev.py`: `clean_requests` extended to log the package's own System One / text-helper calls and to string-ify / flatten their bodies on the OpenRouter route; the goal agent points at the local Kev server on the "local" route.
-- `cli.py`: `inference_log.start_run`; per-job `inference_log.scope`; `browser.calls_log` → `<scope>/browser_actions.jsonl`; `answers/<f>.json` → `<job>/answers.json`; `shots/<f>.jpg` → `<job>/screenshot.jpg`; `_probe_llm_inference`; `preflight()` is a generator that probes LLM inference, then the System One model, then Chrome.
-- `report.py`: Jev counts from in-memory counters (no `decisions.jsonl`); names the decision model; omits a zero cost.
-- `run_kev_server.command`: clones/updates `~/kev` and serves `kev-0.8b`.
+**New module `assistant/gateway.py`** (T2). `Gateway.send(kind, url, body, headers, …)` is the only way a model
+request leaves the program. It owns the queue (`limits.max_in_flight = 1`, `limits.min_interval_s = 0.25`), the
+single retry layer (`limits.max_attempts = 3`, on 429/529/5xx/timeout/no connection; `Retry-After` ≤ 30 s else 2 s
+then 6 s), the per-kind timeout (System One 20 s, or `models.local.timeout` on the local route; chat 45 s), the cost
+accounting, the counters, the single `inference_log` call, and the three clean stops. `gateway.required()` raises
+rather than fall back to an HTTP client; `gateway.private(post=…)` gives a test-injected sender a Gateway of its own
+so nothing has a way around one.
 
-**Config keys** (`config.toml`, strict)
-- `models.<route>.answer_engine` → `models.<route>.llm_inference` (old key rejected with a message).
-- `models.jev` / `models.jev_route` → `models.<route>.system_one_decision_model` / `models.system_one_decision_provider` (per-route, like `llm_inference`).
-- New provider `"local"` with `[models.local]`: `base_url`, `system_one_decision_model`, `state_chars`, `timeout`. `config.local_key` (KEV_API_KEY, optional) and `KEYLESS_PROVIDERS` so preflight asks for no key on that route.
+**Senders rewired.**
+- `decide.Decider`: `BATCH`, `PARALLEL`, the `ThreadPoolExecutor`, `RETRY_WAITS`, `LOCAL_RETRY_WAITS` and `TIMEOUT`
+  are deleted. A judgment is one request, split only above `jev.max_questions_per_request = 24` and sent in parts
+  one after another.
+- `llm_inference._ask_model`: sends through the Gateway; its own `_httpx_post`, `_retry_after` and `RETRY_AFTER_MAX`
+  are deleted. `LLM_INFERENCE_TIMEOUT` 120 → 45 s. On the OpenRouter route the body gains
+  `provider: {require_parameters: true}`.
+- `jev.clean_requests`: the package's `policy._post` is answered from the Gateway and **never calls the package's
+  own sender**, so its internal `range(3)` and its fixed 30 s `policy.CLIENT` are off the send path.
+  `jev.set_call_timeout` was deleted with them. Failures are re-raised as the package's own `TurboUnavailable` with
+  the message strings `TRANSIENT_GOAL_RE` matches.
+- `jev.Jev.goal`: one retry (`GOAL_RETRY_WAIT = 2 s`) instead of the five-wait ladder.
+- **Logging happens once**, in the Gateway, classified by body shape (`state`+`questions` = System One,
+  `messages` = chat). Every sender's own `log_jev`/`log_llm` call was removed; leaving them would have double-logged.
 
-**Run folder** (`runs/<ts>/`): `_run/` for preflight+queue, `<job folder>/` per job, each with `jev_inference_logs.json`, `llm_inference_logs.json`, `browser_actions.jsonl`; `answers.json` and `screenshot.jpg` per job when produced. `decisions.jsonl`, `calls.jsonl`, `answers/`, `shots/` are gone.
+**Clean stops** (T3). `ProviderOutage` (3 in a row, or 5 of the last 10), `BudgetExceeded`
+(`budget.max_usd_per_run`, checked before each request) and `CreditOrKey` (401/402/**403**, never retried) all
+subclass `blockers.StopRun`, so `cli.run`'s existing handler gives exit 3, a report reason, and **no record** for
+the current job. `gateway.tripped` is sticky and `Jev.call` re-raises it on the run's thread, because a stop raised
+inside the package's worker thread would be swallowed by that method's broad `except Exception`. A stop during
+preflight is a stop (exit 3), not a preflight failure (exit 1).
 
-## Live gate evidence
+**Chat fallback** (T4). `decide.ChatDecider` answers the same typed questions with the chat route's models and
+returns the shapes `Answer.parse` already reads. The Decider asks System One first and falls back once. Both the
+System One send and the fallback send defer their verdict, and the Decider reports **one** verdict for the pair.
 
-- **Preflight** `runs/20260928-220412/`: `_run/jev_inference_logs.json` (Kev probe, `kev-latest`, exact §6.3 keys) and `_run/llm_inference_logs.json` (`provider=vercel/mistral`, full messages+completion, exact §6.2 keys). No key strings in either.
-- **Job run** `runs/20260928-221437/` (`--no-record --job` Linda AI): went to Needs Attention `load_failure` at the entry decision. `<job>/jev_inference_logs.json` (3 entries, exact §6.3 keys, object State) + `browser_actions.jsonl`; no forbidden files; nothing submitted; tab left open. No `llm_inference_logs.json`/`answers.json`/`screenshot.jpg` because the job never reached a form (no LLM call).
-- **Numbers:** 1 job; 0 parked; 1 Needs Attention (`load_failure`); ≤ 3 System One requests for the entry; 0 LLM calls in the job; cost ≈ $0 (local Kev free; one Mistral probe in `_run`).
-- **Offline:** 256 unit + 50 browser pass; `contract_check` clean; `run --dry-run` unchanged; T6 (`test_baseline_p0`) green.
+**One Chrome connection** (T5). `jev.connect_chrome(cfg, 180)` + `cli.connect_once`, called before preflight.
+
+**Report** (T6). Summary gains the model-request totals, the spend (reported/estimated), the highest number in
+flight and `Decisions by fallback: N`; Timings gains a per-job breakdown.
+
+**Config** (T1). New strict sections `[limits]`, `[budget]`, `[jev]`, `[decider]`, `[prices]`.
+
+## Two defects the new tests found
+
+1. `Gateway.release()` was dead code: `send` frees the queue slot before returning, so the chat fallback's send was
+   never nested and could not self-deadlock. Deleted; the test that proved it stayed, because a regression there
+   would hang rather than fail.
+2. `llm_inference` still carried an `httpx` sender no longer on any path. A static test now forbids `httpx.post` in
+   any model-sending module, so a second path cannot be reintroduced quietly.
+
+## Evidence
+
+**Offline:** 324 unit + 50 browser pass; `contract_check` clean; `run --dry-run` unchanged (7 jobs);
+`test_baseline_p0` green after the one intended golden change (`provider.require_parameters`).
+
+**New tests, 59 functions in four files:** `tests/test_gateway.py` (30, against a real local `http.server`),
+`tests/test_fallback.py` (16), `tests/test_clean_stop.py` (6, one of them parametrized over the three stops, on
+temp copies of the tracker and the job folders), `tests/test_no_bypass.py` (7, both HTTP clients sealed off plus a
+static check), plus five P1 config-default tests in `tests/test_config.py`.
+
+**Changed assertions**, each required by P1 and recorded in `DISCOVERY.md`: `test_decide`'s batching and retry
+ladders; `test_jev`'s goal retry; the 401 assertions in `test_answers` (now a clean stop, not one model's failure).
+No guard, tripwire or records test was touched.
+
+**Measured, not live:** worst case per goal step is now at most 6 HTTP requests (was ~18 — spec §13.1).
+
+**No live numbers at all this phase.** Nothing here ran against a real provider or a real site.
 
 ## Known issues / open questions
 
-- **kev-0.8b cannot classify a real LinkedIn posting.** On Linda AI it answered `kind="other"` at confidence 0.1238 with a flat distribution, *although* the "Easy Apply to this job" control was in the State it received (State len 3152, well under the 12000 cut). So no job gets past the entry decision with kev-0.8b. Root cause is model capacity/range (Kev's README caps trained state at ~384 tokens; the page state is ~3000). A live **end-to-end form-fill** (an LLM call + `answers.json` + `screenshot.jpg` inside a job folder) is therefore **proven only by unit/browser tests, not live**. Needs a stronger or fine-tuned System One model — P3/P4.
-- **Paid Jev is unavailable on this account:** OpenRouter `typesafe/jev-1.13` → HTTP 402 (no credits); Vercel `typesafe-ai/jev` → HTTP 403 (free tier needs a card). Kev-local is the working route today.
-- **All of build spec §13 (Jev request volume, provider limits, end-to-end) is still open** — P0 did not touch it; it is P1–P4.
+- **kev-0.8b still cannot classify a real LinkedIn posting.** Unchanged from P0, and the reason no job can park.
+  Needs a stronger or fine-tuned System One model (P3/P4). The logged `jev_inference_logs.json` entries are already
+  in the shape `kev.train` takes.
+- **Paid System One is unavailable on the account:** OpenRouter 402, Vercel 403.
+- **P1 T1's single endpoint is only half-done.** On the `local` route both senders already share one URL
+  (`models.local.base_url` + `/v1/systemone`), which is the task's goal. The OpenRouter value stays
+  `https://openrouter.ai/api/alpha/decisions`; P1 asked for `api/v1/systemone`, but DISCOVERY 2026-09-28 measured
+  that this is not the System One route, and the contract test that would settle it needs a real API.
+- **Not measured, because no test may reach a real API:** whether large requests fail on OpenRouter (the
+  `max_questions_per_request = 24` split is P1's number, justified only by the 2026-09-24 Vercel evidence), and the
+  behaviour of `provider.require_parameters` when no provider qualifies.
+- **`tests/test_model_access.py`** still has no `live_model` marker, by the earlier user decision recorded in
+  `CLAUDE.md`. It is the one file a plain `pytest` spends money through. Left untouched; ask the user before
+  changing it.
 
-## Deviations from the phase file (P0 said "no behaviour change")
+## Deviations from the phase file
 
-Each was user-directed, to get past the credit blocker or on explicit request; all are in `DISCOVERY.md` with dates:
-1. System One model moved Vercel → OpenRouter → local Kev (overrides settled decisions **D14** "Jev typesafe/jev-1.13, no `:free`" and **D19** "Jev only via the gateway").
-2. System One `state` sent as a JSON string on the OpenRouter route (respan/span-01-lite rejects an object), kept an object on local Kev.
-3. `respan_questions`: flatten question `instructions`/`criteria` to strings for non-Jev OpenRouter decisions models.
-4. **LLM inference preflight probe** — a live check that the chat model answers. This is a P1 item pulled forward.
-5. `preflight()` converted to a generator (each ✓ prints before a later check fails).
-6. Config **role rename** `jev`/`jev_route` → `system_one_decision_model`/`system_one_decision_provider` (Jev is one instance of a System One decision model).
-7. New **`[models.local]` Kev provider** (server, probe, `run_kev_server.command`) — new infrastructure, arguably P1 scope.
-8. T6 baseline folds the deliberate screenshot-filename move; `test_decide`/`test_cli` assertions rewritten for the new names/shapes.
+1. **T1's defaults** — the user kept `local` + `vercel` instead of paid OpenRouter (above).
+2. **T1's contract test and T7's `--live` items** — not implemented; no test may reach a real API.
+3. **A1's "the `--live` contract tests pass"** — dropped, for the same reason.
+4. **T3 covers 403 as well as 401/402** — Vercel answers 403 for an account with no card, which is the same
+   condition and is not cured by retrying or by another model.
+5. **T2's timeout for the local route** — `models.local.timeout` (120 s), not the 20 s P1 names for System One: a
+   pass on an Apple GPU is seconds, not a data-centre's milliseconds.
+6. **A model rotation hands over before it retries** — a chat request passes `attempts=1` while an untried model
+   remains. P1 caps attempts per request; this keeps the cheaper behaviour the live 2026-09-24 evidence encodes,
+   and is still one retry layer (another model is a different request).
+
+## The live gate the user still has to run
+
+`LIVE_TEST.md` § "P1 re-core gate" has it in full. In short: start `./run_kev_server.command`, then
+`preflight` (one "Allow" click), then `run --no-record --limit 3`; check one "Allow" click for the whole run,
+`Highest number of requests in flight: 1`, spend under $1, no request over 3 attempts, no `:free` model in the
+logs, nothing submitted, and a clean untouched job if a provider failed. Every job ending in Needs Attention
+`load_failure` is expected on these settings and still passes.
 
 ## Commands the next session needs
 
 ```bash
-# env (venv + patched wheel), from Tools/Application_Assistant/
-.venv/bin/python -m assistant preflight                     # LLM inference + System One + Chrome
-./run_kev_server.command                                    # start local Kev before a run (downloads weights once)
-.venv/bin/python -m assistant run --no-record --job <URL>   # fill + park one job, no writes
-.venv/bin/pytest -m "unit or browser" -q                    # offline suite (throwaway Chrome on 9223)
-.venv/bin/python -m assistant.contract_check                # package hooks still applied
+# from Tools/Application_Assistant/
+./run_kev_server.command                                    # the System One route is "local": start it first
+.venv/bin/python -m assistant preflight                     # LLM inference + System One + one Chrome connection
+.venv/bin/python -m assistant run --no-record --limit 3     # the P1 gate
+.venv/bin/pytest -m "unit or browser" -q                    # the offline suite — never a plain `pytest`
+.venv/bin/python -m assistant.contract_check                # the four package hooks still apply
 ```
 
-Next phase is **P1** (`recore/P1_infrastructure.md`): paid routes, one model gateway, circuit breaker, spend cap, one Chrome connection per run. Note P1 assumes paid OpenRouter Jev; reconcile with the Kev-local route this phase added (decide whether Kev-local becomes the default System One provider or a fallback, and whether the credit issue is resolved).
+Next phase is **P2** (`P2_driver_guard_navigation.md`): an owned browser driver, the absolute never-submit guard,
+deterministic Easy Apply navigation. Note for P2: the package's text helper still rotates models inside
+`policy.text_for`, and that rotation does not know about `attempts=1`, so it gets the full ladder per model; P2
+removes the package from the send path anyway.

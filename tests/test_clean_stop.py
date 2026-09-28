@@ -104,3 +104,52 @@ def test_needs_attention_still_records_so_the_stop_is_what_is_special(workspace,
     base = workspace.base
     code = run_until(workspace, NeedsAttention("decision", "no answer"), monkeypatch, tmp_path)
     assert code == 2 and len(list((base / "Needs-Attention").iterdir())) == 2
+
+
+def test_a_stop_during_preflight_exits_three_with_a_report(workspace, monkeypatch, tmp_path):
+    """A rejected key shows up in preflight's own live probe. That is a stop, not a preflight failure: the report
+    says why and the exit code is 3, so a wrapper script can tell "add credit" from "your config is wrong"."""
+    cfg = workspace.cfg
+    monkeypatch.setattr(cli, "RUNS", tmp_path / "runs")
+    monkeypatch.setattr(cli, "_load_package", lambda *a: None)
+    monkeypatch.setattr(cli, "connect_once", lambda *a: None)
+    monkeypatch.setattr(cli, "Jev", lambda *a, **k: SimpleNamespace(calls_log=None))
+    monkeypatch.setattr(config_mod, "chat_key", lambda c: "k")
+
+    def preflight(browser):
+        raise G.CreditOrKey("openrouter.ai rejected the key (HTTP 401) — check the key / add credit on openrouter")
+        yield
+    monkeypatch.setattr(cli, "preflight", preflight)
+    args = SimpleNamespace(job=None, limit=None, no_record=False, dry_run=False, config=None)
+    assert cli.run(cfg, args) == EXIT_STOPPED
+    inference_log.start_run(None)
+    report = next((tmp_path / "runs").glob("*/report.md")).read_text()
+    assert "add credit on openrouter" in report
+    assert list((workspace.base / "Needs-Attention").iterdir()) == []
+
+
+def test_the_report_shows_the_model_rows_p1_asks_for(tmp_path):
+    """T6: the Summary totals and the per-job breakdown in Timings."""
+    from assistant.report import JobResult, Report
+    from datetime import datetime
+    from assistant.blockers import Parked
+    run = G.Counters(requests=9, attempts=11, failures=1, cost=0.0123, in_flight=1,
+                     jev_requests=7, chat_requests=2)
+    job = G.Counters(requests=4, attempts=5, jev_requests=3, chat_requests=1, cost=0.004)
+    r = Report(datetime(2026, 9, 28, 12, 0), gateway=SimpleNamespace(run=run), by_fallback=2,
+               decisions=(7, 0.0), decision_model="kev-latest",
+               results=[JobResult("Acme", "DE", "u", "f", 42, parked=Parked("u", "t", 2), models=job)])
+    md = r.write(tmp_path).read_text()
+    assert "- Model requests: 7 System One, 2 LLM inference (11 attempts, 1 failed)" in md
+    assert "- Model spend: $0.0123 (reported)" in md
+    assert "- Highest number of requests in flight: 1" in md
+    assert "- Decisions by fallback: 2" in md
+    assert "3 System One, 1 LLM, 5 attempts" in md          # the Timings row
+
+
+def test_an_estimated_spend_says_so(tmp_path):
+    from assistant.report import Report
+    from datetime import datetime
+    run = G.Counters(cost=0.5, estimated=True)
+    md = Report(datetime(2026, 9, 28, 12, 0), gateway=SimpleNamespace(run=run)).markdown()
+    assert "$0.5000 (estimated)" in md

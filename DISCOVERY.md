@@ -492,3 +492,150 @@ is fitted in distribution, so `decide.THRESHOLDS` (set for Jev) are not measured
   way back to Jev-level accuracy on these pages, and Kev's README measures 0.804 → 0.904 for one such run.
 - Not verified against a real Kev server (no Apple Silicon and no weights in this container): the wire contract was
   verified against Kev's own request models, and the first real check is `preflight` on the user's Mac.
+
+## One gateway for every model request (P1 T2, 2026-09-28)
+
+P1's evidence (build spec §13.1): one run sent 222 System One requests in 19 minutes, with four batches in flight
+and nested retry loops that could reach ~18 HTTP requests for a single goal step. The cause was three senders that
+each had their own queue, retries and timeout:
+
+| Sender | Queue | Retries | Timeout |
+|---|---|---|---|
+| `decide.Decider` | batches of `BATCH = 4`, `PARALLEL = 4` in flight | `RETRY_WAITS` = 2, 5, 15, 30, 60 s | 30 s |
+| `llm_inference._ask_model` | none (a model rotation) | one `Retry-After` wait | 120 s |
+| the package's `policy._post` | none | `range(3)` on 429/529/503, inside one call | 30 s, fixed in `policy.CLIENT` |
+
+**Worst case before:** a goal step asked the package's `_post`, which tried 3 times; our `Jev.goal` asked the whole
+goal again after each of 5 `RETRY_WAITS`; a judgment of 16 questions went out as 4 batches side by side, each with
+its own 5-wait ladder. 3 × 6 = 18 HTTP requests per goal step, and 4 concurrent connections per judgment.
+
+**Worst case now:** `Gateway.send` is the only sender. One request, at most `limits.max_attempts = 3` attempts,
+one at a time (`limits.max_in_flight = 1`), at least `limits.min_interval_s = 0.25` apart. A goal that took no step
+is asked again once (`jev.GOAL_RETRY_WAIT`), so a goal step is at most **6** HTTP requests, down from ~18, and a
+judgment of any size is at most 3 requests per 24 questions instead of one ladder per 4 questions. The package's own
+`range(3)` and its `policy.CLIENT` are no longer on any path: `clean_requests` answers every `_post` from the
+Gateway and never calls the package's `original`. `jev.set_call_timeout` was deleted with it — the local route's
+timeout is now `gateway.timeouts[JEV]` from `models.local.timeout`.
+
+**Batching is gone.** `BATCH`, `PARALLEL` and the `ThreadPoolExecutor` are deleted. A judgment is one request, split
+only above `jev.max_questions_per_request = 24` and sent in parts one after another. Whether large requests fail on
+OpenRouter is **not re-measured this phase**: the account has no System One credit there (402), and the working route
+is a Kev server on this Mac, which takes what it is given. The 2026-09-24 Vercel evidence (44 questions per request
+failed 5 of 6 times, 11 per request 7 of 12, 4 per request 4 of 33) is why the split exists at all; 24 is P1's number,
+and it stays unverified against a cloud provider until one is reachable.
+
+**A model rotation is not a retry layer, and hands over first.** With three attempts per request, a rate-limited
+model would cost 3 attempts and 8 s of waiting before the rotation tried a model that was free. So a chat request
+passes `attempts=1` while the rotation still has an untried model, and only the last model in the order gets the full
+ladder. This is still one retry layer: the next model is a different request, not a retry of this one. Evidence that
+it matters: `tests/test_answers.py` pins the old live behaviour (a 429 on `a:free` hands over to `b:free` at once,
+2026-09-24), and that behaviour is preserved.
+
+**Logging moved to one place.** `log_jev` in `Decider._one`, `log_llm` in `call_engine` and
+`jev._log_package_request` all logged their own attempt; with the Gateway sending, every one of them would have
+double-logged. The Gateway is now the single logging point and classifies by body shape, the test
+`jev._log_package_request` used (`state` + `questions` = System One, `messages` = chat). `_log_package_request`
+survives only for the no-Gateway path a test uses when it drives the package directly.
+
+**OpenRouter needs no usage-accounting flag.** Its docs (usage accounting, read 2026-09-28) say "Full usage details
+are now always included automatically in every response", and `usage: {include: true}` and
+`stream_options: {include_usage: true}` "have no effect". Cost is at `usage.cost`. So `[prices]` is only a fallback
+for a gateway that reports nothing, and a cost derived from it is marked "estimated" in the report.
+
+**`provider.require_parameters` is OpenRouter-only.** Added to chat requests on that route so OpenRouter routes only
+to a provider that supports every parameter sent, instead of one that silently drops `response_format` or
+`temperature`. Vercel AI Gateway has no such field, so the flag is gated on the route. This is the one intended
+change to `tests/golden/p0_baseline/model_bodies.json`; the golden was patched rather than regenerated, so any other
+drift would still fail T6.
+
+## Three clean stops, and why they are StopRun subclasses (P1 T3, 2026-09-28)
+
+`ProviderOutage` (3 requests in a row fail, or 5 of the last 10), `BudgetExceeded` (`budget.max_usd_per_run`,
+checked before each request) and `CreditOrKey` (401/402/403, never retried) all subclass `blockers.StopRun`.
+
+That choice is the whole design. `cli.run` already turns `StopRun` into exit 3 with the report written and **no**
+record for the current job, which is what D21 asks for. The alternative — a new exception family — would have had to
+survive five `except` sites that convert model failures into `NeedsAttention` (`cli.py` at the job level, `fill.py`
+in four places), and a `NeedsAttention` **writes a record**: it moves the folder, updates the tracker row and adds a
+`job.md` note. A breaker that recorded the job it stopped on would be worse than no breaker.
+`tests/test_clean_stop.py` asserts the outcome on temp copies of the tracker and the folders, including the contrast
+case (a `NeedsAttention` job still is recorded).
+
+**403, not only 401 and 402.** P1 names 401 and 402. Vercel AI Gateway answers **403** for an account with no card
+("Free tier users do not have access to this model", 2026-09-28), which is the same condition: not cured by waiting,
+not cured by another model. Treating it as a generic failure would spend three attempts and then trip the breaker
+with the wrong reason, so 403 is `CreditOrKey` too, and the provider's own message is carried into the stop reason.
+
+**A stop raised on the package's thread.** `Jev.call` catches `Exception` broadly and turns it into an
+`"error(...)"` string, so a stop raised inside `policy._post` would be swallowed there and the job would be recorded
+as Needs Attention. The Gateway therefore keeps the first stop (`gateway.tripped`) and `Jev.call` asks for it after
+every browser call, raising it on the run's own thread. The flag is also what makes the text helper's rotation stop
+trying further models after a stop.
+
+**A stop during preflight** is a stop, not a preflight failure: exit 3 with a report that names the reason, so
+"add credit" is distinguishable from "your config is wrong" (exit 1).
+
+## The chat fallback, and the verdict it shares (P1 T4, 2026-09-28)
+
+`decide.ChatDecider` answers the same typed questions with the chat route's models, returning the shapes
+`Answer.parse` already reads, so nothing downstream knows which backend answered. Its calls are chat calls and land
+in `llm_inference_logs.json` (D4).
+
+Two things were not obvious:
+
+1. **The verdict belongs to the pair.** T4 says the breaker counts a request as failed "only when both fail". The
+   fallback's own `send` therefore defers its verdict as well (`defer_verdict`), and the `Decider` reports one
+   verdict for the pair. Without that, one failed judgment fed the breaker twice and three consecutive rescued
+   decisions tripped an outage although every decision had been answered.
+2. **There is no nesting to deadlock.** `Gateway.release()` was written for the case where the fallback sends while
+   the System One request still holds the only queue slot. It cannot happen: `send` frees the slot before it
+   returns, so the fallback's send is a separate request. `release()` was deleted as dead code, and the test that
+   found it stayed, because a regression there would hang rather than fail.
+
+## How many CDP connections a run opens (P1 T5, 2026-09-28)
+
+**Answer: one per process, already.** `jev_ultrafast_mcp.browser.BrowserManager.cdp` (0.1.5+aa6, browser.py
+l.908–926) builds `self._cdp` lazily on first use and every session shares it; `browser_close(session)` closes that
+session's tab and leaves the socket open, and only `shutdown_browser=True` detaches, which this program never asks
+for. So preflight, the `tabbook` helper and every job session were always one websocket, and the single "Allow
+remote debugging?" prompt was already the only one.
+
+**What was actually wrong was the handshake budget.** `attach_chrome` is called with
+`open_timeout=max(60.0, cfg.call_timeout)` and `call_timeout` defaults to 30 s with **no environment variable** to
+change it, so a person had 60 s to find and click "Allow", not the 180 s `cli.CONNECT_TIMEOUT` promised — and the
+connection happened as a side effect of preflight's first `browser_open`, after the model probes had already run.
+
+`jev.connect_chrome(cfg, 180)` now opens that one socket explicitly, before preflight, and `cli.connect_once` prints
+P1's line first. It sets `MANAGER._cdp` directly rather than raising `call_timeout`, because `call_timeout` is also
+the default deadline of every later CDP call, and a 180 s default would turn a hung call into a three-minute stall.
+Reaching into `MANAGER._cdp` is a fourth touch of the package's internals, so it is listed in `contract_check`'s
+scope alongside the other three.
+
+## P1 deviations, and what the live gate can and cannot prove (2026-09-28)
+
+User decisions this phase, all recorded here because they override P1's own text:
+
+1. **The System One provider stays `local` (Kev on this Mac), not paid OpenRouter Jev.** P1 T1 and D14 assume
+   `typesafe/jev-1.13` on OpenRouter. The user chose to keep the keyless local route. Consequence, already known
+   from P0: kev-0.8b answers `kind="other"` at 0.12 on a real LinkedIn posting, so no job passes the entry decision
+   and **A3 (the live gate's "3 jobs") cannot be met this phase**. The chat fallback does not rescue it — Kev
+   answers badly rather than failing, and the fallback fires only on a failure. P1 itself says "the jobs do not have
+   to park in P1", so the gate is reduced to what T2–T6 can show: one "Allow" click, highest-in-flight = 1, no
+   request over 3 attempts, cost under $1, and a clean stop if a provider fails.
+2. **The chat route stays `vercel`** (`mistral/mistral-small`, `mistral/mistral-nemo`), not P1's
+   `deepseek/deepseek-v4.1-flash` + `openai/gpt-5.4-mini` on OpenRouter. The paid OpenRouter models are configured
+   in `[models.openrouter]` and no `:free` model remains anywhere (T7), but that table is not the default.
+   `[prices]` therefore carries the mistral prices as well.
+3. **No test may reach a real API** (user instruction). P1 T7's `--live` items — the System One contract test and one
+   LLM call per configured model on the `f02` fixture — are **not implemented**. Consequences:
+   - **A1's "the `--live` contract tests pass" is dropped.** Every new test runs against a local `http.server` or an
+     injected sender; the offline suite costs $0.
+   - **P1 T1's endpoint question is not settled.** T1 asks for one endpoint at
+     `https://openrouter.ai/api/v1/systemone` for both senders, contract-tested live. On the local route both senders
+     already share one URL (`models.local.base_url` + `/v1/systemone`), so the task's goal holds; but the OpenRouter
+     value stays `https://openrouter.ai/api/alpha/decisions`, which is what the 2026-09-28 entry above measured
+     (`api/v1/systemone` is not the System One route). Build spec §3.2 line 320 still said `api/v1/systemone` for
+     that route and has been corrected to match the code.
+   - `tests/test_model_access.py` still has no `live_model` marker, by the earlier user decision recorded in
+     `CLAUDE.md`; it is the one file a plain `pytest` would spend money through. It was left untouched, and the
+     phase's command is `pytest -m "unit or browser"`.

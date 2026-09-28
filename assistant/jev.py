@@ -248,22 +248,20 @@ def _log_package_request(url: str, body, resp, reason: str | None) -> None:
 _server = None
 _applied: dict[str, str] | None = None
 _text_helpers: tuple[str, ...] = ()
-_call_timeout: float | None = None
 _string_state: bool = True
 
 
 def apply_env(cfg: Config, key: str, cdp_url: str | None = None) -> None:
     """Scrub stray package variables from os.environ, then set the §3 values. Must precede load()."""
-    global _applied, _text_helpers, _call_timeout, _string_state
+    global _applied, _text_helpers, _string_state
     if _server is not None:
         raise RuntimeError("apply_env() after the package was loaded has no effect (config is fixed per process)")
     for k in [k for k in os.environ if k.startswith(STRIPPED_PREFIXES)]:
         del os.environ[k]
     _applied = env_values(cfg, key, cdp_url)
     _text_helpers = cfg.models.text_helper
-    local = cfg.models.system_one_decision_provider == "local"
-    _call_timeout = cfg.models.local.timeout if local else None
-    _string_state = not local
+    # The per-route timeout is the Gateway's (gateway.for_config), which answers every request the package sends.
+    _string_state = cfg.models.system_one_decision_provider != "local"
     os.environ.update(_applied)
 
 
@@ -312,18 +310,6 @@ def package_version() -> str:
     return version("jev-ultrafast-mcp")
 
 
-def set_call_timeout(policy, seconds: float) -> None:
-    """The package sends every request through one httpx client with a fixed 30 s timeout (policy.CLIENT). A
-    decision model on this Mac answers in seconds, not in the milliseconds of a data-centre GPU, and the first call
-    after the server starts is the slowest, so the local route replaces that client with one of its own timeout
-    (config models.local.timeout). Same flags as the package's, so only the deadline changes."""
-    old = getattr(policy, "CLIENT", None)
-    if not isinstance(old, httpx.Client):
-        raise RuntimeError("jev_ultrafast_mcp.policy.CLIENT is not an httpx.Client: cannot set the call timeout")
-    policy.CLIENT = httpx.Client(http2=True, timeout=seconds)
-    old.close()
-
-
 def load():
     """Import jev_ultrafast_mcp.server (once per process), after apply_env()."""
     global _server
@@ -337,8 +323,6 @@ def load():
         _server = server
         rotate_text_helper(server.policy, _text_helpers)
         clean_requests(server.policy, string_state=_string_state)
-        if _call_timeout is not None:
-            set_call_timeout(server.policy, _call_timeout)
         from jev_ultrafast_mcp import browser as package_browser
         guard_clicks(package_browser)
         # Importing the server turns on INFO logging, and httpx then prints every request ("HTTP Request: POST

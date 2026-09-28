@@ -1,5 +1,56 @@
 # Live test plan (you run these)
 
+## P1 re-core gate (2026-09-28)
+
+P1 changed how the program talks to models and to Chrome. This gate checks the **traffic and the failure handling**,
+not decision quality: with `kev-0.8b` a job still stops at the entry decision, and P1 says the jobs do not have to
+park. Nothing here needs a paid key.
+
+**Before you start**
+
+1. Start the local Kev server: `./run_kev_server.command` (the System One route is `local`, so no key and no quota).
+2. Chrome open with remote debugging on 9222, signed in to LinkedIn.
+3. Chrome → Settings → Performance → Memory Saver → "Always keep these sites active": add `linkedin.com`, so Chrome
+   does not discard a parked tab.
+4. `.env` needs `AI_GATEWAY_API_KEY` (the chat route is `vercel`). No OpenRouter credit is needed on these settings.
+
+**1. Preflight — one "Allow" click**
+```bash
+.venv/bin/python -m assistant preflight
+```
+- The line `Chrome will ask "Allow remote debugging?" — click Allow (waiting up to 180 s).` prints **before** any
+  model probe, and Chrome asks **once**.
+- Then the ✓ lines, ending with "tab release works".
+
+**2. Three jobs, not recorded**
+```bash
+.venv/bin/python -m assistant run --no-record --limit 3
+```
+
+**3. Check, in `runs/<ts>/`**
+- **One** "Allow remote debugging?" click for the whole run — not one per job.
+- `report.md` Summary has:
+  - `Highest number of requests in flight: 1`;
+  - `Model spend: $…` under $1.00 (on these settings it is cents: the System One model is local and free, and only
+    the Vercel chat calls cost anything);
+  - `Model requests: N System One, M LLM inference (A attempts, F failed)` with `A` at most `3 × N + 3 × M`.
+- In each `<job folder>/jev_inference_logs.json`: no request has more than **3** attempts. Count the entries for one
+  judgment — three identical `State` values in a row is the retry ladder, and a fourth would be a bug.
+- `llm_inference_logs.json`: no `:free` model anywhere in it.
+- Nothing was submitted; each job's tab is still open.
+- If a provider did fail: the run stopped with one clear reason (`■ run stopped: …`), the exit code is 3
+  (`echo $?`), and that job has **no** folder move, **no** tracker change and **no** `job.md` note.
+
+Known and expected on these settings: every job ends in Needs Attention `load_failure` at the entry decision, because
+kev-0.8b cannot classify a real LinkedIn posting (`recore/HANDOVER.md`). That still passes this gate.
+
+**If you want the paid route instead** (this is what unblocks a parked job, and is P3/P4's problem): add ≥ $5 of
+OpenRouter credit, put `OPENROUTER_API_KEY` in `.env`, and set `system_one_decision_provider = "openrouter"` (and, if
+you want one bill, `chat_route = "openrouter"`). Then a 401/402 stops the run with "check the key / add credit",
+rather than failing each job in turn.
+
+---
+
 ## P0 re-core gate (2026-09-28)
 
 The P0 gate checks the logs and the run-folder layout, not decision quality — the job need not park. Start the local Kev server first (`./run_kev_server.command`), Chrome open on 9222 and signed in.
