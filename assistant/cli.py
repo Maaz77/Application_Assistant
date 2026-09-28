@@ -86,6 +86,11 @@ def preflight(browser: Jev) -> list[str]:
     the run's inference logs."""
     done = []
     try:
+        model = _probe_llm_inference(browser.cfg)
+    except LLMInferenceError as exc:
+        raise PreflightError(f"the LLM inference model does not answer: {exc}") from exc
+    done.append(f"LLM inference {model} answers (via {browser.cfg.models.chat_route})")
+    try:
         a = decide.current().ask("preflight", "A job application form asks for the candidate's email address.",
                                  {"form": decide.noul("Is this about a job application?")})
     except decide.DecisionError as exc:
@@ -93,11 +98,6 @@ def preflight(browser: Jev) -> list[str]:
     if not a["form"].yes(0.5):
         raise PreflightError("the decision model (Jev) answered a trivial question wrongly")
     done.append(f"decision model {browser.cfg.models.jev} answers (via {browser.cfg.models.jev_route})")
-    try:
-        model = _probe_llm_inference(browser.cfg)
-    except LLMInferenceError as exc:
-        raise PreflightError(f"the LLM inference model does not answer: {exc}") from exc
-    done.append(f"LLM inference {model} answers (via {browser.cfg.models.chat_route})")
     doc = browser.doctor()
     for cap in ("text_model", "uploads", "js_eval"):
         if doc.get(cap) is not True:
