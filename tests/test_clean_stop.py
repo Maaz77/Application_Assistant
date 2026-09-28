@@ -106,8 +106,9 @@ def test_needs_attention_still_records_so_the_stop_is_what_is_special(workspace,
 
 
 def test_a_stop_during_preflight_exits_three_with_a_report(workspace, monkeypatch, tmp_path):
-    """A rejected key shows up in preflight's own live probe. That is a stop, not a preflight failure: the report
-    says why and the exit code is 3, so a wrapper script can tell "add credit" from "your config is wrong"."""
+    """A provider outage found by preflight's own live probes is a stop: the report says why and the exit code is 3.
+    A *key* failure there is the other case — a PreflightError naming the key, exit 1, nothing written (T1); that is
+    `test_cli.py::test_a_rejected_key_fails_preflight_and_names_the_variable`."""
     cfg = workspace.cfg
     monkeypatch.setattr(cli, "RUNS", tmp_path / "runs")
     monkeypatch.setattr(cli, "_load_package", lambda *a: None)
@@ -116,14 +117,14 @@ def test_a_stop_during_preflight_exits_three_with_a_report(workspace, monkeypatc
     monkeypatch.setattr(config_mod, "chat_key", lambda c: "k")
 
     def preflight(browser):
-        raise G.CreditOrKey("openrouter.ai rejected the key (HTTP 401) — check the key / add credit on openrouter")
+        raise G.ProviderOutage("provider outage — vercel HTTP 503: 3 requests in a row failed")
         yield
     monkeypatch.setattr(cli, "preflight", preflight)
     args = SimpleNamespace(job=None, limit=None, no_record=False, dry_run=False, config=None)
     assert cli.run(cfg, args) == EXIT_STOPPED
     inference_log.start_run(None)
     report = next((tmp_path / "runs").glob("*/report.md")).read_text()
-    assert "add credit on openrouter" in report
+    assert "provider outage — vercel HTTP 503" in report
     assert list((workspace.base / "Needs-Attention").iterdir()) == []
 
 

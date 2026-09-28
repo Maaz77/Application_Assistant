@@ -159,6 +159,7 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
     installed = gateway_mod.current()
     if post is not None and installed is None:
         gateway_mod.use(gateway_mod.private(post, sleep=sleep))
+    gateway = gateway_mod.required()           # the verdict below is reported on the Gateway actually in use
     # One attempt per model while another is untried; the last model in the order gets the Gateway's full ladder.
     last = rotation.order()[-1]
     try:
@@ -167,7 +168,15 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
                                                 attempts=None if m == last else 1),
                            ModelUnavailable)
     except NoModelAvailable as exc:
+        # Every model in the rotation failed: that is one failed request for the breaker, not one per model. A model
+        # handing over to the next is the rotation working, and counting each handover would trip an outage on a
+        # provider that is answering — Vercel allows 5 requests a minute per model, so a busy first model plus a
+        # second that answers is a steady alternation of failures and successes (D21, and the same rule as T4's
+        # fallback).
+        gateway.note_failure(True)
         raise LLMInferenceError(f"LLM inference: {exc}") from None
+    else:
+        gateway.note_failure(False)
     finally:
         if post is not None and installed is None:
             gateway_mod.use(None)
@@ -195,8 +204,9 @@ def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post:
     gateway = gateway_mod.required()
     while True:
         sent = {**body, "response_format": fmt}
+        # The verdict is `call_engine`'s: this model failing while the next answers is not a failed request.
         out = gateway.send(gateway_mod.CHAT, url, sent, headers, model=model, timeout=timeout,
-                           attempts=attempts)
+                           attempts=attempts, defer_verdict=True)
         data = out.body
         if out.status == 400 and fmt["type"] == "json_schema":
             fmt = {"type": "json_object"}

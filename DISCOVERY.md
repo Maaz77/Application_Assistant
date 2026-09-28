@@ -572,8 +572,11 @@ as Needs Attention. The Gateway therefore keeps the first stop (`gateway.tripped
 every browser call, raising it on the run's own thread. The flag is also what makes the text helper's rotation stop
 trying further models after a stop.
 
-**A stop during preflight** is a stop, not a preflight failure: exit 3 with a report that names the reason, so
-"add credit" is distinguishable from "your config is wrong" (exit 1).
+**A stop during preflight**, corrected later the same day: it depends which stop. A `ProviderOutage` or
+`BudgetExceeded` is a stop (exit 3, with a report). A `CreditOrKey` is a **`PreflightError`** — exit 1, naming the
+key variable from `config.KEY_NAMES` — because P1 T1 asks for exactly that ("a 401 or 402 fails preflight with
+'check OPENROUTER_API_KEY / add credit on OpenRouter'") and because "preflight failed, nothing written" is the
+accurate description of that outcome. The same condition inside the job loop stays a `CreditOrKey` stop with exit 3.
 
 ## The chat fallback, and the verdict it shares (P1 T4, 2026-09-28)
 
@@ -591,6 +594,24 @@ Two things were not obvious:
    the System One request still holds the only queue slot. It cannot happen: `send` frees the slot before it
    returns, so the fallback's send is a separate request. `release()` was deleted as dead code, and the test that
    found it stayed, because a regression there would hang rather than fail.
+
+## A model rotation is one request for the breaker (P1 T2/T3, 2026-09-29)
+
+Found by review, after the first implementation. `llm_inference._ask_model` reported a verdict per **model**, so a
+rotation handing over fed the breaker one failure every time it did. On the shipped settings that trips a false
+outage: `[models.vercel]` lists two models and Vercel allows 5 requests a minute **per model**, so a busy
+`mistral-small` with `mistral-nemo` answering produces failure, success, failure, success — which reaches
+"5 of the last 10 failed" while every page was in fact answered. The strict-`json_schema` → `json_object` downgrade
+on HTTP 400 has the same shape: one failure per page on any model that rejects a strict schema.
+
+The fix is the rule already applied to the chat fallback (T4): the logical request is "answer this page", so
+`_ask_model` defers its verdict and `call_engine` reports one — success when any model answered, failure only when
+none did. `tests/test_gateway.py` covers both directions (12 alternating calls trip nothing; three calls where no
+model answers count 3 and trip on the third), and both were verified by reintroducing the bug.
+
+The package's own text-helper rotation (`jev.rotate_text_helper`, wrapping `policy.text_for`) has the same shape and
+is **not** fixed: our wrapper sees only the individual `_post` calls and cannot tell which belong to one logical
+call. P2 removes the package from the send path.
 
 ## How many CDP connections a run opens (P1 T5, 2026-09-28)
 

@@ -89,15 +89,21 @@ flight and `Decisions by fallback: N`; Timings gains a per-job breakdown.
    so the first `ask` in any `--live` test (and `tripwire --live`) would have raised "may not bypass". It now
    installs `gateway.for_config(cfg)` for a live test and none for an offline one — a sender with no Gateway refuses
    rather than reaching a provider, which is what keeps the offline suite off the network.
-3. `Gateway.release()` was dead code: `send` frees the queue slot before returning, so the chat fallback's send was
+3. **The chat rotation fed the breaker per model, not per request** — the same defect as (1) in T4's terms, found by
+   a second review. On the shipped settings it trips a false outage: Vercel allows 5 requests a minute per model, so
+   a busy `mistral-small` with `mistral-nemo` answering gives failure, success, failure, success, which reaches
+   "5 of the last 10" while every page was answered. `_ask_model` now defers and `call_engine` reports one verdict.
+   Verified by reintroducing the bug. **The package's own text-helper rotation has the same shape and is not fixed**:
+   our wrapper sees individual `_post` calls and cannot group them. P2 removes the package from the send path.
+4. `Gateway.release()` was dead code: `send` frees the queue slot before returning, so the chat fallback's send was
    never nested and could not self-deadlock. Deleted; the test that proved it stayed, because a regression there
    would hang rather than fail.
-4. `llm_inference` still carried an `httpx` sender no longer on any path. A static test now forbids `httpx.post` in
+5. `llm_inference` still carried an `httpx` sender no longer on any path. A static test now forbids `httpx.post` in
    any model-sending module, so a second path cannot be reintroduced quietly.
 
 ## Evidence
 
-**Offline:** 329 unit + 50 browser pass; `contract_check` clean; `run --dry-run` unchanged (7 jobs);
+**Offline:** 331 unit + 50 browser pass; `contract_check` clean; `run --dry-run` unchanged (7 jobs);
 `test_baseline_p0` green after the one intended golden change (`provider.require_parameters`).
 
 **New tests, 62 functions in four files:** `tests/test_gateway.py` (30, against a real local `http.server`),
@@ -142,7 +148,15 @@ No guard, tripwire or records test was touched.
    pass on an Apple GPU is seconds, not a data-centre's milliseconds.
 6. **A key failure is exit 1 in preflight and exit 3 in the job loop.** T1 says it "fails preflight"; T3 says it
    stops the run. Both hold, split by where it happens.
-7. **A model rotation hands over before it retries** — a chat request passes `attempts=1` while an untried model
+7. **`ChatDecider` answers `noul` and `choice`, not `score`.** T4 names score answers, but nothing in the program
+   builds a score question — `decide.noul` and `decide.choice` are the only builders, and `Answer.parse` reads only
+   those two. Adding a third shape with no caller would be dead code; `inference_log`'s `Score` bucket already exists
+   for the day one is sent.
+8. **One bypass path remains in `jev.clean_requests`**, by choice: when no Gateway is installed it calls the
+   package's own sender, which is what lets `tests/test_jev.py` drive the package directly. Every command installs a
+   Gateway first (`run`, `preflight`, `capture`), and `tests/test_no_bypass.py` proves the gateway path is the one
+   taken when one exists. P2 removes the package from the send path altogether.
+9. **A model rotation hands over before it retries** — a chat request passes `attempts=1` while an untried model
    remains. P1 caps attempts per request; this keeps the cheaper behaviour the live 2026-09-24 evidence encodes,
    and is still one retry layer (another model is a different request).
 

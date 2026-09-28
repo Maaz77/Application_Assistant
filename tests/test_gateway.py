@@ -387,3 +387,42 @@ def test_a_sender_without_a_gateway_is_refused():
     G.use(None)
     with pytest.raises(RuntimeError, match="may not bypass"):
         G.required()
+
+
+def test_a_rotation_handing_over_is_not_a_failed_request():
+    """One model rate-limited while another answers is the rotation working, not a provider outage. Vercel allows
+    5 requests a minute per model, so this alternation is the normal case, and counting each handover as a failure
+    would trip "5 of the last 10" while every page was answered (same rule as the chat fallback's, T4)."""
+    from assistant import llm_inference as L
+    gateway = gw(sleep=lambda _: None)
+    G.use(gateway)
+    try:
+        def post(url, body, headers, timeout):
+            if body["model"] == "busy":
+                return 429, {"error": {"message": "rate-limited upstream"}}
+            return 200, {"choices": [{"message": {"content": json.dumps({"questions": []})}}]}
+        gateway.post = post
+        for _ in range(12):
+            L.call_engine(key="k", models=["busy", "free"], system="s", user={},
+                          url="https://x/v1/chat/completions")
+        assert gateway.tripped is None and gateway.run.failures == 0
+    finally:
+        G.use(None)
+
+
+def test_a_rotation_where_no_model_answers_is_one_failed_request():
+    from assistant import llm_inference as L
+    gateway = gw(sleep=lambda _: None)
+    G.use(gateway)
+    try:
+        gateway.post = lambda *a: (429, {"error": {"message": "rate-limited"}})
+        for _ in range(2):
+            with pytest.raises(L.LLMInferenceError):
+                L.call_engine(key="k", models=["a", "b"], system="s", user={},
+                              url="https://x/v1/chat/completions")
+        assert gateway.run.failures == 2          # two calls, not four models
+        with pytest.raises(G.ProviderOutage):
+            L.call_engine(key="k", models=["a", "b"], system="s", user={},
+                          url="https://x/v1/chat/completions")
+    finally:
+        G.use(None)

@@ -34,8 +34,10 @@ park. Nothing here needs a paid key.
   - `Model spend: $…` under $1.00 (on these settings it is cents: the System One model is local and free, and only
     the Vercel chat calls cost anything);
   - `Model requests: N System One, M LLM inference (A attempts, F failed)` with `A` at most `3 × N + 3 × M`.
-- In each `<job folder>/jev_inference_logs.json`: no request has more than **3** attempts. Count the entries for one
-  judgment — three identical `State` values in a row is the retry ladder, and a fourth would be a bug.
+- In each `<job folder>/jev_inference_logs.json`: no request has more than **3** attempts. The program asks several
+  different judgments about the same page (classify, fill, read-back), so repeated `State` values are normal — what
+  would be a bug is **four or more entries in a row with the same `State` *and* the same questions**. One extra group
+  of up to three is allowed for the single goal retry.
 - `llm_inference_logs.json`: no `:free` model anywhere in it.
 - Nothing was submitted; each job's tab is still open.
 - If a provider did fail: the run stopped with one clear reason (`■ run stopped: …`), the exit code is 3
