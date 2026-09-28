@@ -40,11 +40,12 @@ class Browser(_Strict):
 
 class ChatModels(_Strict):
     """The models one provider serves for us, as that provider names them. The chat lists are tried in turn
-    (rotation.py): the model that answered last first, the next when one is out. `jev` is that provider's TypeSafe
-    System One decision model (a single ID; chosen by models.jev_route, the chat lists by models.chat_route)."""
+    (rotation.py): the model that answered last first, the next when one is out. `system_one_decision_model` is that
+    provider's System One decision model — a single ID, e.g. the Jev instance "typesafe-ai/jev" (chosen by
+    models.system_one_decision_provider; the chat lists by models.chat_route)."""
     llm_inference: tuple[str, ...] = ()
     text_helper: tuple[str, ...] = ()
-    jev: str = ""
+    system_one_decision_model: str = ""
 
     @field_validator("llm_inference", "text_helper", mode="before")
     @classmethod
@@ -57,7 +58,7 @@ class Models(_Strict):
     chat_route: Literal["openrouter", "vercel"] = "openrouter"   # who serves the chat models: the table below
     openrouter: ChatModels = ChatModels()
     vercel: ChatModels = ChatModels()
-    jev_route: Literal["vercel", "openrouter"] = "vercel"   # who serves Jev: Vercel AI Gateway or OpenRouter
+    system_one_decision_provider: Literal["vercel", "openrouter"] = "vercel"   # serves the System One decision model
 
     @model_validator(mode="before")
     @classmethod
@@ -76,9 +77,10 @@ class Models(_Strict):
         return self.vercel if self.chat_route == "vercel" else self.openrouter
 
     @property
-    def jev(self) -> str:
-        """Jev's decision model on models.jev_route (models.<jev_route>.jev)."""
-        return (self.vercel if self.jev_route == "vercel" else self.openrouter).jev
+    def system_one_decision_model(self) -> str:
+        """The System One decision model on models.system_one_decision_provider
+        (models.<system_one_decision_provider>.system_one_decision_model)."""
+        return (self.vercel if self.system_one_decision_provider == "vercel" else self.openrouter).system_one_decision_model
 
     @property
     def llm_inference(self) -> tuple[str, ...]:
@@ -124,9 +126,10 @@ class Config(_Strict):
             if not getattr(self.models.chat, name):
                 out.append(f"models.{route}.{name} is empty (models.chat_route is {route!r}: list one or more "
                            f"model IDs as {route} names them)")
-        if not self.models.jev:
-            out.append(f"models.{self.models.jev_route}.jev is empty (models.jev_route is "
-                       f"{self.models.jev_route!r}: set Jev's decision model for that route)")
+        if not self.models.system_one_decision_model:
+            out.append(f"models.{self.models.system_one_decision_provider}.system_one_decision_model is empty "
+                       f"(models.system_one_decision_provider is {self.models.system_one_decision_provider!r}: set "
+                       f"the System One decision model for that provider)")
         for name in ("applications", "profile", "tracker"):
             if not self.path(name).exists():
                 out.append(f"paths.{name} not found: {self.path(name)}")
@@ -151,13 +154,13 @@ def api_key(env_file: Path = DEFAULT_ENV) -> str:
 
 
 def gateway_key(env_file: Path = DEFAULT_ENV) -> str:
-    """The Vercel AI Gateway key (Jev, when models.jev_route is "vercel")."""
+    """The Vercel AI Gateway key (the System One decision model, when models.system_one_decision_provider is "vercel")."""
     return _env("AI_GATEWAY_API_KEY", env_file)
 
 
-def jev_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
-    """The key for Jev's route."""
-    return gateway_key(env_file) if cfg.models.jev_route == "vercel" else api_key(env_file)
+def system_one_decision_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
+    """The key for the System One decision provider's route."""
+    return gateway_key(env_file) if cfg.models.system_one_decision_provider == "vercel" else api_key(env_file)
 
 
 def chat_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:

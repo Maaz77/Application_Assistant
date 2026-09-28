@@ -16,8 +16,9 @@ max_pages_per_job = 15
 [models]                           # model IDs, as each route names them
 chat_route = "vercel"                     # who serves the LLM inference and the text helper: "openrouter" (free
                                           # models below) or "vercel" (paid, for when OpenRouter's free quota is out)
-jev_route = "openrouter"                  # who serves Jev's decision model: "openrouter" (models.openrouter.jev,
-                                          # OPENROUTER_API_KEY) or "vercel" (models.vercel.jev, AI_GATEWAY_API_KEY)
+system_one_decision_provider = "vercel"   # who serves the System One decision model: "openrouter"
+                                          # (models.openrouter.system_one_decision_model, OPENROUTER_API_KEY) or
+                                          # "vercel" (models.vercel.system_one_decision_model, AI_GATEWAY_API_KEY)
 
 # Each list is tried in turn: the model that answered last goes first, and one that is out (rate-limited,
 # overloaded, wrong output) hands over to the next; when none answers the job goes to Needs Attention.
@@ -36,14 +37,14 @@ text_helper = [                    # types the values the browser agent enters
   "nex-agi/nex-n2.5-mini:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
 ]
-jev = "typesafe/jev-1.13"   # TypeSafe System One via https://openrouter.ai/api/alpha/decisions
+system_one_decision_model = "typesafe/jev-1.13"   # TypeSafe System One via https://openrouter.ai/api/alpha/decisions
 
 [models.vercel]                    # AI_GATEWAY_API_KEY (Vercel AI Gateway, paid from its credit)
 # A realistic page (5.3K tokens in), 2026-09-24: Small 5.2 s and $0.0013; Nemo 58.6 s and $0.00013. Both answer in
 # strict JSON. Vercel allows a new team 5 requests a minute per model, so two models also double that.
 llm_inference = ["mistral/mistral-small", "mistral/mistral-nemo"]
 text_helper = ["mistral/mistral-small", "mistral/mistral-nemo"]
-jev = "typesafe-ai/jev"            # Vercel AI Gateway's Jev (now 403 for free-tier; needs a card)
+system_one_decision_model = "typesafe-ai/jev"            # Vercel AI Gateway's Jev (now 403 for free-tier; needs a card)
 
 [policy]
 prefill = "keep-if-silent"         # or "strict"

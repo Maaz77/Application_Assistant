@@ -37,7 +37,7 @@ def decider(request):
     from tests.rule_decider import RuleDecider
     jev.FORM.started = False                  # the never-submit rule's stage: each test starts before any form
     cfg = config.load()
-    live = "live_model" in request.keywords and config.jev_key(cfg)
+    live = "live_model" in request.keywords and config.system_one_decision_key(cfg)
     d = decide.for_config(cfg) if live else RuleDecider()
     decide.use(d)
     yield d

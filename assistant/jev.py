@@ -112,8 +112,8 @@ def env_values(cfg: Config, key: str, cdp_url: str | None = None) -> dict[str, s
         "JEVMCP_ALLOW_UPLOADS": "1",
         "JEVMCP_ALLOW_JS": "1",
         **agent_route(cfg, key),
-        "TYPESAFE_MODEL": cfg.models.jev,
-        # the package's OpenRouter key pays for Jev on jev_route = "openrouter"
+        "TYPESAFE_MODEL": cfg.models.system_one_decision_model,
+        # the package's OpenRouter key pays for Jev on system_one_decision_provider = "openrouter"
         "OPENROUTER_API_KEY": key if cfg.models.chat_route == "openrouter" else config.api_key(),
         "TEXT_MODEL_API_KEY": key,
         "TEXT_MODEL_BASE_URL": CHAT_BASES[cfg.models.chat_route],
@@ -127,7 +127,7 @@ def agent_route(cfg: Config, key: str) -> dict[str, str]:
     as the full System One endpoint, with TYPESAFE_API_KEY (its config._turbo_backend); OpenRouter's route is its
     alpha decisions endpoint, paid with the OpenRouter key."""
     from assistant import decide
-    if cfg.models.jev_route == "vercel":
+    if cfg.models.system_one_decision_provider == "vercel":
         return {"TYPESAFE_BASE_URL": decide.ENDPOINTS["vercel"], "TYPESAFE_API_KEY": config.gateway_key()}
     return {"TYPESAFE_BASE_URL": "https://openrouter.ai/api/alpha/decisions"}
 

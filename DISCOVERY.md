@@ -425,3 +425,13 @@ Preflight probed Jev live but only static-checked the LLM inference model (key p
 `cli._probe_llm_inference(cfg)` now calls `llm_inference.call_engine` once with a trivial empty page over the real strict-`json_schema` path (`config.chat_url`, the run's `Rotation` of `models.<chat_route>.llm_inference`, `PROBE_TIMEOUT = 60 s`). It raises `LLMInferenceError` when no configured model answers; `preflight()` turns that into a `PreflightError` ("the LLM inference model does not answer: …") and otherwise prints `✓ LLM inference <model> answers (via <route>)`. The probe logs to `_run/llm_inference_logs.json` like any other chat call.
 
 Deviation: this adds a preflight step (behaviour change), out of P0's "no behaviour change". It was the fixed-scope item flagged for P1 (`P1_infrastructure.md`), pulled forward at the user's request. No offline test change (no test calls `preflight()`); the probe itself is unit-tested via a monkeypatched `call_engine`. Cost: one extra chat call per preflight.
+
+## Config names Jev by its role, not the instance (user decision, 2026-09-28)
+
+"Jev" was used as if it were the decision-model role in config and code, but Jev (`typesafe-ai/jev`, `typesafe/jev-1.13`) is one *instance* of a System One decision model; another is `respan/span-01-lite`. Renamed the role, keeping Jev where it means the actual instance/package.
+
+- config keys: `models.jev_route` → `models.system_one_decision_provider`; `[models.<route>].jev` → `[models.<route>].system_one_decision_model`.
+- code: `ChatModels.jev` → `system_one_decision_model`; `Models.jev` property and `Models.jev_route` → `system_one_decision_model` / `system_one_decision_provider`; `config.jev_key` → `config.system_one_decision_key`; readers in `decide.for_config`, `jev.env_values`/`agent_route`, `cli` (preflight/report/`_static_checks`); prose in config.toml, config.py, decide.py, README.md, CLAUDE.md, the build spec, and the tests.
+- Kept as the Jev instance/package: the `jev.py` module, `Jev` driver class, `JevError`, `jevlib`, `jev_ultrafast_mcp`, `JEVMCP_*`, the model-id values (`typesafe-ai/jev`, `typesafe/jev-1.13`), and the browser worker thread name. `decide.adapt_questions_for` still keys on `"jev"` in the model id (Jev takes native structured questions). DISCOVERY's earlier entries keep the old names.
+
+Not a P0 goal (naming), done at the user's request alongside the earlier LLM inference work. 237 unit pass; contract_check + dry-run clean.

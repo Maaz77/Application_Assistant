@@ -12,7 +12,7 @@ Build spec (v2): [application_assistant_build_spec.md](application_assistant_bui
 
 Three pictures: what happens to one job, what happens on one form page, and which file does what. The names on the right are the files in `assistant/` that do each step.
 
-**Jev** (TypeSafe's decision model, reached through Vercel AI Gateway or OpenRouter: `models.jev_route`) makes the decisions, in two places:
+**Jev** (TypeSafe's decision model, reached through Vercel AI Gateway or OpenRouter: `models.system_one_decision_provider`) makes the decisions, in two places:
 - **The browser agent** is the jev package's goal agent (`browser_goal`). Jev looks at the page and picks each click, one action at a time.
 - **The page decisions** are typed questions the code asks Jev in `decide.py`, all of them for a page in one call (about 0.3 s, $0.0003). What is this page? Is a pop-up in the way? Which fields belong to the application? Which upload takes the resume? Is there an error message? The code branches on the answers, with thresholds set in `decide.THRESHOLDS`.
 
@@ -154,7 +154,7 @@ Also in this folder:
 
 2. **Keys.** Create `.env` in this folder with two lines. It is git-ignored.
    - `OPENROUTER_API_KEY=<key>`: the LLM inference and the text helper when `models.chat_route = "openrouter"`.
-   - `AI_GATEWAY_API_KEY=<key>`: Jev through Vercel AI Gateway (`models.jev_route = "vercel"`), and the chat models when `models.chat_route = "vercel"`. Vercel serves requests only once a card is on file for the team, which also unlocks its free credits. With `jev_route = "openrouter"` the OpenRouter key pays for Jev instead.
+   - `AI_GATEWAY_API_KEY=<key>`: Jev through Vercel AI Gateway (`models.system_one_decision_provider = "vercel"`), and the chat models when `models.chat_route = "vercel"`. Vercel serves requests only once a card is on file for the team, which also unlocks its free credits. With `system_one_decision_provider = "openrouter"` the OpenRouter key pays for Jev instead.
  Keep some credit on the account: each form page costs one LLM inference call (about $0.001), plus the browser agent's decisions (about $0.00002 each) and the text helper's typed values. `tests/test_model_access.py` shows the key, the account's credit and whether a model answers. An account that has never bought credits gets 50 free-model requests a day across all free models, and rotation cannot get past that: HTTP 429 "free-models-per-day" from every model. $10 of credit raises it to 1,000 a day.
 
 3. **Config.** `config.toml` is already filled in:
@@ -166,8 +166,8 @@ Also in this folder:
    | `models.openrouter.llm_inference` | five free OpenRouter models, tried in turn (`rotation.py`): answers each form page from your files (sent with reasoning off). A call starts at the model that answered last; one that is out (rate-limited, overloaded, timed out, wrong output) hands over to the next at once. A 429 with a short `Retry-After` (30 s or less) is waited out once. When none answers, the job goes to Needs Attention with every model's reason. A single ID also works |
    | `models.openrouter.text_helper` | four free OpenRouter models, rotated the same way: types the values the browser agent enters |
    | `models.vercel.llm_inference`, `models.vercel.text_helper` | `mistral/mistral-small` (about 5 s and $0.0013 a page), then `mistral/mistral-nemo` (cheaper, but about 60 s a page). Vercel limits a new team to 5 requests a minute per model |
-   | `models.jev` | `typesafe-ai/jev`: TypeSafe's decision model, for the browser agent and every page decision (`decide.py`). Each route names it its own way: `typesafe-ai/jev` on Vercel, `typesafe/jev-1.13` on OpenRouter |
-   | `models.jev_route` | `vercel` (Vercel AI Gateway's TypeSafe-compatible API) or `openrouter` |
+   | `models.system_one_decision_model` | `typesafe-ai/jev`: TypeSafe's decision model, for the browser agent and every page decision (`decide.py`). Each route names it its own way: `typesafe-ai/jev` on Vercel, `typesafe/jev-1.13` on OpenRouter |
+   | `models.system_one_decision_provider` | `vercel` (Vercel AI Gateway's TypeSafe-compatible API) or `openrouter` |
    | `google.account_email` | `maaz1377.aa@gmail.com` |
 
    Unknown keys are an error.

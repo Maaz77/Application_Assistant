@@ -1,5 +1,6 @@
-"""Decisions by TypeSafe's Jev, a System One model, through a gateway's System One API (user decisions 2026-09-24:
-Jev decides; it is reached through Vercel AI Gateway, or OpenRouter — config models.jev_route).
+"""Decisions by a System One decision model (config models.system_one_decision_model; e.g. TypeSafe's Jev instance),
+through a gateway's System One API (user decisions 2026-09-24: a System One model decides; it is reached through
+Vercel AI Gateway, or OpenRouter — config models.system_one_decision_provider).
 
 Code asks typed questions about a state and branches on the typed answers:
   noul    the probability that a yes/no question is true           → Answer.noul
@@ -25,7 +26,7 @@ import httpx
 from assistant import inference_log
 
 # Jev's System One endpoint per route (TypeSafe's request and answer shapes on both). The model ID per route is
-# config models.<route>.jev: Vercel AI Gateway serves "typesafe-ai/jev"; OpenRouter's alpha/decisions API serves a
+# config models.<route>.system_one_decision_model: Vercel AI Gateway serves "typesafe-ai/jev"; OpenRouter's alpha/decisions API serves a
 # TypeSafe-compatible System One model, e.g. "respan/span-01-lite:free" (2026-09-28).
 ENDPOINTS = {"vercel": "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
              "openrouter": "https://openrouter.ai/api/alpha/decisions"}
@@ -233,9 +234,9 @@ class Decider:
 
 
 def for_config(cfg) -> Decider:
-    """The run's Decider: config models.jev on models.jev_route, with that route's key from .env."""
+    """The run's Decider: config models.system_one_decision_model on models.system_one_decision_provider, with that route's key from .env."""
     from assistant import config
-    return Decider(config.jev_key(cfg), cfg.models.jev, route=cfg.models.jev_route)
+    return Decider(config.system_one_decision_key(cfg), cfg.models.system_one_decision_model, route=cfg.models.system_one_decision_provider)
 
 
 _current: Decider | None = None

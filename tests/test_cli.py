@@ -70,11 +70,12 @@ def test_run_without_key_fails_preflight_with_exit_1(workspace, monkeypatch, cap
 def test_a_key_both_routes_use_is_reported_once(workspace, monkeypatch, capsys):
     base, cfg = workspace
     text = re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "vercel"', cfg.read_text())
-    cfg.write_text(re.sub(r'(?m)^jev_route = "\w+"', 'jev_route = "vercel"', text))   # both routes share the key
+    cfg.write_text(re.sub(r'(?m)^system_one_decision_provider = "\w+"', 'system_one_decision_provider = "vercel"', text))   # both routes share the key
     monkeypatch.setattr(cli.config_mod, "gateway_key", lambda *a: "")
     assert cli.main(["--config", str(cfg), "run"]) == 1
     out = capsys.readouterr().out
-    assert out.count("AI_GATEWAY_API_KEY is missing") == 1 and "the LLM inference and text helper and Jev" in out
+    assert out.count("AI_GATEWAY_API_KEY is missing") == 1 and \
+        "the LLM inference and text helper and the System One decision model" in out
 
 
 def test_bad_config_is_exit_1(tmp_path, capsys):

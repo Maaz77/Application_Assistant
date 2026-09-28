@@ -97,7 +97,7 @@ def preflight(browser: Jev) -> Iterator[str]:
         raise PreflightError(f"the decision model (Jev) does not answer: {exc}") from exc
     if not a["form"].yes(0.5):
         raise PreflightError("the decision model (Jev) answered a trivial question wrongly")
-    yield f"decision model {browser.cfg.models.jev} answers (via {browser.cfg.models.jev_route})"
+    yield f"decision model {browser.cfg.models.system_one_decision_model} answers (via {browser.cfg.models.system_one_decision_provider})"
     doc = browser.doctor()
     for cap in ("text_model", "uploads", "js_eval"):
         if doc.get(cap) is not True:
@@ -138,8 +138,9 @@ def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
     missing: dict[str, list[str]] = {}
     if not key:
         missing.setdefault(config_mod.KEY_NAMES[cfg.models.chat_route], []).append("the LLM inference and text helper")
-    if not config_mod.jev_key(cfg):
-        missing.setdefault(config_mod.KEY_NAMES[cfg.models.jev_route], []).append("Jev")
+    if not config_mod.system_one_decision_key(cfg):
+        missing.setdefault(config_mod.KEY_NAMES[cfg.models.system_one_decision_provider], []).append(
+            "the System One decision model")
     for name, users in missing.items():
         problems.append(f"{name} is missing ({' and '.join(users)} need it; put it in Tools/Application_Assistant/.env)")
     return problems
@@ -330,7 +331,8 @@ def run_preflight(cfg: config_mod.Config) -> int:
             print(f"✗ {p}")
         return EXIT_PREFLIGHT
     inference_log.start_run(RUNS / datetime.now().strftime("%Y%m%d-%H%M%S"))   # preflight's Jev call -> _run/ (§6.1)
-    print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, Jev via {cfg.models.jev_route})")
+    print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, "
+          f"System One decision model via {cfg.models.system_one_decision_provider})")
     try:
         _load_package(cfg, key)
         print("✓ jev-ultrafast-mcp loaded after apply_env()")

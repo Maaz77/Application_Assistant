@@ -112,8 +112,8 @@ max_pages_per_job = 15
 
 [models]
 chat_route = "vercel"              # who serves the LLM inference and the text helper: "openrouter" | "vercel"
-jev = "typesafe-ai/jev"            # Jev's ID on its route: "typesafe-ai/jev" (Vercel), "typesafe/jev-1.13" (OpenRouter)
-jev_route = "vercel"               # who serves Jev: "vercel" | "openrouter"
+system_one_decision_model = "typesafe-ai/jev"            # Jev's ID on its route: "typesafe-ai/jev" (Vercel), "typesafe/jev-1.13" (OpenRouter)
+system_one_decision_provider = "vercel"               # who serves Jev: "vercel" | "openrouter"
 
 [models.openrouter]                # OPENROUTER_API_KEY; free tier: 50 requests a day across all free models
 llm_inference = ["qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free",
@@ -136,7 +136,7 @@ account_email = "…"                # empty → every Google sign-in is a block
 The config code in `config.py`:
 - `cfg.models.llm_inference` / `.text_helper` read the active route's table.
 - `config.chat_key(cfg)` / `config.chat_url(cfg)` give the chat route's key and `…/chat/completions`, from `CHAT_BASES = {openrouter: https://openrouter.ai/api/v1, vercel: https://ai-gateway.vercel.sh/v1}`.
-- `config.jev_key(cfg)` gives Jev's route's key.
+- `config.system_one_decision_key(cfg)` gives Jev's route's key.
 
 `.env`: `OPENROUTER_API_KEY=` and `AI_GATEWAY_API_KEY=` (read from `.env` first, then the process environment).
 
@@ -166,7 +166,7 @@ The wheel is 0.1.5 plus three observer fixes (`vendor/*.patch`, "aa"):
 | `JEVMCP_FOREGROUND` / `JEVMCP_MAX_ACTIONS` | `0` / `browser.max_actions` |
 | `JEVMCP_ALLOW_UPLOADS` / `JEVMCP_ALLOW_JS` | `1` / `1` |
 | `TYPESAFE_BASE_URL` (+ `TYPESAFE_API_KEY`) | vercel: `https://ai-gateway.vercel.sh/typesafe/v1/systemone` + `AI_GATEWAY_API_KEY`; openrouter: `https://openrouter.ai/api/alpha/decisions` (paid with the OpenRouter key) |
-| `TYPESAFE_MODEL` | `models.jev` |
+| `TYPESAFE_MODEL` | `models.system_one_decision_model` |
 | `OPENROUTER_API_KEY` | `key` on the openrouter chat route, else the `.env` OpenRouter key |
 | `TEXT_MODEL_API_KEY` / `TEXT_MODEL_BASE_URL` | `key` / `CHAT_BASES[chat_route]` |
 | `TEXT_MODEL` / `TEXT_MODEL_REASONING` | `models.text_helper[0]` (the rest rotate in, §3.3) / `none` |
