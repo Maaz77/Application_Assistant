@@ -143,3 +143,18 @@ def test_a_rejected_key_fails_preflight_and_names_the_variable(monkeypatch):
     browser = type("B", (), {"cfg": cfg})()
     with pytest.raises(cli.PreflightError, match="AI_GATEWAY_API_KEY"):
         list(cli.preflight(browser))
+
+
+def test_process_entry_uses_navigate_not_a_page_kind_gate():
+    """Regression (live gate iter 1, 2026-09-29): cli.process must NOT call pages.classify_entry / pages.judge
+    before run_pages — that gate asks kev "what kind of page?", which fails on every real posting. Entry is
+    navigate.enter's job (deterministic, no page-kind model call)."""
+    import ast
+    src = (Path(__file__).resolve().parent.parent / "assistant" / "cli.py").read_text()
+    process = next(n for n in ast.walk(ast.parse(src))
+                   if isinstance(n, ast.FunctionDef) and n.name == "process")
+    called = {n.func.attr for n in ast.walk(process)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    assert "classify_entry" not in called and "judge" not in called, called
+    assert "run_pages" in {n.func.id for n in ast.walk(process)
+                           if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
