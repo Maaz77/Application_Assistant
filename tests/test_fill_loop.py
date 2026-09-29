@@ -105,6 +105,29 @@ def test_multi_step_easy_apply_walks_to_the_final_step(tmp_path):
     assert next(e for e in fake.site["s2"].els if e.name == "No").checked is True
 
 
+def reminder_site():
+    """Easy Apply opens a "Job search safety reminder" modal over the form; it must be dismissed first
+    (live 2026-09-29, Linda AI)."""
+    return {
+        "job": posting(goto="reminder"),
+        "reminder": FakePage(LI, "Data Engineer | Acme | LinkedIn", "Job search safety reminder",
+                             [El("button", "Dismiss", goto="s1", dialog="d")]),
+        "s1": FakePage(LI, "Data Engineer | Acme | LinkedIn", "Apply to Acme. City Resume", [
+            El("textbox", "City", required=True, dialog="d"),
+            El("file", "Resume", required=True, dialog="d"),
+            El("button", "Submit application", submits=True, dialog="d")])}
+
+
+def test_easy_apply_safety_reminder_is_dismissed_then_the_form_fills(tmp_path):
+    answers = {"Data Engineer | Acme | LinkedIn": [Q("City", "Milan", ref="auto"),
+                                                    Q("Resume", None, kind="file", ref="auto", source=None)]}
+    browser, fake = fake_browser(reminder_site(), "job")
+    run_pages(ctx_for(browser, answers, tmp_path))
+    assert fake.cur == "s1" and fake.sent == []      # reached the form only by dismissing the reminder
+    assert next(e for e in fake.site["s1"].els if e.name == "City").value == "Milan"
+    assert any(k == "click" for k, _ in fake.log)    # Easy Apply + the reminder's Dismiss were clicked
+
+
 def test_external_apply_is_external_ats(tmp_path):
     site = {"job": FakePage(LI, "Data Engineer | Acme | LinkedIn", "Data Engineer | Acme.",
                             [El("link", "Apply"), El("button", "Save")])}

@@ -133,13 +133,37 @@ def _entry_choice(ctx, p: pages.Page) -> str:
     raise NeedsAttention("navigation", f"no way to start the application on {p.title or p.url!r}")
 
 
+# An interstitial that LinkedIn puts over/before the Easy Apply form — most often the "Job search safety
+# reminder" modal (live 2026-09-29, Linda AI). Its control must be clicked to reveal the form. "Continue applying"
+# is preferred; a plain "Dismiss"/"Got it" is accepted (it dismisses the reminder, not the application). Guarded
+# by never_click_element like every click — none of these are submit/structural, and Apply is allowed pre-fill.
+INTERSTITIAL_RE = re.compile(r"^\s*(continue applying|continue|got it|i understand|dismiss|okay|ok)\b", re.I)
+
+
+def _interstitial_control(p: pages.Page):
+    """A control inside an open dialog that has no form fields yet — a reminder to click through, not the form."""
+    if dialog_fields(p):
+        return None
+    for e in in_dialog(p):
+        if e.role in {"button", "link"} and INTERSTITIAL_RE.search(e.name or ""):
+            return e
+    return None
+
+
 def wait_for_dialog(ctx, seconds: int = DIALOG_WAIT) -> pages.Page | None:
-    """Read (no settle) until the Easy Apply dialog's fields appear, at most `seconds`."""
+    """Read (no settle) until the Easy Apply dialog's fields appear, at most `seconds`. Click through an
+    interstitial dialog (e.g. the "Job search safety reminder") that sits over the form, once per control."""
     deadline = time.monotonic() + seconds
+    clicked: set[str] = set()
     while True:
         p = _read(ctx)
         if dialog_is_open(p):
             return p
+        control = _interstitial_control(p)
+        if control is not None and control.ref not in clicked:
+            clicked.add(control.ref)
+            ctx.browser.act([{"op": "click", "ref": control.ref}], ctx.session, p.table, stop_on_error=False)
+            continue                                   # look again at once — the form may be underneath
         if time.monotonic() >= deadline:
             return None
         ctx.sleep(0.5)

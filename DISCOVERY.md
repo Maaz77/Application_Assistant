@@ -857,3 +857,22 @@ tests missed it because they drive `run_pages` directly, not `cli.process`.
 
 **Safety held even so:** `browser_actions.jsonl` for all three jobs shows only read-only `eval` probes — **no click,
 type or upload, and no POST**. The run was safe; it just never started an application. Re-run pending.
+
+## P2 live gate, iteration 2 — the "Job search safety reminder" modal over Easy Apply (`runs/20260929-161017`, 2026-09-29)
+
+With the entry fix, the deterministic path worked: **Genesys and Mastercard → `external_ats`** in 1 s each with
+**0 System One calls** (the Apply control was found by label, never clicked), and **Linda AI is a real Easy Apply
+job** — the program found "Easy Apply to this job", clicked it (`e52`, ok), and waited for the dialog.
+
+New finding: clicking Easy Apply put up a LinkedIn **"Job search safety reminder"** modal (`! dialog open: Job
+search safety reminder [modal]`, one button "Dismiss", `dialog:"<dialog>"`) **over** the Easy Apply form. aa2 lists
+only the topmost modal, so `wait_for_dialog` saw a dialog with no form fields and timed out after 8 s →
+`navigation` "clicked Easy Apply but no application dialog appeared". `browser_actions.jsonl`: the Easy Apply click
+plus read-only probes only — **no type/upload, no POST**; the reminder was never dismissed.
+
+**Fix:** `navigate.wait_for_dialog` now clicks through an interstitial — a dialog that is open but has no form
+fields — using `INTERSTITIAL_RE` (continue applying / continue / got it / i understand / dismiss / ok), once per
+control, then looks again for the form underneath. Guarded by `never_click_element` like any click (none are
+submit/structural; "Continue applying" is allowed pre-fill). Offline test:
+`test_easy_apply_safety_reminder_is_dismissed_then_the_form_fills`. Re-run pending — confirm the form appears after
+the reminder is dismissed.
