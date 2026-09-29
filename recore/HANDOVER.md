@@ -3,9 +3,9 @@
 - **Phase:** P2 — owned browser driver, absolute never-submit guard (v2), deterministic Easy Apply navigation.
 - **Date:** 2026-09-29
 - **Branch:** `recore/p2-driver-guard-navigation` (off `main`; P1 is already in main).
-- **Build spec:** v4.0 (in progress — §3 driver, §4 guard v2, §5.1 navigation; see "Docs" below).
-- **State:** code complete, the **offline suite is green** (371 passed, 30 skipped/live, 0 failed). The live gate
-  (A4) has **not** been run by the user yet.
+- **Build spec:** v4.0.
+- **State:** **complete.** The offline suite is green (371+ passed, 0 failed) and the user **confirmed the live gate
+  on 2026-09-29** (`runs/20260929-222722`). The branch is ready to merge into `main`.
 
 ## What changed
 
@@ -52,22 +52,33 @@ uninstalled and `websockets` is now a direct dep.
   click is refused by the driver press path; `tests/test_guard_v2.py` (17) covers the rule + the T5 label cases.
 - **Navigation:** `tests/test_navigate.py` — Easy Apply on `4012345610-easy-dialog` opens the dialog and advances
   Contact → Resume → Questions → Review → final with **zero POSTs**.
-- **A2:** `git grep` for the package literal finds only `DISCOVERY.md` and `assistant/driver/LICENSE` **once README.md and
-  the build spec are scrubbed** (in progress — see below).
+- **A2:** `git grep` for the package name finds only `DISCOVERY.md` and `assistant/driver/LICENSE`.
 - **A3:** no `browser_goal`, no text helper; `run --dry-run` prints the 7-job queue.
+- **A4 — live gate PASSED (user-confirmed, 2026-09-29).** Five live iterations, each read from the run folder (all
+  logged in DISCOVERY, "P2 live gate iteration 1–5"): the entry fix (`cli.process` no longer gates on the kev
+  `judge().kind`), the "Job search safety reminder" click-through ("Continue applying", not "Dismiss"), the
+  `FORM.started` reset on a broken_form re-entry, and the read-back deciding a verbatim field in code. Final run
+  `runs/20260929-222722`: **one "Allow" click; Genesys + Mastercard → `external_ats` (Apply never clicked); Linda
+  AI → Easy Apply → reminder passed → the Easy Apply form filled (phone typed and held) → advanced two steps by
+  itself (`Next` ×2) → `broken_form "widget not supported yet: Bachelor's Degree Yes/No"`**. Never-submit airtight
+  across every iteration: no submit/apply click ever returned ok, no POST, and `Next`/`Continue applying` are
+  advance controls, not submits. Every job tab was left open; nothing was submitted.
 
 ## Known issues / open questions
 
-- **The live gate (A4) has not been run.** The user runs `LIVE_TEST.md` § "P2 gate".
-- **Queue reality:** of the 7 queued jobs, the P1 gate found Genesys + Mastercard carry "Apply on company website"
-  (→ now `external_ats`). Confirm at least one **Easy Apply** job is queued or the gate shows only external_ats.
+- **P4 (widgets):** Linda AI stops at a `div role=radio` Yes/No question ("Bachelor's Degree") — `plan_fill`
+  cannot set it with click/type/select/toggle/upload, so it is `broken_form "widget not supported yet"` (the
+  planned P2 fallback). P4 adds the widget handlers; that is the last thing between Linda AI and an end-to-end park.
+- **kev-0.8b is weak on the read-back** — it false-flagged a verbatim-correct phone field (`different` 0.3987 vs
+  `holds` 0.2348). P2 works around it (`fill.mismatches` decides an exact value match in code, no model call), but
+  the same weakness will bite the widget/select judgments; P3/P4 want a stronger or fine-tuned System One model.
+- **Profile data (not code):** the profile phone is stored as `+39 351 935 8813`, which repeats the `+39` already in
+  LinkedIn's country-code dropdown; LinkedIn may reject it at `Next`. Store the national number (`351 935 8813`).
+  The program must never write `Profile.md` (§4.2), so this is the user's edit.
 - **"Page is final" heuristic** (`guard.looks_final`): a design choice (submit-like present, no advance button),
-  deterministic and table-only — **confirm at the live gate**.
-- **Top-card scoping:** `navigate.enter` matches text/controls page-wide; a real posting has a "similar jobs"
-  sidebar (its cards carry their own "Applied"/"Easy Apply" badges). Checking the Easy Apply *button* first covers
-  the common case; confirm on a real posting.
+  deterministic and table-only — not reached in the gate yet (Linda stops earlier at the widget).
 - **Resume upload button type:** if LinkedIn's in-dialog "Upload resume" is a `<button>` with no `type` inside the
-  form, the structural rule refuses it — watch item in the live gate.
+  form, the structural rule refuses it — not reached yet; watch for it once P4 gets past the questions step.
 - `websockets` sync `connect()` prints a `DeprecationWarning` (used as in the vendored code); functional.
 
 ## Deviations from the phase file
@@ -80,12 +91,19 @@ uninstalled and `websockets` is now a direct dep.
 - `test_clean_stop`'s P1 sticky-re-raise/real-Jev cleanup tests were dropped: the driver makes no model request on
   its own thread, so the P1 threading bug they guarded cannot occur in P2.
 
-## Docs still to finish (§9)
+## Docs (§9) — done
 
-- Rewrite `application_assistant_build_spec.md` §3 (driver), §4 (guard v2), §5.1 (navigation) and bump to **v4.0**;
-  scrub the package name (7 occurrences).
-- Scrub `README.md` (4 occurrences; update setup to the owned driver + websockets).
-- `LIVE_TEST.md`: add the P2 gate procedure.
+- `application_assistant_build_spec.md` bumped to **v4.0** with a P2 changelog and §3 retitled to the owned driver;
+  package name scrubbed.
+- `README.md` and `CLAUDE.md` updated to the owned-driver setup (`websockets`, no wheel); package name scrubbed.
+- `LIVE_TEST.md` has the P2 gate; `DISCOVERY.md` carries the full P2 record incl. the five live iterations.
+- `git grep` for the package name → only `DISCOVERY.md` and `assistant/driver/LICENSE`.
+
+## Merge
+
+The branch is ready to merge into `main`. NB: this session was found on `main` once (a stray `git checkout main`);
+before merging, confirm you are on `recore/p2-driver-guard-navigation` (`git branch --show-current`) at `f39e922`
+or later.
 
 ## Commands the next session needs
 
