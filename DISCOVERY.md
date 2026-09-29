@@ -782,3 +782,29 @@ from jev-ultrafast-mcp 0.1.5+aa6 (MIT; `assistant/driver/LICENSE` kept). Parity 
   table-only, and is flagged for the user to confirm at the live gate.
 - The driver never imports guard: `Browser` injects `never_click_element` as the `refuse_click` callable and passes
   the page state (T3), keeping job state out of the driver.
+
+## P2 T5: deterministic LinkedIn Easy Apply navigation (`assistant/navigate.py`, 2026-09-29)
+
+`navigate.enter` and `navigate.advance` replace the three `browser_goal` calls, with **no page-kind model call**
+(kev answers `other` at 0.12 on a real posting, so the whole `judge().kind` path fails). Proven end-to-end offline
+on `4012345610-easy-dialog` (`tests/test_navigate.py`, 6 tests): Easy Apply → dialog → Contact → Resume → Questions
+→ Review → final, with **zero POSTs**.
+
+- **Entry from facts, in order:** an Easy Apply button (label starts "Easy Apply") → click and wait ≤8 s for the
+  dialog; else closed text ("No longer accepting applications") → Needs Attention `closed`; else applied text
+  ("Applied … ago" / "Application submitted" / "See application") → `applied`; else a bare "Apply" link/button →
+  `external_ats` (D12, first implementation of the class); else a cookie reject control → click it; else one Jev
+  `choice` over guard-allowed buttons ("Which control starts the application?"), `none`/confidence < 0.6 →
+  `navigation`. Easy Apply is checked first because a closed/applied posting has no Easy Apply button, and applied
+  is checked before any §4.6 alarm (which applies only after the program acts — "Application submitted" would
+  otherwise StopRun a merely-already-applied job).
+- **Dialog scope by the `dialog` field**, not "all listed elements": robust whether LinkedIn uses a real
+  `<dialog showModal>` (aa2 lists only its content) or a `div role=dialog` (page buttons stay listed). `advance`
+  and finality look only at elements with a non-empty `dialog`.
+- **Advance** clicks the allowlisted button and waits ≤8 s for the dialog signature (its fields + buttons) to
+  change; an inline error (matched in the dialog text, since the observer does not list `role=alert`) or no change
+  → `stuck` → the existing `broken_form` attempt. No advance button left → `final` (only a refused Submit remains).
+- Reads with `pages.read_page` directly, never `pages.settle` (settle calls `judge()`/kev).
+- **Live-gate watch item (top-card scoping):** entry text/controls are matched page-wide; the fixtures have no
+  "similar jobs" sidebar, but a real posting does (its cards carry their own "Applied"/"Easy Apply" badges).
+  Checking the Easy Apply *button* first covers the common case; confirm on a real posting.
