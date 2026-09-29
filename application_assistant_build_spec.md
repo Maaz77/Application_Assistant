@@ -703,18 +703,26 @@ C1 no tab groups · C4 tracker saved after every job · C7 the agent clicks the 
 **P1 update (2026-09-28).** P1 fixed the request volume and the failure handling below; it did **not** get a job
 parked, and could not, for a reason the user chose knowingly:
 
-- **13.1 is fixed.** One `Gateway` (§3.3) is the only sender: one request in flight, one retry layer of 3 attempts,
-  0.25 s apart. A goal step is now at most 6 HTTP requests, down from ~18; batching is gone, so a judgment is one
-  request per 24 questions rather than one 5-wait ladder per 4. Measured in `tests/test_gateway.py` against a local
-  HTTP server, not live.
+- **13.1 is fixed, and confirmed live** (`runs/20260929-094752`, 2026-09-29). One `Gateway` (§3.3) is the only
+  sender: one request in flight, one retry layer of 3 attempts, 0.25 s apart. A goal step is now at most 6 HTTP
+  requests, down from ~18; batching is gone, so a judgment is one request per 24 questions rather than one 5-wait
+  ladder per 4. In the gate run each job's entry judgment — 12 questions — was **one** request, the whole run was
+  **6 requests in 6 attempts** (nothing retried), the highest number in flight was **1**, and the spend was
+  **$0.0002**.
 - **13.2 is handled, not removed.** A provider that is out now stops the run cleanly instead of sending jobs to
   Needs Attention one by one (§4.3), and a chat model answers the System One questions when the System One model
   fails (§6.0b). The free models are out of the defaults (D14).
 - **13.6 is fixed.** One "Allow remote debugging?" click per run, with a 180 s budget (§3.4).
 - **Still open, and the blocker for a parked job:** the account has no paid System One credit (OpenRouter 402,
-  Vercel 403), so the working route is a **kev-0.8b** server on this Mac, which answers `kind="other"` at 0.12 on a
-  real LinkedIn posting. No job passes the entry decision, and the chat fallback does not help — Kev answers badly
-  rather than failing, and the fallback fires only on a failure. A stronger or fine-tuned System One model is P3/P4.
+  Vercel 403), so the working route is a **kev-0.8b** server on this Mac, which answered `kind="other"` at
+  confidence 0.1234 on a posting whose State contained "Easy Apply to this job" (gate run, 2026-09-29; 0.1238 in
+  P0). No job passes the entry decision, and the chat fallback does not help — Kev answers badly rather than
+  failing, and the fallback fires only on a failure. A stronger or fine-tuned System One model is P3/P4.
+- **New, found by the gate run: D12's `external_ats` class is not implemented.** Two of the three queued jobs carry
+  "Apply on company website" and no Easy Apply control, so they should be Needs Attention `external_ats`; they were
+  reported as `load_failure`. No occurrence of `external_ats` exists in `assistant/` or `tests/`. P5 owns it. Until
+  then, a queue's Easy Apply jobs must be verified by hand before a gate's numbers mean anything — this "3 job" run
+  was really testing one.
 - **Not verified live this phase, by user instruction** (no test may reach a real API): the System One contract test
   and the per-model LLM inference calls of P1 T7, and whether large requests fail on OpenRouter. Details and the
   full deviation list are in `DISCOVERY.md` (2026-09-28) and `recore/HANDOVER.md`.

@@ -660,3 +660,47 @@ User decisions this phase, all recorded here because they override P1's own text
    - `tests/test_model_access.py` still has no `live_model` marker, by the earlier user decision recorded in
      `CLAUDE.md`; it is the one file a plain `pytest` would spend money through. It was left untouched, and the
      phase's command is `pytest -m "unit or browser"`.
+
+## P1 live gate: the infrastructure passes, and the queue is not what it looked like (2026-09-29)
+
+`runs/20260929-094752`, the user's own run of `run --no-record --limit 3` with the Kev server up. Every P1 check in
+`LIVE_TEST.md` holds:
+
+| Check | Observed |
+|---|---|
+| the "Allow" line before any model probe | printed first (T5) |
+| highest number of requests in flight | **1** |
+| model spend | **$0.0002**, reported (not estimated) |
+| attempts | **6 requests, 6 attempts** — no request retried once |
+| `:free` models | none; `mistral/mistral-small` (vercel/mistral) and `mistral/mistral-nemo` (vercel/deepinfra) |
+| log key sets | exactly §6.2 and §6.3; no key string in either |
+| submission | no click, no `needs_confirmation`, no submit anywhere — only read-only `eval` probes |
+| job tabs | left open (the logged `browser_close` calls are `TabBook.release`'s own scratch tabs) |
+| `--no-record` | honoured: 7 folders still in `Applications/`, `Pending-Review/` and `Needs-Attention/` empty |
+
+**The batching change is visible.** Each job's entry judgment — 12 questions, 4 `choice` and 8 `noul` — went out as
+**one** System One request. Before P1 that was three batches of four, side by side, each with its own five-wait
+ladder. Three jobs took 11 s of browser work in total.
+
+**Two findings, neither a P1 regression.**
+
+1. **kev-0.8b, confirmed again.** Linda AI's State contains `"Easy Apply to this job"` and the model still answered
+   `kind="other"` at confidence **0.1234**, with a flat distribution over eleven options (`other` 0.2031,
+   `job_posting` 0.1652, `application_form` 0.1577). Genesys 0.1539, same shape. Identical to the P0 measurement
+   (0.1238), so the cause is model capacity, not anything P1 changed.
+
+2. **Two of the three jobs were never Easy Apply jobs.** Genesys and Mastercard carry `"Apply on company website"`
+   and no Easy Apply control at all: by **D12** they should be Needs Attention class `external_ats`, "external ATS,
+   not yet supported". They were reported as `load_failure` instead, for two reasons that compound:
+   - `external_ats` **is not implemented anywhere** — no occurrence in `assistant/`, `tests/` or the build spec,
+     although D12 is a settled decision. P5 is the external-ATS phase; this is a pre-existing gap, recorded here
+     because this run is the first evidence of it reaching the user as a wrong reason.
+   - even implemented, it would not have fired: `pages.classify_entry` branches on the System One `kind`, and with
+     kev answering `other` every posting falls to the same `none` → `load_failure` path.
+
+   **Consequence for the gates that follow:** a queue of "3 jobs" was really testing **one** Easy Apply job. The
+   P3 and P4 targets (one job parked end-to-end; ≥ 7 of 10 parked) need a queue verified to be Easy Apply before
+   its numbers mean anything.
+
+**Left as it is, by user decision (2026-09-29):** `Counters.row()` does not pluralise, so the Timings rows read
+"1 attempts". Cosmetic; not fixed this phase.

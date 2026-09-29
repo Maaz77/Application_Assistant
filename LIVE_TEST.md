@@ -46,6 +46,15 @@ park. Nothing here needs a paid key.
 Known and expected on these settings: every job ends in Needs Attention `load_failure` at the entry decision, because
 kev-0.8b cannot classify a real LinkedIn posting (`recore/HANDOVER.md`). That still passes this gate.
 
+**Check the queue before you trust a later gate.** P3's and P4's targets count *parked* jobs, and a job with no
+Easy Apply control can never park. In the P1 gate run two of the three queued jobs carried "Apply on company
+website" (an external ATS, D12) and only one was an Easy Apply posting — so "3 jobs" tested one. Open each queued
+job in Chrome and confirm it shows **Easy Apply**, or the number is meaningless. `run --dry-run` lists the queue.
+
+**Run on 2026-09-29: passed** (`runs/20260929-094752`). One "Allow" click; highest in flight 1; 6 requests in 6
+attempts; $0.0002; no `:free` model; nothing submitted; tabs left open; nothing recorded. 3 jobs, 0 parked, 3
+Needs Attention `load_failure` — as expected above. Details in `DISCOVERY.md` (2026-09-29).
+
 **If you want the paid route instead** (this is what unblocks a parked job, and is P3/P4's problem): add ≥ $5 of
 OpenRouter credit, put `OPENROUTER_API_KEY` in `.env`, and set `system_one_decision_provider = "openrouter"` (and, if
 you want one bill, `chat_route = "openrouter"`). Then a 401/402 stops the run with "check the key / add credit",

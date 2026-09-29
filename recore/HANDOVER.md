@@ -1,10 +1,11 @@
-# Re-core HANDOVER — end of P1 (code complete, live gate not yet run)
+# Re-core HANDOVER — end of P1
 
 - **Phase:** P1 — paid routes, one model gateway, circuit breaker, spend cap, one Chrome connection per run.
 - **Date:** 2026-09-29 (the work and the DISCOVERY entries are dated 2026-09-28/29)
 - **Branch:** `recore/p1-infrastructure`
 - **Build spec:** v3.2
-- **State:** every task implemented, the offline suite green. The user has **not** yet run the live gate.
+- **State:** complete. Every task implemented, the offline suite green, and the user ran and confirmed the
+  live gate (`runs/20260929-094752`, 2026-09-29). The branch is ready to merge.
 
 The phase files still live in `~/Downloads/` (`00_common.md`, `P0_…` … `P5_…`); `recore/` holds only this file.
 
@@ -116,15 +117,43 @@ and three preflight-probe tests in `tests/test_config.py` / `tests/test_cli.py`.
 ladders; `test_jev`'s goal retry; the 401 assertions in `test_answers` (now a clean stop, not one model's failure).
 No guard, tripwire or records test was touched.
 
-**Measured, not live:** worst case per goal step is now at most 6 HTTP requests (was ~18 — spec §13.1).
+**Live gate** — `runs/20260929-094752`, `run --no-record --limit 3` with the Kev server up. Every check in
+`LIVE_TEST.md` § "P1 re-core gate" holds:
 
-**No live numbers at all this phase.** Nothing here ran against a real provider or a real site.
+| Check | Observed |
+|---|---|
+| the "Allow" line before any model probe | printed first; one connection for the run |
+| highest number of requests in flight | **1** |
+| model spend | **$0.0002**, reported (not estimated) |
+| attempts | **6 requests, 6 attempts** — nothing retried |
+| `:free` models | none (`mistral/mistral-small`, `mistral/mistral-nemo`) |
+| log key sets | exactly §6.2 / §6.3; no key string |
+| submission | no click, no `needs_confirmation`, no submit — only read-only `eval` probes |
+| job tabs | left open; the logged `browser_close` calls are `TabBook.release`'s scratch tabs |
+| `--no-record` | honoured — 7 folders still in `Applications/`, the other two directories empty |
+
+**The batching change is visible live:** each job's entry judgment (12 questions, 4 choice + 8 noul) went out as
+**one** request, where pre-P1 it was three batches of four side by side. Three jobs took 11 s of browser work.
+Worst case per goal step is now at most 6 HTTP requests, down from ~18 (spec §13.1).
+
+**Outcome:** 3 jobs, 0 parked, 3 Needs Attention `load_failure` — expected on these settings, and it still passes
+the gate (P1: "the jobs do not have to park").
 
 ## Known issues / open questions
 
-- **kev-0.8b still cannot classify a real LinkedIn posting.** Unchanged from P0, and the reason no job can park.
-  Needs a stronger or fine-tuned System One model (P3/P4). The logged `jev_inference_logs.json` entries are already
-  in the shape `kev.train` takes.
+- **kev-0.8b still cannot classify a real LinkedIn posting.** Confirmed again by the gate run: on a posting whose
+  State contained "Easy Apply to this job" it answered `kind="other"` at confidence **0.1234**, with a flat
+  distribution over eleven options (`other` 0.2031, `job_posting` 0.1652, `application_form` 0.1577) — the same
+  shape as P0's 0.1238. Model capacity, not anything P1 changed. Needs a stronger or fine-tuned System One model
+  (P3/P4); the logged `jev_inference_logs.json` entries are already in the shape `kev.train` takes.
+- **D12's `external_ats` class is not implemented, and the gate run shows why that matters.** Two of the three
+  queued jobs (Genesys, Mastercard) carry "Apply on company website" and **no Easy Apply control**; they should be
+  Needs Attention `external_ats`, and were reported as `load_failure`. There is no occurrence of `external_ats` in
+  `assistant/` or `tests/`. P5 owns the class itself, but the consequence is immediate: **that "3 job" run was
+  really testing one Easy Apply job.** Before P3's gate ("one job parked end-to-end") and P4's ("≥ 7 of 10"), the
+  queue has to be verified to hold actual Easy Apply postings, or the numbers mean nothing.
+- **Cosmetic, left by user decision (2026-09-29):** `Counters.row()` does not pluralise, so a Timings row reads
+  "1 attempts".
 - **Paid System One is unavailable on the account:** OpenRouter 402, Vercel 403.
 - **P1 T1's single endpoint is only half-done.** On the `local` route both senders already share one URL
   (`models.local.base_url` + `/v1/systemone`), which is the task's goal. The OpenRouter value stays
