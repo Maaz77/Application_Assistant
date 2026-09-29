@@ -7,7 +7,7 @@ import pytest
 
 from assistant import pages, probes
 from assistant.llm_inference import PageAnswers, judge_answers, judge_questions
-from assistant.jev import Table
+from assistant.browser import Table
 from assistant.pages import FORM_KINDS, Page, classify, classify_entry, judge, page_from_capture, read_page
 from tests.test_pages_browser import ENTRY, KINDS
 

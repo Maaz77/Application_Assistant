@@ -4,7 +4,7 @@ import pytest
 
 from assistant import pages
 from assistant.fill import page_goal
-from assistant.jev import Element, Option, Table
+from assistant.browser import Element, Option, Table
 from assistant.pages import Page, classify, gate
 
 pytestmark = pytest.mark.unit

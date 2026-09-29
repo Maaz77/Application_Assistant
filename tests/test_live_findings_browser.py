@@ -8,7 +8,7 @@ from pypdf import PdfWriter
 from assistant import cli, config as config_mod, pages, tabs
 from assistant.llm_inference import PageAnswers
 from assistant.fill import resume_input
-from assistant.jev import Jev
+from assistant.browser import Browser
 from assistant.pages import classify, read_page
 from assistant.records import Job
 from tests.support import CDP_URL

@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from assistant import decide
 from assistant.decide import THRESHOLDS as T
 from assistant import probes as probes_mod
-from assistant.jev import Jev, Element, Table, split_json
+from assistant.browser import Browser, Element, Table, split_json
 
 FORM_ROLES = {"textbox", "searchbox", "combobox", "listbox", "checkbox", "radio", "spinbutton", "switch", "file"}
 CONTROL_ROLES = {"button", "link", "menuitem", "tab"}
@@ -60,7 +60,7 @@ PAGE_PROBES = ("REQUIRED_EMPTY", "MAXLENGTHS", "IFRAME_SRCS", "FILE_LABELS", *so
 MODAL_RE = re.compile(r"^\s*! dialog open: (.*?) \[modal\]\s*$", re.M)
 
 
-def read_page(browser: Jev, session: str) -> Page:
+def read_page(browser: Browser, session: str) -> Page:
     view, table = split_json(browser.observe(session))
     pr = browser.probe(session, *PAGE_PROBES)
     enrich(table, pr)

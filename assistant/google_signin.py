@@ -5,10 +5,10 @@ import time
 
 from assistant import pages, tabs
 from assistant.blockers import NeedsAttention
-from assistant.jev import Jev
+from assistant.browser import Browser
 
 
-def sign_in(browser: Jev, session: str, book: tabs.TabBook, email: str, baseline: set[str]) -> None:
+def sign_in(browser: Browser, session: str, book: tabs.TabBook, email: str, baseline: set[str]) -> None:
     """From a page offering Google (or already on accounts.google.com), pick `email` once and return to the site.
     Raises NeedsAttention(signup/credentials) whenever §6.2 says blocker."""
     if not email:
@@ -53,7 +53,7 @@ def sign_in(browser: Jev, session: str, book: tabs.TabBook, email: str, baseline
     _back_on_site(browser, session)
 
 
-def _back_on_site(browser: Jev, session: str) -> None:
+def _back_on_site(browser: Browser, session: str) -> None:
     p = pages.read_page(browser, session)
     if why := pages.after_google_blocker(p):
         raise NeedsAttention("signup", why)

@@ -1,14 +1,11 @@
-"""Test setup. The package reads its config once per process, at `jev_ultrafast_mcp.server` import (spec v2 §9):
-apply_env() runs here, pointed at the throwaway Chrome, before anything can load the server. All browser tests
-share that Chrome; the model key (if any) comes from .env so --live tests work in the same process."""
+"""Test setup (P2). The owned driver attaches to the throwaway Chrome via its cdp_url — there is no package
+env to apply. All browser tests share that Chrome; the model key (if any) comes from .env so --live tests work."""
 from contextlib import nullcontext
 
 import pytest
 
-from assistant import config, jev
+from assistant import config, guard
 from tests.support import CDP_URL, FixtureServer, ThrowawayChrome
-
-jev.apply_env(config.load(), config.chat_key(config.load()), cdp_url=CDP_URL)
 
 
 def pytest_addoption(parser):
@@ -37,7 +34,8 @@ def decider(request):
     from assistant import decide
     from assistant import gateway as gateway_mod
     from tests.rule_decider import RuleDecider
-    jev.FORM.started = False                  # the never-submit rule's stage: each test starts before any form
+    guard.FORM.started = False                # the never-submit rule's stage: each test starts before any form
+    guard.FORM.final = False
     cfg = config.load()
     live = "live_model" in request.keywords and (
         cfg.models.system_one_decision_provider in config.KEYLESS_PROVIDERS
@@ -84,9 +82,10 @@ def chrome(cfg):
 
 @pytest.fixture
 def new_browser(cfg, chrome, tmp_path):
-    """Factory: `with new_browser() as b:` — a Jev client on the shared throwaway Chrome.
-    The key only matters for calls.jsonl redaction; the model key was fixed by apply_env() above."""
-    return lambda key="": nullcontext(jev.Jev(cfg, key, calls_log=tmp_path / "calls.jsonl"))
+    """Factory: `with new_browser() as b:` — a Browser over the owned driver on the shared throwaway Chrome."""
+    from assistant.browser import Browser
+    c = cfg.model_copy(update={"browser": cfg.browser.model_copy(update={"cdp_url": CDP_URL})})
+    return lambda key="": nullcontext(Browser(c, key, actions_log=tmp_path / "browser_actions.jsonl"))
 
 
 class Secret(str):

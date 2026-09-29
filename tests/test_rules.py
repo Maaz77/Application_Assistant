@@ -4,7 +4,7 @@ import pytest
 from assistant.blockers import Attempts, NeedsAttention
 from assistant.fill import run_pages
 from assistant.google_signin import sign_in
-from assistant.jev import Element, Table
+from assistant.browser import Element, Table
 from tests.fake_mcp import El, FakeBook, FakeMCP, FakePage
 from tests.test_fill_loop import SINGLE_ANSWERS, ctx_for, single_page
 

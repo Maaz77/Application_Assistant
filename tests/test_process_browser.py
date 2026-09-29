@@ -9,7 +9,7 @@ import pytest
 
 from assistant import cli, config as config_mod, tabs
 from assistant.llm_inference import PageAnswers
-from assistant.jev import Jev
+from assistant.browser import Browser
 from assistant.records import Job
 from tests.support import CDP_URL
 

@@ -5,7 +5,7 @@ import pytest
 
 from assistant import llm_inference as A
 from assistant.llm_inference import PageAnswers, Policy, Sources, check_answers, total_months
-from assistant.jev import Element, Option, Table
+from assistant.browser import Element, Option, Table
 from assistant.pages import Page
 
 pytestmark = pytest.mark.unit

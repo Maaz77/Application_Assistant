@@ -263,6 +263,25 @@ class Browser:
         s = self._session(session)
         return list(getattr(s.last, "new_tabs", []) or [])
 
+    def list_tabs(self) -> list[dict]:
+        """Every page tab, with full target ids + openerIds — read from the connection, no tab created."""
+        cdp = self._mgr.cdp
+        out = []
+        for info in cdp.call("Target.getTargets").get("targetInfos", []):
+            if info.get("type") == "page" and not info.get("url", "").startswith("devtools://"):
+                out.append({"target_id": info["targetId"],
+                            "opener_id": info.get("openerId") or cdp.openers.get(info["targetId"]),
+                            "url": info.get("url", ""), "title": info.get("title", "")})
+        return out
+
+    def session_target(self, session: str) -> str:
+        """The full target id of the tab this session is driving, or '' if it has no tab yet (never creates one)."""
+        s = self._mgr._sessions.get(session)
+        return s.target_id if s is not None else ""
+
+    def close_tab_id(self, session: str, target_id: str) -> None:
+        self._session(session).cdp.call("Target.closeTarget", targetId=target_id)
+
     def close(self, session: str) -> str:
         """Close a session's tab. Use only for the program's own scratch tabs (preflight); never for a
         job tab — the job tab must stay open (D13). Use `forget` to drop a job session's bookkeeping."""

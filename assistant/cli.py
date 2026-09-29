@@ -14,7 +14,6 @@ from urllib.parse import urlparse
 from assistant import config as config_mod
 from assistant import decide
 from assistant import inference_log
-from assistant import jev as jevlib
 from assistant import pages, records, tabs
 from assistant.llm_inference import (LLMInferenceError, Policy, Sources, answer_page, call_engine, resume_text,
                                      system_prompt)
@@ -22,7 +21,8 @@ from assistant.rotation import Rotation
 from assistant import gateway as gateway_mod
 from assistant.blockers import NeedsAttention, Parked, RestartFromEntry, StopRun
 from assistant.fill import JobCtx, run_pages
-from assistant.jev import Jev, JevError, split_json
+from assistant.browser import Browser, DriverError, split_json
+from assistant.driver import DriverTimeout
 from assistant.report import EXIT_PREFLIGHT, EXIT_STOPPED, JobResult, Report
 from assistant.tracker import NEEDS_ATTENTION, PENDING_REVIEW, Tracker, TrackerError
 
@@ -91,7 +91,7 @@ def _probe_llm_inference(cfg: config_mod.Config) -> list[str]:
     return answered
 
 
-def preflight(browser: Jev) -> Iterator[str]:
+def preflight(browser: Browser) -> Iterator[str]:
     """LLM inference, decision model, server, capabilities, LinkedIn sign-in. Yields each check as it passes (so a
     later failure does not hide an earlier ✓), and raises PreflightError on the first that fails. Writes only the
     run's inference logs."""
@@ -127,36 +127,36 @@ def preflight(browser: Jev) -> Iterator[str]:
         raise PreflightError(f"the decision model ({name}) answered a trivial question wrongly")
     yield f"decision model {name} answers (via {cfg.models.system_one_decision_provider})"
     doc = browser.doctor()
-    for cap in ("text_model", "uploads", "js_eval"):
+    for cap in ("uploads", "js_eval"):
         if doc.get(cap) is not True:
-            raise PreflightError(f"browser_doctor: {cap} is not enabled")
-    yield "server started; text helper, uploads and JS eval enabled"
+            raise PreflightError(f"driver doctor: {cap} is not enabled")
+    yield "driver connected; uploads and JS eval enabled"
     try:
         browser.open(LINKEDIN_FEED, "preflight", timeout=CONNECT_TIMEOUT)
         _, table = split_json(browser.observe("preflight", include_text=False))
-    except JevError as exc:
+    except DriverError as exc:
         raise PreflightError(f"could not open LinkedIn in your Chrome ({exc}). Is Chrome running with "
                              f"remote debugging on {browser.cfg.browser.cdp_url}?") from exc
     finally:
         try:
-            browser.close("preflight")
-        except JevError:
+            browser.close("preflight")            # a scratch tab, safe to close (never a job tab)
+        except DriverError:
             pass
     if not pages.linkedin_feed_ok(table.url):
         raise PreflightError(f"LinkedIn is signed out in this Chrome (landed on {table.url})")
     yield "LinkedIn signed in"
     if (browser.doctor()).get("connected") is not True:
-        raise PreflightError("browser_doctor: not connected after the LinkedIn probe")
+        raise PreflightError("driver doctor: not connected after the LinkedIn probe")
     yield "attached to Chrome"
     try:
         book = tabs.TabBook(browser)
         browser.open("about:blank", "preflight-tabs")
-        book.current("preflight-tabs")            # a tab made after the book started must resolve to a full ID
+        book.current("preflight-tabs")            # the driver reports a full target id for the scratch tab
         browser.close("preflight-tabs")
         book.close()
-    except (tabs.TabError, JevError) as exc:
-        raise PreflightError(f"tab bookkeeping does not work in this Chrome: {exc}") from exc
-    yield "tab release works"
+    except (tabs.TabError, DriverError) as exc:
+        raise PreflightError(f"tab handling does not work in this Chrome: {exc}") from exc
+    yield "tab handling works"
 
 
 def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
@@ -175,7 +175,7 @@ def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
 
 # ------------------------------------------------------------------ one job (§5)
 
-def process(job: records.Job, *, browser: Jev, book: tabs.TabBook, cfg: config_mod.Config, key: str, profile: str,
+def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: config_mod.Config, key: str, profile: str,
                   run_dir: Path, today: date, warn: Callable[[str], None] | None = None,
                   engines: Rotation | None = None) -> Parked:
     """Open the posting → the page loop (the browser agent from there) → parked. Raises NeedsAttention / StopRun.
@@ -225,11 +225,11 @@ def process(job: records.Job, *, browser: Jev, book: tabs.TabBook, cfg: config_m
             try:
                 app = book.current_handle(S)
                 book.close_junk(S, baseline, {app})
-            except (JevError, RuntimeError):
+            except (DriverError, RuntimeError):
                 pass
             try:
                 book.release(S)
-            except (JevError, RuntimeError) as exc:           # TabError is a RuntimeError
+            except (DriverError, RuntimeError) as exc:        # TabError is a RuntimeError
                 (warn or print)(f"{job.label}: its tab could not be released ({exc}); "
                                 "the tab may close when the run ends")
     raise AssertionError("unreachable")
@@ -264,26 +264,16 @@ def dry_run(cfg: config_mod.Config, args) -> int:
     return 0
 
 
-def connect_once(cfg: config_mod.Config) -> None:
-    """The run's single CDP connection (D13, P1 T5), opened before preflight so the whole run costs one "Allow"
-    click. The package keeps one websocket per process and reuses it for every session, so this is the only
-    handshake there is."""
+def connect_once(browser: Browser) -> None:
+    """The run's single CDP connection (D13), opened before preflight so the whole run costs one "Allow" click.
+    One Browser is built per run and owns one BrowserManager, so this is the only handshake there is."""
     print(f'Chrome will ask "Allow remote debugging?" — click Allow (waiting up to {CONNECT_TIMEOUT:.0f} s).',
           flush=True)
     try:
-        jevlib.connect_chrome(cfg, CONNECT_TIMEOUT)
+        browser.connect(CONNECT_TIMEOUT)
     except Exception as exc:  # noqa: BLE001 - any handshake failure is a preflight failure
-        raise PreflightError(f"could not connect to Chrome on {cfg.browser.cdp_url} ({exc}). Is Chrome running "
-                             f"with remote debugging switched on in chrome://inspect?") from exc
-
-
-def _load_package(cfg: config_mod.Config, key: str) -> None:
-    """Preflight step: the package imports after apply_env() (§1.1, §3)."""
-    try:
-        jevlib.apply_env(cfg, key)
-        jevlib.load()
-    except Exception as exc:  # noqa: BLE001 - any import failure is a preflight failure
-        raise PreflightError(f"jev-ultrafast-mcp did not load: {exc}") from exc
+        raise PreflightError(f"could not connect to Chrome on {browser.cfg.browser.cdp_url} ({exc}). Is Chrome "
+                             f"running with remote debugging switched on in chrome://inspect?") from exc
 
 
 def run(cfg: config_mod.Config, args) -> int:
@@ -297,20 +287,14 @@ def run(cfg: config_mod.Config, args) -> int:
     inference_log.start_run(run_dir)                   # scope _run until a job starts (§6.1); preflight logs here
     report = Report(started)
 
-    def on_timeout(msg: str) -> None:                  # §3: write the report, then the caller os._exit(3)s
-        report.stopped = f"a browser call hung: {msg}"
-        print(f"■ run stopped: {report.stopped}")
-        print(f"Report: {report.write(run_dir)}")
-
-    browser = Jev(cfg, key, on_timeout=on_timeout)     # calls are not logged until preflight passes
+    browser = Browser(cfg, key)                        # one Browser per run: one BrowserManager, one connection
     gateway = gateway_mod.for_config(cfg)              # every model request in this run goes through it (T2)
     gateway_mod.use(gateway)
     report.gateway = gateway
     decide.use(decide.for_config(cfg, gateway))
     try:
-        _load_package(cfg, key)
         tracker = Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
-        connect_once(cfg)                              # one "Allow remote debugging?" click for the whole run
+        connect_once(browser)                          # one "Allow remote debugging?" click for the whole run
         for line in preflight(browser):
             print(f"✓ {line}")
     except gateway_mod.GatewayStop as exc:     # T3: a stop during preflight is a stop, not a preflight failure
@@ -318,11 +302,11 @@ def run(cfg: config_mod.Config, args) -> int:
         print(f"■ run stopped: {exc}")
         print(f"Report: {report.write(run_dir)}")
         return EXIT_STOPPED
-    except (PreflightError, TrackerError, JevError) as exc:
+    except (PreflightError, TrackerError, DriverError) as exc:
         print(f"✗ preflight: {exc}")
         return EXIT_PREFLIGHT
     try:
-        browser.calls_log = run_dir / "_run" / "browser_actions.jsonl"   # preflight/queue calls; repointed per job
+        browser.actions_log = run_dir / "_run" / "browser_actions.jsonl"   # preflight/queue calls; repointed per job
         book = tabs.TabBook(browser)                   # before any job tab exists (full IDs, §4.5)
         tracker.backup(run_dir / "tracker-backup.numbers")
         if not args.no_record:
@@ -335,7 +319,7 @@ def run(cfg: config_mod.Config, args) -> int:
         engines = Rotation(cfg.models.llm_inference)   # one for the run: each page starts at the last model that answered
         for job in q.jobs:
             with inference_log.scope(job.folder):      # §6.1: this job's logs land in run_dir/<job folder>/
-                browser.calls_log = run_dir / job.folder / "browser_actions.jsonl"
+                browser.actions_log = run_dir / job.folder / "browser_actions.jsonl"
                 counters = gateway.start_job()
                 t0 = time.monotonic()
                 result = JobResult(job.company, job.title, job.linkedin_url, job.folder, 0,
@@ -363,10 +347,10 @@ def run(cfg: config_mod.Config, args) -> int:
         report.stopped = str(exc)
         print(f"■ run stopped: {exc}")
     finally:
-        browser.calls_log = run_dir / "_run" / "browser_actions.jsonl"   # tab cleanup is run-level, not a job's
+        browser.actions_log = run_dir / "_run" / "browser_actions.jsonl"   # tab cleanup is run-level, not a job's
         try:
             book.close()
-        except (NameError, JevError):
+        except (NameError, DriverError):
             pass
         d = decide.current()
         report.decisions, report.decision_model = (d.calls, d.cost), d.model
@@ -387,20 +371,19 @@ def run_preflight(cfg: config_mod.Config) -> int:
     print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, System One decision model via "
           f"{provider}{' — no key needed' if provider in config_mod.KEYLESS_PROVIDERS else ''})")
     try:
-        _load_package(cfg, key)
-        print("✓ jev-ultrafast-mcp loaded after apply_env()")
         Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
         print("✓ tracker readable")
         gateway = gateway_mod.for_config(cfg)
         gateway_mod.use(gateway)
         decide.use(decide.for_config(cfg, gateway))
-        connect_once(cfg)
-        for line in preflight(Jev(cfg, key)):
+        browser = Browser(cfg, key)
+        connect_once(browser)
+        for line in preflight(browser):
             print(f"✓ {line}")
     except gateway_mod.GatewayStop as exc:
         print(f"■ {exc}")
         return EXIT_STOPPED
-    except (PreflightError, TrackerError, JevError) as exc:
+    except (PreflightError, TrackerError, DriverError) as exc:
         print(f"✗ {exc}")
         return EXIT_PREFLIGHT
     return 0
@@ -412,11 +395,11 @@ def capture(cfg: config_mod.Config, url: str) -> int:
     out = CAPTURED / f"{host}-{datetime.now():%Y%m%d-%H%M%S}"
     out.mkdir(parents=True)
     key = config_mod.chat_key(cfg)
-    jevlib.apply_env(cfg, key)
     gateway = gateway_mod.for_config(cfg)
     gateway_mod.use(gateway)
     decide.use(decide.for_config(cfg, gateway))
-    browser = Jev(cfg, key)
+    browser = Browser(cfg, key)
+    browser.connect(CONNECT_TIMEOUT)
     book = tabs.TabBook(browser)                       # before the captured tab exists
     S = "capture"
     browser.open(url, S)
