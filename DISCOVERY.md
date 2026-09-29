@@ -919,3 +919,31 @@ not be refused. `FakeSession` gained a `navigate()` (the reopen path was never e
 "different", or LinkedIn reformats the value. After this fix, Linda AI should report a clear `broken_form` on the
 phone field (an acceptable P2 gate outcome — "parked, or broken_form with a clear reason") rather than `navigation`;
 the phone widget itself is P4. Re-run pending.
+
+## P2 live gate, iteration 5 — both fixes confirmed; read-back false-flagged a verbatim field (`runs/20260929-220759`, 2026-09-29)
+
+A second subagent run confirmed both prior fixes work live: Linda AI goes Easy Apply → **Continue applying** → the
+real "Apply to Linda AI" form → fills email + phone country code + phone → and after a `_Refill` the re-entry Easy
+Apply is **allowed** (the `FORM.started` reset works). Outcome is now `broken_form — field would not accept its
+value: 'Mobile phone number*' (after 2 attempts)`, **not** the bogus `navigation`. Never-submit airtight: only Easy
+Apply + Continue applying (×2) clicks, four types into the phone, **zero** submit/upload/POST; `Next` was present but
+never clicked.
+
+**But the phone value actually held** — the program's own DOM observations and the read-back's own `State` show
+`e45 = "+39 351 935 8813"`, byte-for-byte the answer. The failure was the **read-back judge**: `kev-0.8b` answered
+`held_0="different"` at **0.3987** over `holds` **0.2348** (empty 0.3665), four times, on a verbatim-correct field.
+A model-calibration miss, not value-didn't-stick and not a validation error.
+
+**Fix:** `fill.mismatches` decides the exact-match case in code — a field whose value already equals the answer (or
+a toggle whose option is checked) **holds without a model call**; the read-back is asked only for fields the page
+reformatted. This is the re-core target ("code decides facts; Jev answers only what stays ambiguous") and removes
+the kev false-negative for every verbatim field. Unit test
+`test_mismatches_holds_a_verbatim_field_without_asking_the_model`.
+
+**Secondary (Profile data, not code):** the answer `"+39 351 935 8813"` repeats the `+39` already in the country
+code `e44 "Italy (+39)"`. It does not cause this failure, but LinkedIn may reject a `+39`-prefixed number when a
+`+39` country code is set, at `Next`. Worth storing the national number in `Profile.md`.
+
+**P2 gate status: met** — driver, guard v2 and deterministic navigation work live; nothing is submitted;
+Genesys/Mastercard `external_ats`; Linda AI reaches and fills the Easy Apply form. Whether it now *parks* end-to-end
+(P3's bar) depends on LinkedIn accepting the phone at `Next`.

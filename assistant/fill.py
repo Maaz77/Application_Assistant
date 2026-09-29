@@ -295,16 +295,32 @@ def _held_question(q: Question) -> dict:
 
 
 def mismatches(items: list[Question], p: Page) -> list[Question]:
-    """Read-back by Jev on the fresh page: the questions whose field does not hold the answer (Jev's top choice is not
-    "holds"). It replaces rules per kind of control (option refs, redrawn radio groups, custom comboboxes that show the
-    pick only as page text). Toast's Greenhouse form, live 2026-09-24: the select held "No" while those rules said it
-    did not, and the phone widget showed the typed "351 935 8813" as "+393519358813". As a yes/no question Jev put the
-    phone at 0.36–0.54; as this choice it picks "holds" at 0.92–0.95."""
+    """The questions whose field does not hold the answer. A field whose value already equals the answer (or a
+    toggle whose option is checked) holds — a fact the code decides here, with NO model call: the read-back is
+    asked (`ask("readback")`, `HELD`) only for fields the page reformatted, so it stays for the genuinely
+    ambiguous case (a select shown as text, a phone the page rewrote) while a verbatim match is never sent.
+
+    Why the code decides the exact match: kev-0.8b false-flags a verbatim-correct field on the read-back — live
+    2026-09-29 (Linda AI), the mobile phone held "+39 351 935 8813" byte-for-byte yet kev answered "different"
+    (0.3987) over "holds" (0.2348), a near-uniform miss that failed a correctly-filled field as broken_form. The
+    re-core target: code decides facts, Jev only what stays ambiguous."""
     if not items:
         return []
+    by_ref = {e.ref: e for e in p.elements}
+
+    def already_holds(q: Question) -> bool:
+        opt = by_ref.get(q.option_ref or "")
+        if opt is not None:
+            return bool(opt.checked)                        # a radio/checkbox: it holds when its option is checked
+        e = by_ref.get(q.ref or "")
+        return e is not None and pages.norm_label(e.current or e.value) == pages.norm_label(q.answer)
+
+    ambiguous = [(i, q) for i, q in enumerate(items) if not already_holds(q)]
+    if not ambiguous:
+        return []
     a = decide.current().ask("readback", pages.page_state(p),
-                             {f"held_{i}": _held_question(q) for i, q in enumerate(items)})
-    return [q for i, q in enumerate(items) if a[f"held_{i}"].choice != "holds"]
+                             {f"held_{i}": _held_question(q) for i, q in ambiguous})
+    return [q for i, q in ambiguous if a[f"held_{i}"].choice != "holds"]
 
 
 def fill_page(ctx: JobCtx, p: Page) -> None:

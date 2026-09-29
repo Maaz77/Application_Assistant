@@ -105,6 +105,36 @@ def test_multi_step_easy_apply_walks_to_the_final_step(tmp_path):
     assert next(e for e in fake.site["s2"].els if e.name == "No").checked is True
 
 
+def test_mismatches_holds_a_verbatim_field_without_asking_the_model(tmp_path):
+    """A field whose value already equals the answer holds — decided in code, no read-back model call (kev-0.8b
+    false-flagged a verbatim phone as 'different', live 2026-09-29). Only reformatted fields reach the model."""
+    from assistant import decide, fill, pages
+    from assistant.browser import Element, Table
+    from assistant.llm_inference import PageAnswers
+    q = PageAnswers.model_validate({"questions": [
+        Q("Mobile phone number*", "+39 351 935 8813", ref="e1")]}).questions[0]
+    p = pages.Page(url="x", title="t", text="",
+                   table=Table(url="x", elements=[Element(ref="e1", role="textbox", name="Mobile phone number*",
+                                                          value="+39 351 935 8813")]))
+
+    class Boom:
+        def ask(self, *a, **k):
+            raise AssertionError("read-back asked the model for a field that already holds the answer verbatim")
+    decide.use(Boom())
+    try:
+        assert fill.mismatches([q], p) == []                     # holds; no model call
+        # a reformatted value is still sent to the model (not short-circuited)
+        p.elements[0].value = "+393519358813"
+        raised = False
+        try:
+            fill.mismatches([q], p)
+        except AssertionError:
+            raised = True
+        assert raised                                            # the ambiguous, reformatted field WAS asked
+    finally:
+        decide.use(None)
+
+
 def reminder_site():
     """Easy Apply opens a "Job search safety reminder" modal over the form. Its buttons, in DOM order, are
     Dismiss (cancels), report it, Review job post, Continue applying (proceeds) — live 2026-09-29, Linda AI.
