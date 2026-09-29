@@ -112,6 +112,14 @@ class FakeSession:
         self.last = obs
         return obs
 
+    def navigate(self, url, *, timeout=None):
+        """Go to the first scripted page with this url (several share the posting url) — like a real reopen,
+        which lands back on the posting. Used when the fill loop reopens after a _Refill."""
+        match = next((k for k, pg in self.mgr.site.items() if pg.url == url), None)
+        if match is not None:
+            self.mgr.cur = match
+        self.last = None
+
     def _refresh_tabs(self):
         return [{"index": 0, "target_id": self.target_id, "opener_id": None,
                  "url": self._page.url, "title": self._page.title, "active": True}]

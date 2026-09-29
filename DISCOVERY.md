@@ -892,4 +892,30 @@ first DOM match wins.
 before "Continue applying"), `wait_for_dialog` keeps polling for the proceed control instead of clicking the wrong
 one, and each successful interstitial click resets the wait so the form has time to render. Offline test renamed
 `test_easy_apply_safety_reminder_is_passed_with_continue_applying` with the real four-button modal (Dismiss first,
-Continue applying last); the test fails if "Dismiss" is clicked. Re-run pending.
+Continue applying last); the test fails if "Dismiss" is clicked.
+
+## P2 live gate, iteration 4 — `FORM.started` not reset on the broken_form re-entry (`runs/20260929-215143`, 2026-09-29)
+
+The "Continue applying" fix worked: Linda AI went Easy Apply → **Continue applying** (e41) → the real **"Apply to
+Linda AI"** form dialog opened with its fields (Email, Phone country code, Mobile phone number, Next), and
+`fill_page` **ran and typed the phone (e45)**. But the mobile-phone field did not "hold" its value on read-back, so
+`fill_page` raised `_Refill` (broken_form attempt 2). `run_pages` re-opened the posting and re-entered — **but did
+not reset `guard.FORM.started`** (set True by `fill_page`), so the re-entry `navigate.enter` clicked "Easy Apply"
+with the form-being-filled flag still set and the driver **refused** it ("the program never clicks Apply once the
+form is being filled"). No dialog reopened → `wait_for_dialog` timed out → the job reported `navigation` "clicked
+Easy Apply but no application dialog appeared" — a bogus symptom hiding the real cause (the phone field).
+
+Never-submit held throughout: the only clicks were Easy Apply, Continue applying, and the *refused* re-entry Easy
+Apply; two `type` ops into the phone field; no submit, no POST.
+
+**Fix:** both re-entry paths in `run_pages` (a `_Refill`, and "the Easy Apply dialog is not open") now reset
+`guard.FORM.started = guard.FORM.final = False` before reopening the posting, so a re-entry is a clean posting entry
+where Easy Apply is clickable again. Regression test `test_refill_reenters_and_easy_apply_stays_clickable`: a
+field that will not hold must end `broken_form` (the field), never `navigation`, and the re-entry Easy Apply must
+not be refused. `FakeSession` gained a `navigate()` (the reopen path was never exercised offline before).
+
+**Open for the next iteration (P4-ish):** why the mobile-phone value did not hold (a `tel` input should keep
+"351 935 8813" verbatim; the country code is a separate combobox). Either the read-back judge (kev) wrongly said
+"different", or LinkedIn reformats the value. After this fix, Linda AI should report a clear `broken_form` on the
+phone field (an acceptable P2 gate outcome — "parked, or broken_form with a clear reason") rather than `navigation`;
+the phone widget itself is P4. Re-run pending.

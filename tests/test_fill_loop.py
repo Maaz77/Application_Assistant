@@ -132,6 +132,26 @@ def test_easy_apply_safety_reminder_is_passed_with_continue_applying(tmp_path):
     assert next(e for e in fake.site["s1"].els if e.name == "City").value == "Milan"
 
 
+def test_refill_reenters_and_easy_apply_stays_clickable(tmp_path):
+    """A field that will not hold triggers _Refill (broken_form attempt 2). Re-entry from the posting must reset
+    guard.FORM.started, or the re-entry Easy Apply click is refused as "Apply while filling" and the job wrongly
+    reports `navigation` instead of `broken_form` (live 2026-09-29, Linda AI's phone field)."""
+    site = single_dialog()
+    site["s1"].els.insert(0, El("textbox", "Mobile phone number", required=True, dialog="d", refuse_typing=True))
+    answers = {"Data Engineer | Acme | LinkedIn": [
+        Q("Mobile phone number", "351 935 8813", ref="auto"),
+        Q("City", "Milan", ref="auto"),
+        Q("Resume", None, kind="file", ref="auto", source=None)]}
+    browser, fake = fake_browser(site, "job")
+    with pytest.raises(NeedsAttention) as exc:
+        run_pages(ctx_for(browser, answers, tmp_path))
+    assert exc.value.cls == "broken_form"        # the phone field — NOT "navigation" (the bug's symptom)
+    assert fake.sent == []
+    # Easy Apply was clicked more than once (initial + re-entry) and never refused for "Apply while filling".
+    assert not any("Apply once the form is being filled" in (op.get("detail", "") or "")
+                   for _, op in fake.log)
+
+
 def test_external_apply_is_external_ats(tmp_path):
     site = {"job": FakePage(LI, "Data Engineer | Acme | LinkedIn", "Data Engineer | Acme.",
                             [El("link", "Apply"), El("button", "Save")])}

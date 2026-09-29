@@ -441,6 +441,7 @@ def run_pages(ctx: JobCtx) -> Parked:
                 continue                                         # a cookie was declined, or the dialog is opening
             if not navigate.dialog_is_open(p):
                 ctx.attempts.fail("broken_form", "the Easy Apply dialog is not open")   # raises when no attempt left
+                guard.FORM.started = guard.FORM.final = False       # re-entry from the posting: Apply is clickable again
                 entered, filled = False, False
                 ctx.browser.open(ctx.last.url, ctx.session)
                 continue
@@ -448,7 +449,11 @@ def run_pages(ctx: JobCtx) -> Parked:
                 try:
                     fill_page(ctx, p)
                 except _Refill as rf:
-                    ctx.browser.open(rf.url or ctx.last.url, ctx.session)   # reopen the posting and re-enter
+                    # broken_form attempt 2: reopen the posting and re-enter. Reset the fill stage, or the
+                    # re-entry Easy Apply click is refused as "Apply once the form is being filled" (live
+                    # 2026-09-29, Linda AI — that turned a phone-field broken_form into a bogus "navigation").
+                    guard.FORM.started = guard.FORM.final = False
+                    ctx.browser.open(rf.url or ctx.last.url, ctx.session)
                     entered, filled = False, False
                     continue
                 filled = True
