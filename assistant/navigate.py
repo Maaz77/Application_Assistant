@@ -133,26 +133,31 @@ def _entry_choice(ctx, p: pages.Page) -> str:
     raise NeedsAttention("navigation", f"no way to start the application on {p.title or p.url!r}")
 
 
-# An interstitial that LinkedIn puts over/before the Easy Apply form — most often the "Job search safety
-# reminder" modal (live 2026-09-29, Linda AI). Its control must be clicked to reveal the form. "Continue applying"
-# is preferred; a plain "Dismiss"/"Got it" is accepted (it dismisses the reminder, not the application). Guarded
-# by never_click_element like every click — none of these are submit/structural, and Apply is allowed pre-fill.
-INTERSTITIAL_RE = re.compile(r"^\s*(continue applying|continue|got it|i understand|dismiss|okay|ok)\b", re.I)
+# The control that PROCEEDS past a LinkedIn interstitial to the Easy Apply form. Deliberately narrow: only
+# "Continue applying" / "Continue" — NOT "Dismiss" (the "Job search safety reminder" modal's close button, which
+# CANCELS the application), nor "Review job post" / "report it". Live 2026-09-29 (Linda AI): clicking Easy Apply
+# raised that reminder over the form; its buttons in DOM order are Dismiss, report it, Review job post, Continue
+# applying — so "click the first match" clicked Dismiss and abandoned the application. If only a close/cancel
+# control is present (the reminder renders "Dismiss" a beat before "Continue applying"), we wait for the proceed
+# control rather than click the wrong thing.
+PROCEED_RE = re.compile(r"^\s*(continue applying|continue to next step|continue)\b", re.I)
 
 
 def _interstitial_control(p: pages.Page):
-    """A control inside an open dialog that has no form fields yet — a reminder to click through, not the form."""
+    """A PROCEED control inside an open dialog that has no form fields yet — clicks through a reminder to the
+    form. Returns None when the dialog is the form itself, or when only a cancel/close control is showing."""
     if dialog_fields(p):
         return None
     for e in in_dialog(p):
-        if e.role in {"button", "link"} and INTERSTITIAL_RE.search(e.name or ""):
+        if e.role in {"button", "link"} and PROCEED_RE.search(e.name or ""):
             return e
     return None
 
 
 def wait_for_dialog(ctx, seconds: int = DIALOG_WAIT) -> pages.Page | None:
-    """Read (no settle) until the Easy Apply dialog's fields appear, at most `seconds`. Click through an
-    interstitial dialog (e.g. the "Job search safety reminder") that sits over the form, once per control."""
+    """Read (no settle) until the Easy Apply dialog's fields appear. Click through an interstitial dialog (e.g.
+    the "Job search safety reminder") that sits over the form by its Continue-applying control, once per control;
+    each such click resets the wait so the form has time to render underneath."""
     deadline = time.monotonic() + seconds
     clicked: set[str] = set()
     while True:
@@ -163,7 +168,8 @@ def wait_for_dialog(ctx, seconds: int = DIALOG_WAIT) -> pages.Page | None:
         if control is not None and control.ref not in clicked:
             clicked.add(control.ref)
             ctx.browser.act([{"op": "click", "ref": control.ref}], ctx.session, p.table, stop_on_error=False)
-            continue                                   # look again at once — the form may be underneath
+            deadline = time.monotonic() + seconds      # progress: give the form underneath a fresh wait
+            continue
         if time.monotonic() >= deadline:
             return None
         ctx.sleep(0.5)

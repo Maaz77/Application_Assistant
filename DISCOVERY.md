@@ -873,6 +873,23 @@ plus read-only probes only — **no type/upload, no POST**; the reminder was nev
 **Fix:** `navigate.wait_for_dialog` now clicks through an interstitial — a dialog that is open but has no form
 fields — using `INTERSTITIAL_RE` (continue applying / continue / got it / i understand / dismiss / ok), once per
 control, then looks again for the form underneath. Guarded by `never_click_element` like any click (none are
-submit/structural; "Continue applying" is allowed pre-fill). Offline test:
-`test_easy_apply_safety_reminder_is_dismissed_then_the_form_fills`. Re-run pending — confirm the form appears after
-the reminder is dismissed.
+submit/structural; "Continue applying" is allowed pre-fill).
+
+## P2 live gate, iteration 3 — the reminder fix clicked "Dismiss" (cancel), not "Continue applying" (2026-09-29)
+
+A subagent re-ran the live test (`runs/20260929-162226`) and inspected the real tabs with the Chrome tools. Result:
+never-submit airtight (exactly two clicks in the whole run — the Easy Apply entry and one modal button — and **0**
+type/upload/POST; Genesys + Mastercard clicked nothing and are correctly `external_ats`, verified against the live
+"Apply on company website" → Workday/Phenom pages). But Linda AI still failed, and the iteration-2 fix was the
+cause: the "Job search safety reminder" modal's buttons in DOM order are **Dismiss, report it, Review job post,
+Continue applying** (from the iteration-2 log, which polled the fully-rendered modal for 8 s), and
+`_interstitial_control` returned the **first** `INTERSTITIAL_RE` match — "Dismiss" — which **cancels** the
+application (obs after the click showed the bare job page, no form). A regex alternation does not rank alternatives;
+first DOM match wins.
+
+**Fix (iteration 3):** `PROCEED_RE` matches only `continue applying` / `continue to next step` / `continue` — never
+`dismiss` / `review job post` / `report it`. If only a cancel control is showing (the modal renders "Dismiss" a beat
+before "Continue applying"), `wait_for_dialog` keeps polling for the proceed control instead of clicking the wrong
+one, and each successful interstitial click resets the wait so the form has time to render. Offline test renamed
+`test_easy_apply_safety_reminder_is_passed_with_continue_applying` with the real four-button modal (Dismiss first,
+Continue applying last); the test fails if "Dismiss" is clicked. Re-run pending.
