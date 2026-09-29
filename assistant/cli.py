@@ -47,6 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
     trip.add_argument("--live", action="store_true", help="also run the live_model goal tripwire (OpenRouter)")
     cap = sub.add_parser("capture", help="save a read-only snapshot of a page for tests")
     cap.add_argument("url")
+    rep = sub.add_parser("replay", help="offline replay of a recorded job")
+    rep.add_argument("path", type=Path, help="path to a job folder within a run")
+    rep.add_argument("--live", action="store_true", help="call real APIs on cache miss and save to fixture")
     req = sub.add_parser("requeue", help="put Needs-Attention jobs back in the queue (status Resume Built)")
     req.add_argument("--job", metavar="URL", help="only the job with this LinkedIn URL")
     return p
@@ -451,4 +454,7 @@ def main(argv: list[str] | None = None) -> int:
         return capture(cfg, args.url)
     if args.cmd == "requeue":
         return requeue(cfg, args.job)
+    if args.cmd == "replay":
+        from tests.replay.harness import replay_job
+        return replay_job(args.path, mode="live" if args.live else "strict", cfg=cfg)
     return EXIT_STOPPED

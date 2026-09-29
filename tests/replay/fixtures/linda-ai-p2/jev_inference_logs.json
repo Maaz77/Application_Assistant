@@ -1,0 +1,5397 @@
+[
+  {
+    "State": {
+      "page": "Founding Software Engineer | Linda AI | LinkedIn",
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "shown_0",
+        "type": "noul",
+        "instructions": {
+          "value": "Italy (+39)",
+          "question": "Is `value` a placeholder prompt, such as 'Select an option', 'Choose…' or '--', rather than a real answer?"
+        }
+      },
+      {
+        "id": "shown_1",
+        "type": "noul",
+        "instructions": {
+          "value": "abbaszadehmohammadamin@yahoo.com",
+          "question": "Is `value` a placeholder prompt, such as 'Select an option', 'Choose…' or '--', rather than a real answer?"
+        }
+      }
+    ],
+    "Choice": [],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "shown_0": {
+          "type": "noul",
+          "noul": 0.3166
+        },
+        "shown_1": {
+          "type": "noul",
+          "noul": 0.3612
+        }
+      },
+      "usage": {
+        "input_tokens": 171,
+        "output_tokens": 48
+      },
+      "latency_ms": 403.6
+    }
+  },
+  {
+    "State": {
+      "page": "Founding Software Engineer | Linda AI | LinkedIn",
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "resume_0",
+        "type": "noul",
+        "instructions": {
+          "form_question": "Email address*",
+          "options": [
+            "abbaszadehmohammadamin@yahoo.com",
+            "maaz1377.aa@gmail.com"
+          ],
+          "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing among uploaded resume files?"
+        }
+      },
+      {
+        "id": "resume_1",
+        "type": "noul",
+        "instructions": {
+          "form_question": "Phone country code*",
+          "options": [
+            "Andorra (+376)",
+            "United Arab Emirates (+971)",
+            "Afghanistan (+93)",
+            "Antigua & Barbuda (+1)",
+            "Anguilla (+1)",
+            "Albania (+355)",
+            "Armenia (+374)",
+            "Angola (+244)",
+            "Antarctica (+0)",
+            "Argentina (+54)",
+            "American Samoa (+1)",
+            "Austria (+43)",
+            "Australia (+61)",
+            "Aruba (+297)",
+            "Åland Islands (+358)",
+            "Azerbaijan (+994)",
+            "Bosnia & Herzegovina (+387)",
+            "Barbados (+1)",
+            "Bangladesh (+880)",
+            "Belgium (+32)",
+            "Burkina Faso (+226)",
+            "Bulgaria (+359)",
+            "Bahrain (+973)",
+            "Burundi (+257)",
+            "Benin (+229)",
+            "St. Barthélemy (+590)",
+            "Bermuda (+1)",
+            "Brunei (+673)",
+            "Bolivia (+591)",
+            "Caribbean Netherlands (+599)",
+            "Brazil (+55)",
+            "Bahamas (+1)",
+            "Bhutan (+975)",
+            "Bouvet Island (+0)",
+            "Botswana (+267)",
+            "Belarus (+375)",
+            "Belize (+501)",
+            "Canada (+1)",
+            "Cocos (Keeling) Islands (+61)",
+            "Congo - Kinshasa (+243)"
+          ],
+          "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing among uploaded resume files?"
+        }
+      },
+      {
+        "id": "resume_2",
+        "type": "noul",
+        "instructions": {
+          "form_question": "Mobile phone number*",
+          "options": [],
+          "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing among uploaded resume files?"
+        }
+      }
+    ],
+    "Choice": [],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "resume_0": {
+          "type": "noul",
+          "noul": 0.4037
+        },
+        "resume_1": {
+          "type": "noul",
+          "noul": 0.3276
+        },
+        "resume_2": {
+          "type": "noul",
+          "noul": 0.3275
+        }
+      },
+      "usage": {
+        "input_tokens": 610,
+        "output_tokens": 72
+      },
+      "latency_ms": 603.0
+    }
+  },
+  {
+    "State": {
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+      "title": "Founding Software Engineer | Linda AI | LinkedIn",
+      "open_dialogs": [
+        "Apply to Linda AI"
+      ],
+      "controls": [
+        {
+          "ref": "e38",
+          "role": "button",
+          "name": "Dismiss"
+        },
+        {
+          "ref": "e43",
+          "role": "combobox",
+          "name": "Email address*",
+          "value": "abbaszadehmohammadamin@yahoo.com",
+          "options": [
+            "abbaszadehmohammadamin@yahoo.com",
+            "maaz1377.aa@gmail.com"
+          ]
+        },
+        {
+          "ref": "e44",
+          "role": "combobox",
+          "name": "Phone country code*",
+          "value": "Italy (+39)",
+          "options": [
+            "Andorra (+376)",
+            "United Arab Emirates (+971)",
+            "Afghanistan (+93)",
+            "Antigua & Barbuda (+1)",
+            "Anguilla (+1)",
+            "Albania (+355)",
+            "Armenia (+374)",
+            "Angola (+244)"
+          ]
+        },
+        {
+          "ref": "e45",
+          "role": "textbox",
+          "name": "Mobile phone number*"
+        },
+        {
+          "ref": "e46",
+          "role": "button",
+          "name": "Next"
+        }
+      ],
+      "required_fields_still_empty": [
+        "Mobile phone number*"
+      ],
+      "text": "Apply to Linda AI 1/4 pages Contact info Amin Abbaszadeh Full-Stack AI/ML Engineer | Computer Vision | Model Quantization | Ex-STMicroelectronics | Polimi Alumnus Milan, Lombardy, Italy Email address* Phone country code* Mobile phone number* Next 0 notifications"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "submitted",
+        "type": "noul",
+        "instructions": "Does the page say that a job application was just submitted, sent or received?",
+        "criteria": {
+          "true": "A confirmation such as 'Your application was submitted' or 'Thank you for applying'.",
+          "false": "No such confirmation. Counts of applicants, or a badge on another job, do not count."
+        }
+      },
+      {
+        "id": "applied",
+        "type": "noul",
+        "instructions": "Does the page say that the candidate has already applied to this job?"
+      },
+      {
+        "id": "covered",
+        "type": "noul",
+        "instructions": "Is a pop-up that is not part of the job application in front of the page, covering what is behind it?",
+        "criteria": {
+          "true": "A cookie or consent banner, a newsletter pop-up or another overlay sits over the application or the job page.",
+          "false": "Nothing covers the page, or what is in front is the application form itself."
+        }
+      },
+      {
+        "id": "actionable",
+        "type": "noul",
+        "instructions": "Besides the site's own navigation, does the page already offer something to act on for this job?",
+        "criteria": {
+          "true": "An apply button or link, a field of a form, or the buttons of a dialog about the application.",
+          "false": "Only the site's navigation links, a search box, a spinner or a loading message."
+        }
+      },
+      {
+        "id": "validation",
+        "type": "noul",
+        "instructions": "Does the page show an error message about a form field, such as 'This field is required' or 'Invalid email'?"
+      },
+      {
+        "id": "registration",
+        "type": "noul",
+        "instructions": "Does the page ask to complete a registration, create a profile or accept terms of use before going on?"
+      },
+      {
+        "id": "submit_button",
+        "type": "noul",
+        "instructions": "Is there a button that would submit the job application, such as 'Submit application', 'Send application' or 'Apply'?"
+      },
+      {
+        "id": "field_e43",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e43",
+            "role": "combobox",
+            "name": "Email address*",
+            "value": "abbaszadehmohammadamin@yahoo.com",
+            "options": [
+              "abbaszadehmohammadamin@yahoo.com",
+              "maaz1377.aa@gmail.com"
+            ]
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e44",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e44",
+            "role": "combobox",
+            "name": "Phone country code*",
+            "value": "Italy (+39)",
+            "options": [
+              "Andorra (+376)",
+              "United Arab Emirates (+971)",
+              "Afghanistan (+93)",
+              "Antigua & Barbuda (+1)",
+              "Anguilla (+1)",
+              "Albania (+355)",
+              "Armenia (+374)",
+              "Angola (+244)"
+            ]
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e45",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e45",
+            "role": "textbox",
+            "name": "Mobile phone number*"
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      }
+    ],
+    "Choice": [
+      {
+        "id": "kind",
+        "type": "choice",
+        "instructions": "What is this page, as a step of applying for a job?",
+        "criteria": {
+          "job_posting": "A job description page. It offers a button or link to start applying (Apply, Easy Apply, Apply now).",
+          "interstitial": "A step between the job posting and the application form: a job-search safety reminder, a 'you are leaving this site' notice, or a choice of how to start the application (apply manually, autofill with a resume).",
+          "application_form": "A step of the job application itself: its own fields such as name, email, phone, resume upload or screening questions, with a way to go on to the next step.",
+          "final_step": "The application's last step: a review or summary, or a form whose only way forward is a button that submits the application.",
+          "account_wall": "Asks to sign in, to create an account or to enter a password before the application can go on.",
+          "google_sign_in": "Google's own sign-in page: an account chooser, a permission request, a password or code.",
+          "captcha": "A human-verification challenge.",
+          "confirmation": "Says that the application was submitted, sent or received.",
+          "closed": "Says that the job is closed or no longer accepts applications.",
+          "error": "An error page, a page that did not load, or an empty page.",
+          "other": "None of the above."
+        }
+      },
+      {
+        "id": "account",
+        "type": "choice",
+        "instructions": "What does the page ask for about an account?",
+        "criteria": {
+          "create_account": "To create a new account: sign up, register, choose a password.",
+          "sign_in": "To sign in to an existing account or enter a password.",
+          "none": "Neither."
+        }
+      },
+      {
+        "id": "resume_input",
+        "type": "choice",
+        "instructions": "Which control uploads the candidate's resume (CV)?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e46": "Next",
+          "none": "No control on this page uploads a resume."
+        }
+      },
+      {
+        "id": "google_button",
+        "type": "choice",
+        "instructions": "Which control signs in or continues with Google?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e46": "Next",
+          "none": "No control signs in with Google."
+        }
+      },
+      {
+        "id": "form_iframe",
+        "type": "choice",
+        "instructions": "Which embedded frame holds the job application form?",
+        "criteria": {
+          "frame0": "https://www.linkedin.com/preload/?_bprMode=vanilla",
+          "frame1": "https://lnkd.demdex.net/dest5.html?d_nsid=0#https%3A%2F%2Fwww.linkedin.com",
+          "none": "None of these frames holds an application form."
+        }
+      }
+    ],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "kind": {
+          "type": "choice",
+          "choice": "application_form",
+          "confidence": 0.1874,
+          "probabilities": {
+            "job_posting": 0.1964,
+            "interstitial": 0.1029,
+            "application_form": 0.2613,
+            "final_step": 0.1341,
+            "account_wall": 0.0229,
+            "google_sign_in": 0.0096,
+            "captcha": 0.0033,
+            "confirmation": 0.0316,
+            "closed": 0.0329,
+            "error": 0.055,
+            "other": 0.15
+          }
+        },
+        "submitted": {
+          "type": "noul",
+          "noul": 0.3471
+        },
+        "applied": {
+          "type": "noul",
+          "noul": 0.3913
+        },
+        "covered": {
+          "type": "noul",
+          "noul": 0.2922
+        },
+        "actionable": {
+          "type": "noul",
+          "noul": 0.8769
+        },
+        "validation": {
+          "type": "noul",
+          "noul": 0.3969
+        },
+        "registration": {
+          "type": "noul",
+          "noul": 0.1884
+        },
+        "account": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.8511,
+          "probabilities": {
+            "create_account": 0.0278,
+            "sign_in": 0.0715,
+            "none": 0.9007
+          }
+        },
+        "submit_button": {
+          "type": "noul",
+          "noul": 0.7587
+        },
+        "field_e43": {
+          "type": "noul",
+          "noul": 0.6316
+        },
+        "field_e44": {
+          "type": "noul",
+          "noul": 0.5915
+        },
+        "field_e45": {
+          "type": "noul",
+          "noul": 0.6253
+        },
+        "resume_input": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.6517,
+          "probabilities": {
+            "e38": 0.0694,
+            "e46": 0.1628,
+            "none": 0.7678
+          }
+        },
+        "google_button": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.4178,
+          "probabilities": {
+            "e38": 0.075,
+            "e46": 0.3131,
+            "none": 0.6119
+          }
+        },
+        "form_iframe": {
+          "type": "choice",
+          "choice": "frame1",
+          "confidence": 0.2946,
+          "probabilities": {
+            "frame0": 0.1224,
+            "frame1": 0.5297,
+            "none": 0.3478
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 1700,
+        "output_tokens": 657
+      },
+      "latency_ms": 2244.8
+    }
+  },
+  {
+    "State": {
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+      "title": "Founding Software Engineer | Linda AI | LinkedIn",
+      "open_dialogs": [
+        "Apply to Linda AI"
+      ],
+      "controls": [
+        {
+          "ref": "e38",
+          "role": "button",
+          "name": "Dismiss"
+        },
+        {
+          "ref": "e43",
+          "role": "combobox",
+          "name": "Email address*",
+          "value": "abbaszadehmohammadamin@yahoo.com",
+          "options": [
+            "abbaszadehmohammadamin@yahoo.com",
+            "maaz1377.aa@gmail.com"
+          ]
+        },
+        {
+          "ref": "e44",
+          "role": "combobox",
+          "name": "Phone country code*",
+          "value": "Italy (+39)",
+          "options": [
+            "Andorra (+376)",
+            "United Arab Emirates (+971)",
+            "Afghanistan (+93)",
+            "Antigua & Barbuda (+1)",
+            "Anguilla (+1)",
+            "Albania (+355)",
+            "Armenia (+374)",
+            "Angola (+244)"
+          ]
+        },
+        {
+          "ref": "e45",
+          "role": "textbox",
+          "name": "Mobile phone number*"
+        },
+        {
+          "ref": "e46",
+          "role": "button",
+          "name": "Next"
+        }
+      ],
+      "required_fields_still_empty": [
+        "Mobile phone number*"
+      ],
+      "text": "Apply to Linda AI 1/4 pages Contact info Amin Abbaszadeh Full-Stack AI/ML Engineer | Computer Vision | Model Quantization | Ex-STMicroelectronics | Polimi Alumnus Milan, Lombardy, Italy Email address* Phone country code* Mobile phone number* Next 0 notifications"
+    },
+    "Score": [],
+    "Noul": [],
+    "Choice": [
+      {
+        "id": "op_0",
+        "type": "choice",
+        "instructions": {
+          "question": "Mobile phone number*",
+          "answer": "+39 351 935 8813",
+          "llm_inference_ref": "e45",
+          "ask": "How does `answer` go into the form for `question`?"
+        },
+        "criteria": {
+          "type": "Type the answer into the field: a text box, a text area or a number field.",
+          "select": "Choose the answer in a dropdown list whose options are listed on the page.",
+          "check": "Check the radio button or checkbox that is the answer.",
+          "widget": "Anything else, which needs clicks: a dropdown with no listed options, a date picker, an autocomplete."
+        }
+      },
+      {
+        "id": "field_0",
+        "type": "choice",
+        "instructions": {
+          "question": "Mobile phone number*",
+          "answer": "+39 351 935 8813",
+          "llm_inference_ref": "e45",
+          "ask": "Which field is the one for `question`?"
+        },
+        "criteria": {
+          "e43": "Email address*",
+          "e44": "Phone country code*",
+          "e45": "Mobile phone number*",
+          "none": "None of these fields."
+        }
+      },
+      {
+        "id": "option_0",
+        "type": "choice",
+        "instructions": {
+          "question": "Mobile phone number*",
+          "answer": "+39 351 935 8813",
+          "llm_inference_ref": "e45",
+          "ask": "Which option is `answer` for `question`?"
+        },
+        "criteria": {
+          "e43:1": "Email address*: abbaszadehmohammadamin@yahoo.com",
+          "e43:2": "Email address*: maaz1377.aa@gmail.com",
+          "e44:1": "Phone country code*: Andorra (+376)",
+          "e44:2": "Phone country code*: United Arab Emirates (+971)",
+          "e44:3": "Phone country code*: Afghanistan (+93)",
+          "e44:4": "Phone country code*: Antigua & Barbuda (+1)",
+          "e44:5": "Phone country code*: Anguilla (+1)",
+          "e44:6": "Phone country code*: Albania (+355)",
+          "e44:7": "Phone country code*: Armenia (+374)",
+          "e44:8": "Phone country code*: Angola (+244)",
+          "e44:9": "Phone country code*: Antarctica (+0)",
+          "e44:10": "Phone country code*: Argentina (+54)",
+          "e44:11": "Phone country code*: American Samoa (+1)",
+          "e44:12": "Phone country code*: Austria (+43)",
+          "e44:13": "Phone country code*: Australia (+61)",
+          "e44:14": "Phone country code*: Aruba (+297)",
+          "e44:15": "Phone country code*: Åland Islands (+358)",
+          "e44:16": "Phone country code*: Azerbaijan (+994)",
+          "e44:17": "Phone country code*: Bosnia & Herzegovina (+387)",
+          "e44:18": "Phone country code*: Barbados (+1)",
+          "e44:19": "Phone country code*: Bangladesh (+880)",
+          "e44:20": "Phone country code*: Belgium (+32)",
+          "e44:21": "Phone country code*: Burkina Faso (+226)",
+          "e44:22": "Phone country code*: Bulgaria (+359)",
+          "e44:23": "Phone country code*: Bahrain (+973)",
+          "e44:24": "Phone country code*: Burundi (+257)",
+          "e44:25": "Phone country code*: Benin (+229)",
+          "e44:26": "Phone country code*: St. Barthélemy (+590)",
+          "e44:27": "Phone country code*: Bermuda (+1)",
+          "e44:28": "Phone country code*: Brunei (+673)",
+          "e44:29": "Phone country code*: Bolivia (+591)",
+          "e44:30": "Phone country code*: Caribbean Netherlands (+599)",
+          "e44:31": "Phone country code*: Brazil (+55)",
+          "e44:32": "Phone country code*: Bahamas (+1)",
+          "e44:33": "Phone country code*: Bhutan (+975)",
+          "e44:34": "Phone country code*: Bouvet Island (+0)",
+          "e44:35": "Phone country code*: Botswana (+267)",
+          "e44:36": "Phone country code*: Belarus (+375)",
+          "e44:37": "Phone country code*: Belize (+501)",
+          "e44:38": "Phone country code*: Canada (+1)",
+          "e44:39": "Phone country code*: Cocos (Keeling) Islands (+61)",
+          "e44:40": "Phone country code*: Congo - Kinshasa (+243)",
+          "none": "None of these options."
+        }
+      }
+    ],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "op_0": {
+          "type": "choice",
+          "choice": "type",
+          "confidence": 0.435,
+          "probabilities": {
+            "type": 0.5763,
+            "select": 0.1359,
+            "check": 0.1107,
+            "widget": 0.1772
+          }
+        },
+        "field_0": {
+          "type": "choice",
+          "choice": "e45",
+          "confidence": 0.4241,
+          "probabilities": {
+            "e43": 0.0324,
+            "e44": 0.0445,
+            "e45": 0.5681,
+            "none": 0.3549
+          }
+        },
+        "option_0": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.2484,
+          "probabilities": {
+            "e43:1": 0.0667,
+            "e43:2": 0.0465,
+            "e44:1": 0.018,
+            "e44:2": 0.0189,
+            "e44:3": 0.0269,
+            "e44:4": 0.0243,
+            "e44:5": 0.0311,
+            "e44:6": 0.0346,
+            "e44:7": 0.0343,
+            "e44:8": 0.0343,
+            "e44:9": 0.007,
+            "e44:10": 0.0106,
+            "e44:11": 0.0209,
+            "e44:12": 0.0084,
+            "e44:13": 0.0106,
+            "e44:14": 0.0104,
+            "e44:15": 0.0136,
+            "e44:16": 0.0166,
+            "e44:17": 0.0121,
+            "e44:18": 0.0133,
+            "e44:19": 0.0079,
+            "e44:20": 0.0091,
+            "e44:21": 0.0105,
+            "e44:22": 0.0146,
+            "e44:23": 0.0139,
+            "e44:24": 0.0097,
+            "e44:25": 0.009,
+            "e44:26": 0.0101,
+            "e44:27": 0.0168,
+            "e44:28": 0.012,
+            "e44:29": 0.0126,
+            "e44:30": 0.0128,
+            "e44:31": 0.0108,
+            "e44:32": 0.0151,
+            "e44:33": 0.0132,
+            "e44:34": 0.007,
+            "e44:35": 0.0129,
+            "e44:36": 0.0224,
+            "e44:37": 0.0098,
+            "e44:38": 0.0173,
+            "e44:39": 0.0085,
+            "e44:40": 0.019,
+            "none": 0.2659
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 1498,
+        "output_tokens": 857
+      },
+      "latency_ms": 1302.7
+    }
+  },
+  {
+    "State": {
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+      "title": "Founding Software Engineer | Linda AI | LinkedIn",
+      "open_dialogs": [
+        "Apply to Linda AI"
+      ],
+      "controls": [
+        {
+          "ref": "e38",
+          "role": "button",
+          "name": "Dismiss"
+        },
+        {
+          "ref": "e47",
+          "role": "button",
+          "name": "PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026"
+        },
+        {
+          "ref": "e48",
+          "role": "link",
+          "name": "Download Amin_Accenture_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e49",
+          "role": "radio",
+          "name": "Amin_Accenture_AI-Engineer.pdf",
+          "checked": true
+        },
+        {
+          "ref": "e50",
+          "role": "button",
+          "name": "PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026"
+        },
+        {
+          "ref": "e51",
+          "role": "link",
+          "name": "Download Amin_Version-1_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e52",
+          "role": "radio",
+          "name": "Amin_Version-1_AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e53",
+          "role": "button",
+          "name": "PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026"
+        },
+        {
+          "ref": "e54",
+          "role": "link",
+          "name": "Download Amin_Vallum-Associates_Agentic-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e55",
+          "role": "radio",
+          "name": "Amin_Vallum-Associates_Agentic-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e56",
+          "role": "button",
+          "name": "PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026"
+        },
+        {
+          "ref": "e57",
+          "role": "link",
+          "name": "Download Amin_Elsevier_Data-Scientist.pdf"
+        },
+        {
+          "ref": "e58",
+          "role": "radio",
+          "name": "Amin_Elsevier_Data-Scientist.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e59",
+          "role": "button",
+          "name": "PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026"
+        },
+        {
+          "ref": "e60",
+          "role": "link",
+          "name": "Download Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf"
+        },
+        {
+          "ref": "e61",
+          "role": "radio",
+          "name": "Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e62",
+          "role": "button",
+          "name": "PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e63",
+          "role": "link",
+          "name": "Download Amin_iProov_Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e64",
+          "role": "radio",
+          "name": "Amin_iProov_Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e65",
+          "role": "button",
+          "name": "PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026"
+        },
+        {
+          "ref": "e66",
+          "role": "link",
+          "name": "Download Amin_Euphoric_Software-Engineer-Applied-AI.pdf"
+        },
+        {
+          "ref": "e67",
+          "role": "radio",
+          "name": "Amin_Euphoric_Software-Engineer-Applied-AI.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e68",
+          "role": "button",
+          "name": "PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e69",
+          "role": "link",
+          "name": "Download Amin_Findrs_Forward-Deployed-Engineer.pdf"
+        },
+        {
+          "ref": "e70",
+          "role": "radio",
+          "name": "Amin_Findrs_Forward-Deployed-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e71",
+          "role": "button",
+          "name": "PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e72",
+          "role": "link",
+          "name": "Download Amin_The-Portfolio-Group_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e73",
+          "role": "radio",
+          "name": "Amin_The-Portfolio-Group_AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e74",
+          "role": "button",
+          "name": "PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e75",
+          "role": "link",
+          "name": "Download Amin_kadence_Artificial-Intelligence-Engineer.pdf"
+        },
+        {
+          "ref": "e76",
+          "role": "radio",
+          "name": "Amin_kadence_Artificial-Intelligence-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e77",
+          "role": "button",
+          "name": "PDF Amin_The-Lanes-Group_MLOps-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e78",
+          "role": "link",
+          "name": "Download Amin_The-Lanes-Group_MLOps-Engineer.pdf"
+        },
+        {
+          "ref": "e79",
+          "role": "radio",
+          "name": "Amin_The-Lanes-Group_MLOps-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e80",
+          "role": "button",
+          "name": "PDF Amin_The-Lanes-Group_Generative-AI-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e81",
+          "role": "link",
+          "name": "Download Amin_The-Lanes-Group_Generative-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e82",
+          "role": "radio",
+          "name": "Amin_The-Lanes-Group_Generative-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e83",
+          "role": "button",
+          "name": "PDF Amin_Odysse-Ltd_Data-Scientist.pdf 9/9/2026"
+        },
+        {
+          "ref": "e84",
+          "role": "link",
+          "name": "Download Amin_Odysse-Ltd_Data-Scientist.pdf"
+        },
+        {
+          "ref": "e85",
+          "role": "radio",
+          "name": "Amin_Odysse-Ltd_Data-Scientist.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e86",
+          "role": "button",
+          "name": "PDF Amin_Oho-Group_Machine-Learning-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e87",
+          "role": "link",
+          "name": "Download Amin_Oho-Group_Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e88",
+          "role": "radio",
+          "name": "Amin_Oho-Group_Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e89",
+          "role": "button",
+          "name": "PDF Amin_FreshtechIT_Agentic-Software-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e90",
+          "role": "link",
+          "name": "Download Amin_FreshtechIT_Agentic-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e91",
+          "role": "radio",
+          "name": "Amin_FreshtechIT_Agentic-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e92",
+          "role": "button",
+          "name": "PDF Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e93",
+          "role": "link",
+          "name": "Download Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e94",
+          "role": "radio",
+          "name": "Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e95",
+          "role": "button",
+          "name": "PDF Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e96",
+          "role": "link",
+          "name": "Download Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf"
+        },
+        {
+          "ref": "e97",
+          "role": "radio",
+          "name": "Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e98",
+          "role": "button",
+          "name": "PDF Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf 9/8/2026"
+        },
+        {
+          "ref": "e99",
+          "role": "link",
+          "name": "Download Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf"
+        },
+        {
+          "ref": "e100",
+          "role": "radio",
+          "name": "Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e101",
+          "role": "button",
+          "name": "PDF Amin_Sorint.SEC_Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e102",
+          "role": "link",
+          "name": "Download Amin_Sorint.SEC_Software-Engineer.pdf"
+        },
+        {
+          "ref": "e103",
+          "role": "radio",
+          "name": "Amin_Sorint.SEC_Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e104",
+          "role": "button",
+          "name": "PDF Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e105",
+          "role": "link",
+          "name": "Download Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e106",
+          "role": "radio",
+          "name": "Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e107",
+          "role": "button",
+          "name": "PDF Amin_Fides_GenAI-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e108",
+          "role": "link",
+          "name": "Download Amin_Fides_GenAI-Engineer.pdf"
+        },
+        {
+          "ref": "e109",
+          "role": "radio",
+          "name": "Amin_Fides_GenAI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e110",
+          "role": "button",
+          "name": "PDF Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e111",
+          "role": "link",
+          "name": "Download Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e112",
+          "role": "radio",
+          "name": "Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e113",
+          "role": "button",
+          "name": "PDF Amin_Aieng_AI-Engineer---Site-Rome.pdf 9/8/2026"
+        },
+        {
+          "ref": "e114",
+          "role": "link",
+          "name": "Download Amin_Aieng_AI-Engineer---Site-Rome.pdf"
+        },
+        {
+          "ref": "e115",
+          "role": "radio",
+          "name": "Amin_Aieng_AI-Engineer---Site-Rome.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e116",
+          "role": "button",
+          "name": "PDF Amin_ADENTIS-Italia_Full-Stack-Developer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e117",
+          "role": "link",
+          "name": "Download Amin_ADENTIS-Italia_Full-Stack-Developer.pdf"
+        },
+        {
+          "ref": "e118",
+          "role": "radio",
+          "name": "Amin_ADENTIS-Italia_Full-Stack-Developer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e119",
+          "role": "button",
+          "name": "PDF Amin_ACENSI-Italia_AI-Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e120",
+          "role": "link",
+          "name": "Download Amin_ACENSI-Italia_AI-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e121",
+          "role": "radio",
+          "name": "Amin_ACENSI-Italia_AI-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e122",
+          "role": "button",
+          "name": "Upload resume"
+        },
+        {
+          "ref": "e123",
+          "role": "button",
+          "name": "Back"
+        },
+        {
+          "ref": "e46",
+          "role": "button",
+          "name": "Next"
+        }
+      ],
+      "required_fields_still_empty": [],
+      "text": "Apply to Linda AI 2/4 pages Resume* Select or upload a resume in DOC, DOCX, or PDF format that is less than 2MB PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026 PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026 PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026 PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026 PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026 PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026 PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026 PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026 PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026 PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026 0 notifications"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "submitted",
+        "type": "noul",
+        "instructions": "Does the page say that a job application was just submitted, sent or received?",
+        "criteria": {
+          "true": "A confirmation such as 'Your application was submitted' or 'Thank you for applying'.",
+          "false": "No such confirmation. Counts of applicants, or a badge on another job, do not count."
+        }
+      },
+      {
+        "id": "applied",
+        "type": "noul",
+        "instructions": "Does the page say that the candidate has already applied to this job?"
+      },
+      {
+        "id": "covered",
+        "type": "noul",
+        "instructions": "Is a pop-up that is not part of the job application in front of the page, covering what is behind it?",
+        "criteria": {
+          "true": "A cookie or consent banner, a newsletter pop-up or another overlay sits over the application or the job page.",
+          "false": "Nothing covers the page, or what is in front is the application form itself."
+        }
+      },
+      {
+        "id": "actionable",
+        "type": "noul",
+        "instructions": "Besides the site's own navigation, does the page already offer something to act on for this job?",
+        "criteria": {
+          "true": "An apply button or link, a field of a form, or the buttons of a dialog about the application.",
+          "false": "Only the site's navigation links, a search box, a spinner or a loading message."
+        }
+      },
+      {
+        "id": "validation",
+        "type": "noul",
+        "instructions": "Does the page show an error message about a form field, such as 'This field is required' or 'Invalid email'?"
+      },
+      {
+        "id": "registration",
+        "type": "noul",
+        "instructions": "Does the page ask to complete a registration, create a profile or accept terms of use before going on?"
+      },
+      {
+        "id": "submit_button",
+        "type": "noul",
+        "instructions": "Is there a button that would submit the job application, such as 'Submit application', 'Send application' or 'Apply'?"
+      },
+      {
+        "id": "field_e49",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e49",
+            "role": "radio",
+            "name": "Amin_Accenture_AI-Engineer.pdf",
+            "checked": true
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e52",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e52",
+            "role": "radio",
+            "name": "Amin_Version-1_AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e55",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e55",
+            "role": "radio",
+            "name": "Amin_Vallum-Associates_Agentic-AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e58",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e58",
+            "role": "radio",
+            "name": "Amin_Elsevier_Data-Scientist.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e61",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e61",
+            "role": "radio",
+            "name": "Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e64",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e64",
+            "role": "radio",
+            "name": "Amin_iProov_Machine-Learning-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e67",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e67",
+            "role": "radio",
+            "name": "Amin_Euphoric_Software-Engineer-Applied-AI.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e70",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e70",
+            "role": "radio",
+            "name": "Amin_Findrs_Forward-Deployed-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e73",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e73",
+            "role": "radio",
+            "name": "Amin_The-Portfolio-Group_AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e76",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e76",
+            "role": "radio",
+            "name": "Amin_kadence_Artificial-Intelligence-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e79",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e79",
+            "role": "radio",
+            "name": "Amin_The-Lanes-Group_MLOps-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e82",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e82",
+            "role": "radio",
+            "name": "Amin_The-Lanes-Group_Generative-AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e85",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e85",
+            "role": "radio",
+            "name": "Amin_Odysse-Ltd_Data-Scientist.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e88",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e88",
+            "role": "radio",
+            "name": "Amin_Oho-Group_Machine-Learning-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e91",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e91",
+            "role": "radio",
+            "name": "Amin_FreshtechIT_Agentic-Software-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      }
+    ],
+    "Choice": [
+      {
+        "id": "kind",
+        "type": "choice",
+        "instructions": "What is this page, as a step of applying for a job?",
+        "criteria": {
+          "job_posting": "A job description page. It offers a button or link to start applying (Apply, Easy Apply, Apply now).",
+          "interstitial": "A step between the job posting and the application form: a job-search safety reminder, a 'you are leaving this site' notice, or a choice of how to start the application (apply manually, autofill with a resume).",
+          "application_form": "A step of the job application itself: its own fields such as name, email, phone, resume upload or screening questions, with a way to go on to the next step.",
+          "final_step": "The application's last step: a review or summary, or a form whose only way forward is a button that submits the application.",
+          "account_wall": "Asks to sign in, to create an account or to enter a password before the application can go on.",
+          "google_sign_in": "Google's own sign-in page: an account chooser, a permission request, a password or code.",
+          "captcha": "A human-verification challenge.",
+          "confirmation": "Says that the application was submitted, sent or received.",
+          "closed": "Says that the job is closed or no longer accepts applications.",
+          "error": "An error page, a page that did not load, or an empty page.",
+          "other": "None of the above."
+        }
+      },
+      {
+        "id": "account",
+        "type": "choice",
+        "instructions": "What does the page ask for about an account?",
+        "criteria": {
+          "create_account": "To create a new account: sign up, register, choose a password.",
+          "sign_in": "To sign in to an existing account or enter a password.",
+          "none": "Neither."
+        }
+      }
+    ],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "kind": {
+          "type": "choice",
+          "choice": "application_form",
+          "confidence": 0.1499,
+          "probabilities": {
+            "job_posting": 0.2248,
+            "interstitial": 0.1527,
+            "application_form": 0.2272,
+            "final_step": 0.1441,
+            "account_wall": 0.0226,
+            "google_sign_in": 0.0066,
+            "captcha": 0.0024,
+            "confirmation": 0.0348,
+            "closed": 0.0232,
+            "error": 0.0497,
+            "other": 0.1117
+          }
+        },
+        "submitted": {
+          "type": "noul",
+          "noul": 0.3902
+        },
+        "applied": {
+          "type": "noul",
+          "noul": 0.323
+        },
+        "covered": {
+          "type": "noul",
+          "noul": 0.3028
+        },
+        "actionable": {
+          "type": "noul",
+          "noul": 0.8887
+        },
+        "validation": {
+          "type": "noul",
+          "noul": 0.3772
+        },
+        "registration": {
+          "type": "noul",
+          "noul": 0.2092
+        },
+        "account": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.8691,
+          "probabilities": {
+            "create_account": 0.0332,
+            "sign_in": 0.0541,
+            "none": 0.9127
+          }
+        },
+        "submit_button": {
+          "type": "noul",
+          "noul": 0.7949
+        },
+        "field_e49": {
+          "type": "noul",
+          "noul": 0.6743
+        },
+        "field_e52": {
+          "type": "noul",
+          "noul": 0.6959
+        },
+        "field_e55": {
+          "type": "noul",
+          "noul": 0.6761
+        },
+        "field_e58": {
+          "type": "noul",
+          "noul": 0.6777
+        },
+        "field_e61": {
+          "type": "noul",
+          "noul": 0.6829
+        },
+        "field_e64": {
+          "type": "noul",
+          "noul": 0.6764
+        },
+        "field_e67": {
+          "type": "noul",
+          "noul": 0.6748
+        },
+        "field_e70": {
+          "type": "noul",
+          "noul": 0.6787
+        },
+        "field_e73": {
+          "type": "noul",
+          "noul": 0.698
+        },
+        "field_e76": {
+          "type": "noul",
+          "noul": 0.6861
+        },
+        "field_e79": {
+          "type": "noul",
+          "noul": 0.6955
+        },
+        "field_e82": {
+          "type": "noul",
+          "noul": 0.686
+        },
+        "field_e85": {
+          "type": "noul",
+          "noul": 0.6898
+        },
+        "field_e88": {
+          "type": "noul",
+          "noul": 0.7022
+        },
+        "field_e91": {
+          "type": "noul",
+          "noul": 0.6876
+        }
+      },
+      "usage": {
+        "input_tokens": 5774,
+        "output_tokens": 754
+      },
+      "latency_ms": 3980.4
+    }
+  },
+  {
+    "State": {
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+      "title": "Founding Software Engineer | Linda AI | LinkedIn",
+      "open_dialogs": [
+        "Apply to Linda AI"
+      ],
+      "controls": [
+        {
+          "ref": "e38",
+          "role": "button",
+          "name": "Dismiss"
+        },
+        {
+          "ref": "e47",
+          "role": "button",
+          "name": "PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026"
+        },
+        {
+          "ref": "e48",
+          "role": "link",
+          "name": "Download Amin_Accenture_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e49",
+          "role": "radio",
+          "name": "Amin_Accenture_AI-Engineer.pdf",
+          "checked": true
+        },
+        {
+          "ref": "e50",
+          "role": "button",
+          "name": "PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026"
+        },
+        {
+          "ref": "e51",
+          "role": "link",
+          "name": "Download Amin_Version-1_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e52",
+          "role": "radio",
+          "name": "Amin_Version-1_AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e53",
+          "role": "button",
+          "name": "PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026"
+        },
+        {
+          "ref": "e54",
+          "role": "link",
+          "name": "Download Amin_Vallum-Associates_Agentic-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e55",
+          "role": "radio",
+          "name": "Amin_Vallum-Associates_Agentic-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e56",
+          "role": "button",
+          "name": "PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026"
+        },
+        {
+          "ref": "e57",
+          "role": "link",
+          "name": "Download Amin_Elsevier_Data-Scientist.pdf"
+        },
+        {
+          "ref": "e58",
+          "role": "radio",
+          "name": "Amin_Elsevier_Data-Scientist.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e59",
+          "role": "button",
+          "name": "PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026"
+        },
+        {
+          "ref": "e60",
+          "role": "link",
+          "name": "Download Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf"
+        },
+        {
+          "ref": "e61",
+          "role": "radio",
+          "name": "Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e62",
+          "role": "button",
+          "name": "PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e63",
+          "role": "link",
+          "name": "Download Amin_iProov_Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e64",
+          "role": "radio",
+          "name": "Amin_iProov_Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e65",
+          "role": "button",
+          "name": "PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026"
+        },
+        {
+          "ref": "e66",
+          "role": "link",
+          "name": "Download Amin_Euphoric_Software-Engineer-Applied-AI.pdf"
+        },
+        {
+          "ref": "e67",
+          "role": "radio",
+          "name": "Amin_Euphoric_Software-Engineer-Applied-AI.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e68",
+          "role": "button",
+          "name": "PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e69",
+          "role": "link",
+          "name": "Download Amin_Findrs_Forward-Deployed-Engineer.pdf"
+        },
+        {
+          "ref": "e70",
+          "role": "radio",
+          "name": "Amin_Findrs_Forward-Deployed-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e71",
+          "role": "button",
+          "name": "PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e72",
+          "role": "link",
+          "name": "Download Amin_The-Portfolio-Group_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e73",
+          "role": "radio",
+          "name": "Amin_The-Portfolio-Group_AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e74",
+          "role": "button",
+          "name": "PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e75",
+          "role": "link",
+          "name": "Download Amin_kadence_Artificial-Intelligence-Engineer.pdf"
+        },
+        {
+          "ref": "e76",
+          "role": "radio",
+          "name": "Amin_kadence_Artificial-Intelligence-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e77",
+          "role": "button",
+          "name": "PDF Amin_The-Lanes-Group_MLOps-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e78",
+          "role": "link",
+          "name": "Download Amin_The-Lanes-Group_MLOps-Engineer.pdf"
+        },
+        {
+          "ref": "e79",
+          "role": "radio",
+          "name": "Amin_The-Lanes-Group_MLOps-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e80",
+          "role": "button",
+          "name": "PDF Amin_The-Lanes-Group_Generative-AI-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e81",
+          "role": "link",
+          "name": "Download Amin_The-Lanes-Group_Generative-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e82",
+          "role": "radio",
+          "name": "Amin_The-Lanes-Group_Generative-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e83",
+          "role": "button",
+          "name": "PDF Amin_Odysse-Ltd_Data-Scientist.pdf 9/9/2026"
+        },
+        {
+          "ref": "e84",
+          "role": "link",
+          "name": "Download Amin_Odysse-Ltd_Data-Scientist.pdf"
+        },
+        {
+          "ref": "e85",
+          "role": "radio",
+          "name": "Amin_Odysse-Ltd_Data-Scientist.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e86",
+          "role": "button",
+          "name": "PDF Amin_Oho-Group_Machine-Learning-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e87",
+          "role": "link",
+          "name": "Download Amin_Oho-Group_Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e88",
+          "role": "radio",
+          "name": "Amin_Oho-Group_Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e89",
+          "role": "button",
+          "name": "PDF Amin_FreshtechIT_Agentic-Software-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e90",
+          "role": "link",
+          "name": "Download Amin_FreshtechIT_Agentic-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e91",
+          "role": "radio",
+          "name": "Amin_FreshtechIT_Agentic-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e92",
+          "role": "button",
+          "name": "PDF Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e93",
+          "role": "link",
+          "name": "Download Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e94",
+          "role": "radio",
+          "name": "Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e95",
+          "role": "button",
+          "name": "PDF Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e96",
+          "role": "link",
+          "name": "Download Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf"
+        },
+        {
+          "ref": "e97",
+          "role": "radio",
+          "name": "Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e98",
+          "role": "button",
+          "name": "PDF Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf 9/8/2026"
+        },
+        {
+          "ref": "e99",
+          "role": "link",
+          "name": "Download Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf"
+        },
+        {
+          "ref": "e100",
+          "role": "radio",
+          "name": "Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e101",
+          "role": "button",
+          "name": "PDF Amin_Sorint.SEC_Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e102",
+          "role": "link",
+          "name": "Download Amin_Sorint.SEC_Software-Engineer.pdf"
+        },
+        {
+          "ref": "e103",
+          "role": "radio",
+          "name": "Amin_Sorint.SEC_Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e104",
+          "role": "button",
+          "name": "PDF Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e105",
+          "role": "link",
+          "name": "Download Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e106",
+          "role": "radio",
+          "name": "Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e107",
+          "role": "button",
+          "name": "PDF Amin_Fides_GenAI-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e108",
+          "role": "link",
+          "name": "Download Amin_Fides_GenAI-Engineer.pdf"
+        },
+        {
+          "ref": "e109",
+          "role": "radio",
+          "name": "Amin_Fides_GenAI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e110",
+          "role": "button",
+          "name": "PDF Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e111",
+          "role": "link",
+          "name": "Download Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e112",
+          "role": "radio",
+          "name": "Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e113",
+          "role": "button",
+          "name": "PDF Amin_Aieng_AI-Engineer---Site-Rome.pdf 9/8/2026"
+        },
+        {
+          "ref": "e114",
+          "role": "link",
+          "name": "Download Amin_Aieng_AI-Engineer---Site-Rome.pdf"
+        },
+        {
+          "ref": "e115",
+          "role": "radio",
+          "name": "Amin_Aieng_AI-Engineer---Site-Rome.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e116",
+          "role": "button",
+          "name": "PDF Amin_ADENTIS-Italia_Full-Stack-Developer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e117",
+          "role": "link",
+          "name": "Download Amin_ADENTIS-Italia_Full-Stack-Developer.pdf"
+        },
+        {
+          "ref": "e118",
+          "role": "radio",
+          "name": "Amin_ADENTIS-Italia_Full-Stack-Developer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e119",
+          "role": "button",
+          "name": "PDF Amin_ACENSI-Italia_AI-Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e120",
+          "role": "link",
+          "name": "Download Amin_ACENSI-Italia_AI-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e121",
+          "role": "radio",
+          "name": "Amin_ACENSI-Italia_AI-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e122",
+          "role": "button",
+          "name": "Upload resume"
+        },
+        {
+          "ref": "e123",
+          "role": "button",
+          "name": "Back"
+        },
+        {
+          "ref": "e46",
+          "role": "button",
+          "name": "Next"
+        }
+      ],
+      "required_fields_still_empty": [],
+      "text": "Apply to Linda AI 2/4 pages Resume* Select or upload a resume in DOC, DOCX, or PDF format that is less than 2MB PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026 PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026 PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026 PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026 PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026 PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026 PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026 PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026 PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026 PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026 0 notifications"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "field_e94",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e94",
+            "role": "radio",
+            "name": "Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e97",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e97",
+            "role": "radio",
+            "name": "Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e100",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e100",
+            "role": "radio",
+            "name": "Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e103",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e103",
+            "role": "radio",
+            "name": "Amin_Sorint.SEC_Software-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e106",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e106",
+            "role": "radio",
+            "name": "Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e109",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e109",
+            "role": "radio",
+            "name": "Amin_Fides_GenAI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e112",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e112",
+            "role": "radio",
+            "name": "Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e115",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e115",
+            "role": "radio",
+            "name": "Amin_Aieng_AI-Engineer---Site-Rome.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e118",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e118",
+            "role": "radio",
+            "name": "Amin_ADENTIS-Italia_Full-Stack-Developer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e121",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e121",
+            "role": "radio",
+            "name": "Amin_ACENSI-Italia_AI-Software-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      }
+    ],
+    "Choice": [
+      {
+        "id": "resume_input",
+        "type": "choice",
+        "instructions": "Which control uploads the candidate's resume (CV)?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e47": "PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026",
+          "e50": "PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026",
+          "e53": "PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026",
+          "e56": "PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026",
+          "e59": "PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026",
+          "e62": "PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026",
+          "e65": "PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026",
+          "e68": "PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026",
+          "e71": "PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026",
+          "e74": "PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026",
+          "e77": "PDF Amin_The-Lanes-Group_MLOps-Engineer.pdf 9/9/2026",
+          "e80": "PDF Amin_The-Lanes-Group_Generative-AI-Engineer.pdf 9/9/2026",
+          "e83": "PDF Amin_Odysse-Ltd_Data-Scientist.pdf 9/9/2026",
+          "e86": "PDF Amin_Oho-Group_Machine-Learning-Engineer.pdf 9/9/2026",
+          "e89": "PDF Amin_FreshtechIT_Agentic-Software-Engineer.pdf 9/9/2026",
+          "e92": "PDF Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf 9/9/2026",
+          "e95": "PDF Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf 9/9/2026",
+          "e98": "PDF Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf 9/8/2026",
+          "e101": "PDF Amin_Sorint.SEC_Software-Engineer.pdf 9/8/2026",
+          "e104": "PDF Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf 9/8/2026",
+          "e107": "PDF Amin_Fides_GenAI-Engineer.pdf 9/8/2026",
+          "e110": "PDF Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf 9/8/2026",
+          "e113": "PDF Amin_Aieng_AI-Engineer---Site-Rome.pdf 9/8/2026",
+          "e116": "PDF Amin_ADENTIS-Italia_Full-Stack-Developer.pdf 9/8/2026",
+          "e119": "PDF Amin_ACENSI-Italia_AI-Software-Engineer.pdf 9/8/2026",
+          "e122": "Upload resume",
+          "e123": "Back",
+          "e46": "Next",
+          "none": "No control on this page uploads a resume."
+        }
+      },
+      {
+        "id": "google_button",
+        "type": "choice",
+        "instructions": "Which control signs in or continues with Google?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e47": "PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026",
+          "e48": "Download Amin_Accenture_AI-Engineer.pdf",
+          "e50": "PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026",
+          "e51": "Download Amin_Version-1_AI-Engineer.pdf",
+          "e53": "PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026",
+          "e54": "Download Amin_Vallum-Associates_Agentic-AI-Engineer.pdf",
+          "e56": "PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026",
+          "e57": "Download Amin_Elsevier_Data-Scientist.pdf",
+          "e59": "PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026",
+          "e60": "Download Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf",
+          "e62": "PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026",
+          "e63": "Download Amin_iProov_Machine-Learning-Engineer.pdf",
+          "e65": "PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026",
+          "e66": "Download Amin_Euphoric_Software-Engineer-Applied-AI.pdf",
+          "e68": "PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026",
+          "e69": "Download Amin_Findrs_Forward-Deployed-Engineer.pdf",
+          "e71": "PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026",
+          "e72": "Download Amin_The-Portfolio-Group_AI-Engineer.pdf",
+          "e74": "PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026",
+          "e75": "Download Amin_kadence_Artificial-Intelligence-Engineer.pdf",
+          "e77": "PDF Amin_The-Lanes-Group_MLOps-Engineer.pdf 9/9/2026",
+          "e78": "Download Amin_The-Lanes-Group_MLOps-Engineer.pdf",
+          "e80": "PDF Amin_The-Lanes-Group_Generative-AI-Engineer.pdf 9/9/2026",
+          "e81": "Download Amin_The-Lanes-Group_Generative-AI-Engineer.pdf",
+          "e83": "PDF Amin_Odysse-Ltd_Data-Scientist.pdf 9/9/2026",
+          "e84": "Download Amin_Odysse-Ltd_Data-Scientist.pdf",
+          "e86": "PDF Amin_Oho-Group_Machine-Learning-Engineer.pdf 9/9/2026",
+          "e87": "Download Amin_Oho-Group_Machine-Learning-Engineer.pdf",
+          "e89": "PDF Amin_FreshtechIT_Agentic-Software-Engineer.pdf 9/9/2026",
+          "e90": "Download Amin_FreshtechIT_Agentic-Software-Engineer.pdf",
+          "e92": "PDF Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf 9/9/2026",
+          "e93": "Download Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf",
+          "e95": "PDF Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf 9/9/2026",
+          "e96": "Download Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf",
+          "e98": "PDF Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf 9/8/2026",
+          "e99": "Download Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf",
+          "e101": "PDF Amin_Sorint.SEC_Software-Engineer.pdf 9/8/2026",
+          "e102": "Download Amin_Sorint.SEC_Software-Engineer.pdf",
+          "e104": "PDF Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf 9/8/2026",
+          "e105": "Download Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf",
+          "e107": "PDF Amin_Fides_GenAI-Engineer.pdf 9/8/2026",
+          "e108": "Download Amin_Fides_GenAI-Engineer.pdf",
+          "e110": "PDF Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf 9/8/2026",
+          "e111": "Download Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf",
+          "e113": "PDF Amin_Aieng_AI-Engineer---Site-Rome.pdf 9/8/2026",
+          "e114": "Download Amin_Aieng_AI-Engineer---Site-Rome.pdf",
+          "e116": "PDF Amin_ADENTIS-Italia_Full-Stack-Developer.pdf 9/8/2026",
+          "e117": "Download Amin_ADENTIS-Italia_Full-Stack-Developer.pdf",
+          "e119": "PDF Amin_ACENSI-Italia_AI-Software-Engineer.pdf 9/8/2026",
+          "e120": "Download Amin_ACENSI-Italia_AI-Software-Engineer.pdf",
+          "e122": "Upload resume",
+          "e123": "Back",
+          "e46": "Next",
+          "none": "No control signs in with Google."
+        }
+      },
+      {
+        "id": "form_iframe",
+        "type": "choice",
+        "instructions": "Which embedded frame holds the job application form?",
+        "criteria": {
+          "frame0": "https://www.linkedin.com/preload/?_bprMode=vanilla",
+          "frame1": "https://lnkd.demdex.net/dest5.html?d_nsid=0#https%3A%2F%2Fwww.linkedin.com",
+          "none": "None of these frames holds an application form."
+        }
+      }
+    ],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "field_e94": {
+          "type": "noul",
+          "noul": 0.664
+        },
+        "field_e97": {
+          "type": "noul",
+          "noul": 0.6974
+        },
+        "field_e100": {
+          "type": "noul",
+          "noul": 0.6765
+        },
+        "field_e103": {
+          "type": "noul",
+          "noul": 0.6848
+        },
+        "field_e106": {
+          "type": "noul",
+          "noul": 0.6564
+        },
+        "field_e109": {
+          "type": "noul",
+          "noul": 0.6826
+        },
+        "field_e112": {
+          "type": "noul",
+          "noul": 0.6659
+        },
+        "field_e115": {
+          "type": "noul",
+          "noul": 0.7008
+        },
+        "field_e118": {
+          "type": "noul",
+          "noul": 0.6988
+        },
+        "field_e121": {
+          "type": "noul",
+          "noul": 0.6853
+        },
+        "resume_input": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.1578,
+          "probabilities": {
+            "e38": 0.0081,
+            "e47": 0.1271,
+            "e50": 0.0669,
+            "e53": 0.0151,
+            "e56": 0.0102,
+            "e59": 0.0248,
+            "e62": 0.0207,
+            "e65": 0.0131,
+            "e68": 0.0102,
+            "e71": 0.0206,
+            "e74": 0.0224,
+            "e77": 0.011,
+            "e80": 0.0194,
+            "e83": 0.0086,
+            "e86": 0.0165,
+            "e89": 0.0247,
+            "e92": 0.0191,
+            "e95": 0.0209,
+            "e98": 0.0118,
+            "e101": 0.0145,
+            "e104": 0.0139,
+            "e107": 0.0093,
+            "e110": 0.0154,
+            "e113": 0.0195,
+            "e116": 0.017,
+            "e119": 0.0234,
+            "e122": 0.1694,
+            "e123": 0.025,
+            "e46": 0.0355,
+            "none": 0.1859
+          }
+        },
+        "google_button": {
+          "type": "choice",
+          "choice": "e47",
+          "confidence": 0.0458,
+          "probabilities": {
+            "e38": 0.0088,
+            "e47": 0.0631,
+            "e48": 0.0412,
+            "e50": 0.0395,
+            "e51": 0.023,
+            "e53": 0.0124,
+            "e54": 0.0129,
+            "e56": 0.01,
+            "e57": 0.0082,
+            "e59": 0.0185,
+            "e60": 0.0149,
+            "e62": 0.0132,
+            "e63": 0.0117,
+            "e65": 0.0097,
+            "e66": 0.0096,
+            "e68": 0.0107,
+            "e69": 0.0105,
+            "e71": 0.0193,
+            "e72": 0.0182,
+            "e74": 0.0183,
+            "e75": 0.0158,
+            "e77": 0.0086,
+            "e78": 0.009,
+            "e80": 0.021,
+            "e81": 0.0178,
+            "e83": 0.0081,
+            "e84": 0.0083,
+            "e86": 0.011,
+            "e87": 0.0096,
+            "e89": 0.0202,
+            "e90": 0.0184,
+            "e92": 0.0129,
+            "e93": 0.0154,
+            "e95": 0.0143,
+            "e96": 0.0095,
+            "e98": 0.0086,
+            "e99": 0.0107,
+            "e101": 0.0125,
+            "e102": 0.0101,
+            "e104": 0.0137,
+            "e105": 0.0128,
+            "e107": 0.0116,
+            "e108": 0.0167,
+            "e110": 0.014,
+            "e111": 0.0125,
+            "e113": 0.0183,
+            "e114": 0.0196,
+            "e116": 0.013,
+            "e117": 0.0119,
+            "e119": 0.0206,
+            "e120": 0.0295,
+            "e122": 0.0544,
+            "e123": 0.0291,
+            "e46": 0.0536,
+            "none": 0.0534
+          }
+        },
+        "form_iframe": {
+          "type": "choice",
+          "choice": "frame1",
+          "confidence": 0.2289,
+          "probabilities": {
+            "frame0": 0.133,
+            "frame1": 0.4859,
+            "none": 0.3811
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 6753,
+        "output_tokens": 1503
+      },
+      "latency_ms": 3074.9
+    }
+  },
+  {
+    "State": {
+      "page": "Founding Software Engineer | Linda AI | LinkedIn",
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "resume_0",
+        "type": "noul",
+        "instructions": {
+          "form_question": "Resume*",
+          "options": [],
+          "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing among uploaded resume files?"
+        }
+      },
+      {
+        "id": "cover_0",
+        "type": "noul",
+        "instructions": {
+          "upload": "Resume*",
+          "question": "Does `upload` ask for a cover letter?"
+        }
+      }
+    ],
+    "Choice": [],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "resume_0": {
+          "type": "noul",
+          "noul": 0.4014
+        },
+        "cover_0": {
+          "type": "noul",
+          "noul": 0.3279
+        }
+      },
+      "usage": {
+        "input_tokens": 141,
+        "output_tokens": 48
+      },
+      "latency_ms": 98.9
+    }
+  },
+  {
+    "State": {
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+      "title": "Founding Software Engineer | Linda AI | LinkedIn",
+      "open_dialogs": [
+        "Apply to Linda AI"
+      ],
+      "controls": [
+        {
+          "ref": "e38",
+          "role": "button",
+          "name": "Dismiss"
+        },
+        {
+          "ref": "e47",
+          "role": "button",
+          "name": "PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026"
+        },
+        {
+          "ref": "e48",
+          "role": "link",
+          "name": "Download Amin_Accenture_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e49",
+          "role": "radio",
+          "name": "Amin_Accenture_AI-Engineer.pdf",
+          "checked": true
+        },
+        {
+          "ref": "e50",
+          "role": "button",
+          "name": "PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026"
+        },
+        {
+          "ref": "e51",
+          "role": "link",
+          "name": "Download Amin_Version-1_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e52",
+          "role": "radio",
+          "name": "Amin_Version-1_AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e53",
+          "role": "button",
+          "name": "PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026"
+        },
+        {
+          "ref": "e54",
+          "role": "link",
+          "name": "Download Amin_Vallum-Associates_Agentic-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e55",
+          "role": "radio",
+          "name": "Amin_Vallum-Associates_Agentic-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e56",
+          "role": "button",
+          "name": "PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026"
+        },
+        {
+          "ref": "e57",
+          "role": "link",
+          "name": "Download Amin_Elsevier_Data-Scientist.pdf"
+        },
+        {
+          "ref": "e58",
+          "role": "radio",
+          "name": "Amin_Elsevier_Data-Scientist.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e59",
+          "role": "button",
+          "name": "PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026"
+        },
+        {
+          "ref": "e60",
+          "role": "link",
+          "name": "Download Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf"
+        },
+        {
+          "ref": "e61",
+          "role": "radio",
+          "name": "Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e62",
+          "role": "button",
+          "name": "PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e63",
+          "role": "link",
+          "name": "Download Amin_iProov_Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e64",
+          "role": "radio",
+          "name": "Amin_iProov_Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e65",
+          "role": "button",
+          "name": "PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026"
+        },
+        {
+          "ref": "e66",
+          "role": "link",
+          "name": "Download Amin_Euphoric_Software-Engineer-Applied-AI.pdf"
+        },
+        {
+          "ref": "e67",
+          "role": "radio",
+          "name": "Amin_Euphoric_Software-Engineer-Applied-AI.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e68",
+          "role": "button",
+          "name": "PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e69",
+          "role": "link",
+          "name": "Download Amin_Findrs_Forward-Deployed-Engineer.pdf"
+        },
+        {
+          "ref": "e70",
+          "role": "radio",
+          "name": "Amin_Findrs_Forward-Deployed-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e71",
+          "role": "button",
+          "name": "PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e72",
+          "role": "link",
+          "name": "Download Amin_The-Portfolio-Group_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e73",
+          "role": "radio",
+          "name": "Amin_The-Portfolio-Group_AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e74",
+          "role": "button",
+          "name": "PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e75",
+          "role": "link",
+          "name": "Download Amin_kadence_Artificial-Intelligence-Engineer.pdf"
+        },
+        {
+          "ref": "e76",
+          "role": "radio",
+          "name": "Amin_kadence_Artificial-Intelligence-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e77",
+          "role": "button",
+          "name": "PDF Amin_The-Lanes-Group_MLOps-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e78",
+          "role": "link",
+          "name": "Download Amin_The-Lanes-Group_MLOps-Engineer.pdf"
+        },
+        {
+          "ref": "e79",
+          "role": "radio",
+          "name": "Amin_The-Lanes-Group_MLOps-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e80",
+          "role": "button",
+          "name": "PDF Amin_The-Lanes-Group_Generative-AI-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e81",
+          "role": "link",
+          "name": "Download Amin_The-Lanes-Group_Generative-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e82",
+          "role": "radio",
+          "name": "Amin_The-Lanes-Group_Generative-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e83",
+          "role": "button",
+          "name": "PDF Amin_Odysse-Ltd_Data-Scientist.pdf 9/9/2026"
+        },
+        {
+          "ref": "e84",
+          "role": "link",
+          "name": "Download Amin_Odysse-Ltd_Data-Scientist.pdf"
+        },
+        {
+          "ref": "e85",
+          "role": "radio",
+          "name": "Amin_Odysse-Ltd_Data-Scientist.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e86",
+          "role": "button",
+          "name": "PDF Amin_Oho-Group_Machine-Learning-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e87",
+          "role": "link",
+          "name": "Download Amin_Oho-Group_Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e88",
+          "role": "radio",
+          "name": "Amin_Oho-Group_Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e89",
+          "role": "button",
+          "name": "PDF Amin_FreshtechIT_Agentic-Software-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e90",
+          "role": "link",
+          "name": "Download Amin_FreshtechIT_Agentic-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e91",
+          "role": "radio",
+          "name": "Amin_FreshtechIT_Agentic-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e92",
+          "role": "button",
+          "name": "PDF Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e93",
+          "role": "link",
+          "name": "Download Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e94",
+          "role": "radio",
+          "name": "Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e95",
+          "role": "button",
+          "name": "PDF Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e96",
+          "role": "link",
+          "name": "Download Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf"
+        },
+        {
+          "ref": "e97",
+          "role": "radio",
+          "name": "Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e98",
+          "role": "button",
+          "name": "PDF Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf 9/8/2026"
+        },
+        {
+          "ref": "e99",
+          "role": "link",
+          "name": "Download Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf"
+        },
+        {
+          "ref": "e100",
+          "role": "radio",
+          "name": "Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e101",
+          "role": "button",
+          "name": "PDF Amin_Sorint.SEC_Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e102",
+          "role": "link",
+          "name": "Download Amin_Sorint.SEC_Software-Engineer.pdf"
+        },
+        {
+          "ref": "e103",
+          "role": "radio",
+          "name": "Amin_Sorint.SEC_Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e104",
+          "role": "button",
+          "name": "PDF Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e105",
+          "role": "link",
+          "name": "Download Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e106",
+          "role": "radio",
+          "name": "Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e107",
+          "role": "button",
+          "name": "PDF Amin_Fides_GenAI-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e108",
+          "role": "link",
+          "name": "Download Amin_Fides_GenAI-Engineer.pdf"
+        },
+        {
+          "ref": "e109",
+          "role": "radio",
+          "name": "Amin_Fides_GenAI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e110",
+          "role": "button",
+          "name": "PDF Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e111",
+          "role": "link",
+          "name": "Download Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e112",
+          "role": "radio",
+          "name": "Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e113",
+          "role": "button",
+          "name": "PDF Amin_Aieng_AI-Engineer---Site-Rome.pdf 9/8/2026"
+        },
+        {
+          "ref": "e114",
+          "role": "link",
+          "name": "Download Amin_Aieng_AI-Engineer---Site-Rome.pdf"
+        },
+        {
+          "ref": "e115",
+          "role": "radio",
+          "name": "Amin_Aieng_AI-Engineer---Site-Rome.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e116",
+          "role": "button",
+          "name": "PDF Amin_ADENTIS-Italia_Full-Stack-Developer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e117",
+          "role": "link",
+          "name": "Download Amin_ADENTIS-Italia_Full-Stack-Developer.pdf"
+        },
+        {
+          "ref": "e118",
+          "role": "radio",
+          "name": "Amin_ADENTIS-Italia_Full-Stack-Developer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e119",
+          "role": "button",
+          "name": "PDF Amin_ACENSI-Italia_AI-Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e120",
+          "role": "link",
+          "name": "Download Amin_ACENSI-Italia_AI-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e121",
+          "role": "radio",
+          "name": "Amin_ACENSI-Italia_AI-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e122",
+          "role": "button",
+          "name": "Upload resume"
+        },
+        {
+          "ref": "e123",
+          "role": "button",
+          "name": "Back"
+        },
+        {
+          "ref": "e46",
+          "role": "button",
+          "name": "Next"
+        }
+      ],
+      "required_fields_still_empty": [],
+      "text": "Apply to Linda AI 2/4 pages Resume* Select or upload a resume in DOC, DOCX, or PDF format that is less than 2MB PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026 PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026 PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026 PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026 PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026 PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026 PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026 PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026 PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026 PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026 0 notifications"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "submitted",
+        "type": "noul",
+        "instructions": "Does the page say that a job application was just submitted, sent or received?",
+        "criteria": {
+          "true": "A confirmation such as 'Your application was submitted' or 'Thank you for applying'.",
+          "false": "No such confirmation. Counts of applicants, or a badge on another job, do not count."
+        }
+      },
+      {
+        "id": "applied",
+        "type": "noul",
+        "instructions": "Does the page say that the candidate has already applied to this job?"
+      },
+      {
+        "id": "covered",
+        "type": "noul",
+        "instructions": "Is a pop-up that is not part of the job application in front of the page, covering what is behind it?",
+        "criteria": {
+          "true": "A cookie or consent banner, a newsletter pop-up or another overlay sits over the application or the job page.",
+          "false": "Nothing covers the page, or what is in front is the application form itself."
+        }
+      },
+      {
+        "id": "actionable",
+        "type": "noul",
+        "instructions": "Besides the site's own navigation, does the page already offer something to act on for this job?",
+        "criteria": {
+          "true": "An apply button or link, a field of a form, or the buttons of a dialog about the application.",
+          "false": "Only the site's navigation links, a search box, a spinner or a loading message."
+        }
+      },
+      {
+        "id": "validation",
+        "type": "noul",
+        "instructions": "Does the page show an error message about a form field, such as 'This field is required' or 'Invalid email'?"
+      },
+      {
+        "id": "registration",
+        "type": "noul",
+        "instructions": "Does the page ask to complete a registration, create a profile or accept terms of use before going on?"
+      },
+      {
+        "id": "submit_button",
+        "type": "noul",
+        "instructions": "Is there a button that would submit the job application, such as 'Submit application', 'Send application' or 'Apply'?"
+      },
+      {
+        "id": "field_e49",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e49",
+            "role": "radio",
+            "name": "Amin_Accenture_AI-Engineer.pdf",
+            "checked": true
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e52",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e52",
+            "role": "radio",
+            "name": "Amin_Version-1_AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e55",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e55",
+            "role": "radio",
+            "name": "Amin_Vallum-Associates_Agentic-AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e58",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e58",
+            "role": "radio",
+            "name": "Amin_Elsevier_Data-Scientist.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e61",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e61",
+            "role": "radio",
+            "name": "Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e64",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e64",
+            "role": "radio",
+            "name": "Amin_iProov_Machine-Learning-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e67",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e67",
+            "role": "radio",
+            "name": "Amin_Euphoric_Software-Engineer-Applied-AI.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e70",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e70",
+            "role": "radio",
+            "name": "Amin_Findrs_Forward-Deployed-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e73",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e73",
+            "role": "radio",
+            "name": "Amin_The-Portfolio-Group_AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e76",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e76",
+            "role": "radio",
+            "name": "Amin_kadence_Artificial-Intelligence-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e79",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e79",
+            "role": "radio",
+            "name": "Amin_The-Lanes-Group_MLOps-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e82",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e82",
+            "role": "radio",
+            "name": "Amin_The-Lanes-Group_Generative-AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e85",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e85",
+            "role": "radio",
+            "name": "Amin_Odysse-Ltd_Data-Scientist.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e88",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e88",
+            "role": "radio",
+            "name": "Amin_Oho-Group_Machine-Learning-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e91",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e91",
+            "role": "radio",
+            "name": "Amin_FreshtechIT_Agentic-Software-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      }
+    ],
+    "Choice": [
+      {
+        "id": "kind",
+        "type": "choice",
+        "instructions": "What is this page, as a step of applying for a job?",
+        "criteria": {
+          "job_posting": "A job description page. It offers a button or link to start applying (Apply, Easy Apply, Apply now).",
+          "interstitial": "A step between the job posting and the application form: a job-search safety reminder, a 'you are leaving this site' notice, or a choice of how to start the application (apply manually, autofill with a resume).",
+          "application_form": "A step of the job application itself: its own fields such as name, email, phone, resume upload or screening questions, with a way to go on to the next step.",
+          "final_step": "The application's last step: a review or summary, or a form whose only way forward is a button that submits the application.",
+          "account_wall": "Asks to sign in, to create an account or to enter a password before the application can go on.",
+          "google_sign_in": "Google's own sign-in page: an account chooser, a permission request, a password or code.",
+          "captcha": "A human-verification challenge.",
+          "confirmation": "Says that the application was submitted, sent or received.",
+          "closed": "Says that the job is closed or no longer accepts applications.",
+          "error": "An error page, a page that did not load, or an empty page.",
+          "other": "None of the above."
+        }
+      },
+      {
+        "id": "account",
+        "type": "choice",
+        "instructions": "What does the page ask for about an account?",
+        "criteria": {
+          "create_account": "To create a new account: sign up, register, choose a password.",
+          "sign_in": "To sign in to an existing account or enter a password.",
+          "none": "Neither."
+        }
+      }
+    ],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "kind": {
+          "type": "choice",
+          "choice": "application_form",
+          "confidence": 0.1499,
+          "probabilities": {
+            "job_posting": 0.2248,
+            "interstitial": 0.1527,
+            "application_form": 0.2272,
+            "final_step": 0.1441,
+            "account_wall": 0.0226,
+            "google_sign_in": 0.0066,
+            "captcha": 0.0024,
+            "confirmation": 0.0348,
+            "closed": 0.0232,
+            "error": 0.0497,
+            "other": 0.1117
+          }
+        },
+        "submitted": {
+          "type": "noul",
+          "noul": 0.3902
+        },
+        "applied": {
+          "type": "noul",
+          "noul": 0.323
+        },
+        "covered": {
+          "type": "noul",
+          "noul": 0.3028
+        },
+        "actionable": {
+          "type": "noul",
+          "noul": 0.8887
+        },
+        "validation": {
+          "type": "noul",
+          "noul": 0.3772
+        },
+        "registration": {
+          "type": "noul",
+          "noul": 0.2092
+        },
+        "account": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.8691,
+          "probabilities": {
+            "create_account": 0.0332,
+            "sign_in": 0.0541,
+            "none": 0.9127
+          }
+        },
+        "submit_button": {
+          "type": "noul",
+          "noul": 0.7949
+        },
+        "field_e49": {
+          "type": "noul",
+          "noul": 0.6743
+        },
+        "field_e52": {
+          "type": "noul",
+          "noul": 0.6959
+        },
+        "field_e55": {
+          "type": "noul",
+          "noul": 0.6761
+        },
+        "field_e58": {
+          "type": "noul",
+          "noul": 0.6777
+        },
+        "field_e61": {
+          "type": "noul",
+          "noul": 0.6829
+        },
+        "field_e64": {
+          "type": "noul",
+          "noul": 0.6764
+        },
+        "field_e67": {
+          "type": "noul",
+          "noul": 0.6748
+        },
+        "field_e70": {
+          "type": "noul",
+          "noul": 0.6787
+        },
+        "field_e73": {
+          "type": "noul",
+          "noul": 0.698
+        },
+        "field_e76": {
+          "type": "noul",
+          "noul": 0.6861
+        },
+        "field_e79": {
+          "type": "noul",
+          "noul": 0.6955
+        },
+        "field_e82": {
+          "type": "noul",
+          "noul": 0.686
+        },
+        "field_e85": {
+          "type": "noul",
+          "noul": 0.6898
+        },
+        "field_e88": {
+          "type": "noul",
+          "noul": 0.7022
+        },
+        "field_e91": {
+          "type": "noul",
+          "noul": 0.6876
+        }
+      },
+      "usage": {
+        "input_tokens": 5774,
+        "output_tokens": 754
+      },
+      "latency_ms": 2116.6
+    }
+  },
+  {
+    "State": {
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+      "title": "Founding Software Engineer | Linda AI | LinkedIn",
+      "open_dialogs": [
+        "Apply to Linda AI"
+      ],
+      "controls": [
+        {
+          "ref": "e38",
+          "role": "button",
+          "name": "Dismiss"
+        },
+        {
+          "ref": "e47",
+          "role": "button",
+          "name": "PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026"
+        },
+        {
+          "ref": "e48",
+          "role": "link",
+          "name": "Download Amin_Accenture_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e49",
+          "role": "radio",
+          "name": "Amin_Accenture_AI-Engineer.pdf",
+          "checked": true
+        },
+        {
+          "ref": "e50",
+          "role": "button",
+          "name": "PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026"
+        },
+        {
+          "ref": "e51",
+          "role": "link",
+          "name": "Download Amin_Version-1_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e52",
+          "role": "radio",
+          "name": "Amin_Version-1_AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e53",
+          "role": "button",
+          "name": "PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026"
+        },
+        {
+          "ref": "e54",
+          "role": "link",
+          "name": "Download Amin_Vallum-Associates_Agentic-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e55",
+          "role": "radio",
+          "name": "Amin_Vallum-Associates_Agentic-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e56",
+          "role": "button",
+          "name": "PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026"
+        },
+        {
+          "ref": "e57",
+          "role": "link",
+          "name": "Download Amin_Elsevier_Data-Scientist.pdf"
+        },
+        {
+          "ref": "e58",
+          "role": "radio",
+          "name": "Amin_Elsevier_Data-Scientist.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e59",
+          "role": "button",
+          "name": "PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026"
+        },
+        {
+          "ref": "e60",
+          "role": "link",
+          "name": "Download Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf"
+        },
+        {
+          "ref": "e61",
+          "role": "radio",
+          "name": "Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e62",
+          "role": "button",
+          "name": "PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e63",
+          "role": "link",
+          "name": "Download Amin_iProov_Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e64",
+          "role": "radio",
+          "name": "Amin_iProov_Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e65",
+          "role": "button",
+          "name": "PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026"
+        },
+        {
+          "ref": "e66",
+          "role": "link",
+          "name": "Download Amin_Euphoric_Software-Engineer-Applied-AI.pdf"
+        },
+        {
+          "ref": "e67",
+          "role": "radio",
+          "name": "Amin_Euphoric_Software-Engineer-Applied-AI.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e68",
+          "role": "button",
+          "name": "PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e69",
+          "role": "link",
+          "name": "Download Amin_Findrs_Forward-Deployed-Engineer.pdf"
+        },
+        {
+          "ref": "e70",
+          "role": "radio",
+          "name": "Amin_Findrs_Forward-Deployed-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e71",
+          "role": "button",
+          "name": "PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026"
+        },
+        {
+          "ref": "e72",
+          "role": "link",
+          "name": "Download Amin_The-Portfolio-Group_AI-Engineer.pdf"
+        },
+        {
+          "ref": "e73",
+          "role": "radio",
+          "name": "Amin_The-Portfolio-Group_AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e74",
+          "role": "button",
+          "name": "PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e75",
+          "role": "link",
+          "name": "Download Amin_kadence_Artificial-Intelligence-Engineer.pdf"
+        },
+        {
+          "ref": "e76",
+          "role": "radio",
+          "name": "Amin_kadence_Artificial-Intelligence-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e77",
+          "role": "button",
+          "name": "PDF Amin_The-Lanes-Group_MLOps-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e78",
+          "role": "link",
+          "name": "Download Amin_The-Lanes-Group_MLOps-Engineer.pdf"
+        },
+        {
+          "ref": "e79",
+          "role": "radio",
+          "name": "Amin_The-Lanes-Group_MLOps-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e80",
+          "role": "button",
+          "name": "PDF Amin_The-Lanes-Group_Generative-AI-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e81",
+          "role": "link",
+          "name": "Download Amin_The-Lanes-Group_Generative-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e82",
+          "role": "radio",
+          "name": "Amin_The-Lanes-Group_Generative-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e83",
+          "role": "button",
+          "name": "PDF Amin_Odysse-Ltd_Data-Scientist.pdf 9/9/2026"
+        },
+        {
+          "ref": "e84",
+          "role": "link",
+          "name": "Download Amin_Odysse-Ltd_Data-Scientist.pdf"
+        },
+        {
+          "ref": "e85",
+          "role": "radio",
+          "name": "Amin_Odysse-Ltd_Data-Scientist.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e86",
+          "role": "button",
+          "name": "PDF Amin_Oho-Group_Machine-Learning-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e87",
+          "role": "link",
+          "name": "Download Amin_Oho-Group_Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e88",
+          "role": "radio",
+          "name": "Amin_Oho-Group_Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e89",
+          "role": "button",
+          "name": "PDF Amin_FreshtechIT_Agentic-Software-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e90",
+          "role": "link",
+          "name": "Download Amin_FreshtechIT_Agentic-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e91",
+          "role": "radio",
+          "name": "Amin_FreshtechIT_Agentic-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e92",
+          "role": "button",
+          "name": "PDF Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e93",
+          "role": "link",
+          "name": "Download Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf"
+        },
+        {
+          "ref": "e94",
+          "role": "radio",
+          "name": "Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e95",
+          "role": "button",
+          "name": "PDF Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf 9/9/2026"
+        },
+        {
+          "ref": "e96",
+          "role": "link",
+          "name": "Download Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf"
+        },
+        {
+          "ref": "e97",
+          "role": "radio",
+          "name": "Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e98",
+          "role": "button",
+          "name": "PDF Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf 9/8/2026"
+        },
+        {
+          "ref": "e99",
+          "role": "link",
+          "name": "Download Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf"
+        },
+        {
+          "ref": "e100",
+          "role": "radio",
+          "name": "Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e101",
+          "role": "button",
+          "name": "PDF Amin_Sorint.SEC_Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e102",
+          "role": "link",
+          "name": "Download Amin_Sorint.SEC_Software-Engineer.pdf"
+        },
+        {
+          "ref": "e103",
+          "role": "radio",
+          "name": "Amin_Sorint.SEC_Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e104",
+          "role": "button",
+          "name": "PDF Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e105",
+          "role": "link",
+          "name": "Download Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf"
+        },
+        {
+          "ref": "e106",
+          "role": "radio",
+          "name": "Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e107",
+          "role": "button",
+          "name": "PDF Amin_Fides_GenAI-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e108",
+          "role": "link",
+          "name": "Download Amin_Fides_GenAI-Engineer.pdf"
+        },
+        {
+          "ref": "e109",
+          "role": "radio",
+          "name": "Amin_Fides_GenAI-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e110",
+          "role": "button",
+          "name": "PDF Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e111",
+          "role": "link",
+          "name": "Download Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e112",
+          "role": "radio",
+          "name": "Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e113",
+          "role": "button",
+          "name": "PDF Amin_Aieng_AI-Engineer---Site-Rome.pdf 9/8/2026"
+        },
+        {
+          "ref": "e114",
+          "role": "link",
+          "name": "Download Amin_Aieng_AI-Engineer---Site-Rome.pdf"
+        },
+        {
+          "ref": "e115",
+          "role": "radio",
+          "name": "Amin_Aieng_AI-Engineer---Site-Rome.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e116",
+          "role": "button",
+          "name": "PDF Amin_ADENTIS-Italia_Full-Stack-Developer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e117",
+          "role": "link",
+          "name": "Download Amin_ADENTIS-Italia_Full-Stack-Developer.pdf"
+        },
+        {
+          "ref": "e118",
+          "role": "radio",
+          "name": "Amin_ADENTIS-Italia_Full-Stack-Developer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e119",
+          "role": "button",
+          "name": "PDF Amin_ACENSI-Italia_AI-Software-Engineer.pdf 9/8/2026"
+        },
+        {
+          "ref": "e120",
+          "role": "link",
+          "name": "Download Amin_ACENSI-Italia_AI-Software-Engineer.pdf"
+        },
+        {
+          "ref": "e121",
+          "role": "radio",
+          "name": "Amin_ACENSI-Italia_AI-Software-Engineer.pdf",
+          "checked": false
+        },
+        {
+          "ref": "e122",
+          "role": "button",
+          "name": "Upload resume"
+        },
+        {
+          "ref": "e123",
+          "role": "button",
+          "name": "Back"
+        },
+        {
+          "ref": "e46",
+          "role": "button",
+          "name": "Next"
+        }
+      ],
+      "required_fields_still_empty": [],
+      "text": "Apply to Linda AI 2/4 pages Resume* Select or upload a resume in DOC, DOCX, or PDF format that is less than 2MB PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026 PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026 PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026 PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026 PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026 PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026 PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026 PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026 PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026 PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026 0 notifications"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "field_e94",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e94",
+            "role": "radio",
+            "name": "Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e97",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e97",
+            "role": "radio",
+            "name": "Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e100",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e100",
+            "role": "radio",
+            "name": "Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e103",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e103",
+            "role": "radio",
+            "name": "Amin_Sorint.SEC_Software-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e106",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e106",
+            "role": "radio",
+            "name": "Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e109",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e109",
+            "role": "radio",
+            "name": "Amin_Fides_GenAI-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e112",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e112",
+            "role": "radio",
+            "name": "Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e115",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e115",
+            "role": "radio",
+            "name": "Amin_Aieng_AI-Engineer---Site-Rome.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e118",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e118",
+            "role": "radio",
+            "name": "Amin_ADENTIS-Italia_Full-Stack-Developer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e121",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e121",
+            "role": "radio",
+            "name": "Amin_ACENSI-Italia_AI-Software-Engineer.pdf",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      }
+    ],
+    "Choice": [
+      {
+        "id": "resume_input",
+        "type": "choice",
+        "instructions": "Which control uploads the candidate's resume (CV)?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e47": "PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026",
+          "e50": "PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026",
+          "e53": "PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026",
+          "e56": "PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026",
+          "e59": "PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026",
+          "e62": "PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026",
+          "e65": "PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026",
+          "e68": "PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026",
+          "e71": "PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026",
+          "e74": "PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026",
+          "e77": "PDF Amin_The-Lanes-Group_MLOps-Engineer.pdf 9/9/2026",
+          "e80": "PDF Amin_The-Lanes-Group_Generative-AI-Engineer.pdf 9/9/2026",
+          "e83": "PDF Amin_Odysse-Ltd_Data-Scientist.pdf 9/9/2026",
+          "e86": "PDF Amin_Oho-Group_Machine-Learning-Engineer.pdf 9/9/2026",
+          "e89": "PDF Amin_FreshtechIT_Agentic-Software-Engineer.pdf 9/9/2026",
+          "e92": "PDF Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf 9/9/2026",
+          "e95": "PDF Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf 9/9/2026",
+          "e98": "PDF Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf 9/8/2026",
+          "e101": "PDF Amin_Sorint.SEC_Software-Engineer.pdf 9/8/2026",
+          "e104": "PDF Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf 9/8/2026",
+          "e107": "PDF Amin_Fides_GenAI-Engineer.pdf 9/8/2026",
+          "e110": "PDF Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf 9/8/2026",
+          "e113": "PDF Amin_Aieng_AI-Engineer---Site-Rome.pdf 9/8/2026",
+          "e116": "PDF Amin_ADENTIS-Italia_Full-Stack-Developer.pdf 9/8/2026",
+          "e119": "PDF Amin_ACENSI-Italia_AI-Software-Engineer.pdf 9/8/2026",
+          "e122": "Upload resume",
+          "e123": "Back",
+          "e46": "Next",
+          "none": "No control on this page uploads a resume."
+        }
+      },
+      {
+        "id": "google_button",
+        "type": "choice",
+        "instructions": "Which control signs in or continues with Google?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e47": "PDF Amin_Accenture_AI-Engineer.pdf 9/18/2026",
+          "e48": "Download Amin_Accenture_AI-Engineer.pdf",
+          "e50": "PDF Amin_Version-1_AI-Engineer.pdf 9/18/2026",
+          "e51": "Download Amin_Version-1_AI-Engineer.pdf",
+          "e53": "PDF Amin_Vallum-Associates_Agentic-AI-Engineer.pdf 9/14/2026",
+          "e54": "Download Amin_Vallum-Associates_Agentic-AI-Engineer.pdf",
+          "e56": "PDF Amin_Elsevier_Data-Scientist.pdf 9/14/2026",
+          "e57": "Download Amin_Elsevier_Data-Scientist.pdf",
+          "e59": "PDF Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf 9/11/2026",
+          "e60": "Download Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf",
+          "e62": "PDF Amin_iProov_Machine-Learning-Engineer.pdf 9/11/2026",
+          "e63": "Download Amin_iProov_Machine-Learning-Engineer.pdf",
+          "e65": "PDF Amin_Euphoric_Software-Engineer-Applied-AI.pdf 9/11/2026",
+          "e66": "Download Amin_Euphoric_Software-Engineer-Applied-AI.pdf",
+          "e68": "PDF Amin_Findrs_Forward-Deployed-Engineer.pdf 9/11/2026",
+          "e69": "Download Amin_Findrs_Forward-Deployed-Engineer.pdf",
+          "e71": "PDF Amin_The-Portfolio-Group_AI-Engineer.pdf 9/11/2026",
+          "e72": "Download Amin_The-Portfolio-Group_AI-Engineer.pdf",
+          "e74": "PDF Amin_kadence_Artificial-Intelligence-Engineer.pdf 9/9/2026",
+          "e75": "Download Amin_kadence_Artificial-Intelligence-Engineer.pdf",
+          "e77": "PDF Amin_The-Lanes-Group_MLOps-Engineer.pdf 9/9/2026",
+          "e78": "Download Amin_The-Lanes-Group_MLOps-Engineer.pdf",
+          "e80": "PDF Amin_The-Lanes-Group_Generative-AI-Engineer.pdf 9/9/2026",
+          "e81": "Download Amin_The-Lanes-Group_Generative-AI-Engineer.pdf",
+          "e83": "PDF Amin_Odysse-Ltd_Data-Scientist.pdf 9/9/2026",
+          "e84": "Download Amin_Odysse-Ltd_Data-Scientist.pdf",
+          "e86": "PDF Amin_Oho-Group_Machine-Learning-Engineer.pdf 9/9/2026",
+          "e87": "Download Amin_Oho-Group_Machine-Learning-Engineer.pdf",
+          "e89": "PDF Amin_FreshtechIT_Agentic-Software-Engineer.pdf 9/9/2026",
+          "e90": "Download Amin_FreshtechIT_Agentic-Software-Engineer.pdf",
+          "e92": "PDF Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf 9/9/2026",
+          "e93": "Download Amin_NearTech-Search_Senior-Computer-Vision-Machine-Learning-Engineer.pdf",
+          "e95": "PDF Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf 9/9/2026",
+          "e96": "Download Amin_Coforge_Forward-Deployed-Graduate-Engineer.pdf",
+          "e98": "PDF Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf 9/8/2026",
+          "e99": "Download Amin_Hunter-Bond_AI-Engineer-Leading-Investment-firm.pdf",
+          "e101": "PDF Amin_Sorint.SEC_Software-Engineer.pdf 9/8/2026",
+          "e102": "Download Amin_Sorint.SEC_Software-Engineer.pdf",
+          "e104": "PDF Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf 9/8/2026",
+          "e105": "Download Amin_Measmerize_Junior-Data-Scientist-AI-Engineer.pdf",
+          "e107": "PDF Amin_Fides_GenAI-Engineer.pdf 9/8/2026",
+          "e108": "Download Amin_Fides_GenAI-Engineer.pdf",
+          "e110": "PDF Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf 9/8/2026",
+          "e111": "Download Amin_Blue-Reply-IT_Junior-Agentic-Software-Engineer.pdf",
+          "e113": "PDF Amin_Aieng_AI-Engineer---Site-Rome.pdf 9/8/2026",
+          "e114": "Download Amin_Aieng_AI-Engineer---Site-Rome.pdf",
+          "e116": "PDF Amin_ADENTIS-Italia_Full-Stack-Developer.pdf 9/8/2026",
+          "e117": "Download Amin_ADENTIS-Italia_Full-Stack-Developer.pdf",
+          "e119": "PDF Amin_ACENSI-Italia_AI-Software-Engineer.pdf 9/8/2026",
+          "e120": "Download Amin_ACENSI-Italia_AI-Software-Engineer.pdf",
+          "e122": "Upload resume",
+          "e123": "Back",
+          "e46": "Next",
+          "none": "No control signs in with Google."
+        }
+      },
+      {
+        "id": "form_iframe",
+        "type": "choice",
+        "instructions": "Which embedded frame holds the job application form?",
+        "criteria": {
+          "frame0": "https://www.linkedin.com/preload/?_bprMode=vanilla",
+          "frame1": "https://lnkd.demdex.net/dest5.html?d_nsid=0#https%3A%2F%2Fwww.linkedin.com",
+          "none": "None of these frames holds an application form."
+        }
+      }
+    ],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "field_e94": {
+          "type": "noul",
+          "noul": 0.664
+        },
+        "field_e97": {
+          "type": "noul",
+          "noul": 0.6974
+        },
+        "field_e100": {
+          "type": "noul",
+          "noul": 0.6765
+        },
+        "field_e103": {
+          "type": "noul",
+          "noul": 0.6848
+        },
+        "field_e106": {
+          "type": "noul",
+          "noul": 0.6564
+        },
+        "field_e109": {
+          "type": "noul",
+          "noul": 0.6826
+        },
+        "field_e112": {
+          "type": "noul",
+          "noul": 0.6659
+        },
+        "field_e115": {
+          "type": "noul",
+          "noul": 0.7008
+        },
+        "field_e118": {
+          "type": "noul",
+          "noul": 0.6988
+        },
+        "field_e121": {
+          "type": "noul",
+          "noul": 0.6853
+        },
+        "resume_input": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.1578,
+          "probabilities": {
+            "e38": 0.0081,
+            "e47": 0.1271,
+            "e50": 0.0669,
+            "e53": 0.0151,
+            "e56": 0.0102,
+            "e59": 0.0248,
+            "e62": 0.0207,
+            "e65": 0.0131,
+            "e68": 0.0102,
+            "e71": 0.0206,
+            "e74": 0.0224,
+            "e77": 0.011,
+            "e80": 0.0194,
+            "e83": 0.0086,
+            "e86": 0.0165,
+            "e89": 0.0247,
+            "e92": 0.0191,
+            "e95": 0.0209,
+            "e98": 0.0118,
+            "e101": 0.0145,
+            "e104": 0.0139,
+            "e107": 0.0093,
+            "e110": 0.0154,
+            "e113": 0.0195,
+            "e116": 0.017,
+            "e119": 0.0234,
+            "e122": 0.1694,
+            "e123": 0.025,
+            "e46": 0.0355,
+            "none": 0.1859
+          }
+        },
+        "google_button": {
+          "type": "choice",
+          "choice": "e47",
+          "confidence": 0.0458,
+          "probabilities": {
+            "e38": 0.0088,
+            "e47": 0.0631,
+            "e48": 0.0412,
+            "e50": 0.0395,
+            "e51": 0.023,
+            "e53": 0.0124,
+            "e54": 0.0129,
+            "e56": 0.01,
+            "e57": 0.0082,
+            "e59": 0.0185,
+            "e60": 0.0149,
+            "e62": 0.0132,
+            "e63": 0.0117,
+            "e65": 0.0097,
+            "e66": 0.0096,
+            "e68": 0.0107,
+            "e69": 0.0105,
+            "e71": 0.0193,
+            "e72": 0.0182,
+            "e74": 0.0183,
+            "e75": 0.0158,
+            "e77": 0.0086,
+            "e78": 0.009,
+            "e80": 0.021,
+            "e81": 0.0178,
+            "e83": 0.0081,
+            "e84": 0.0083,
+            "e86": 0.011,
+            "e87": 0.0096,
+            "e89": 0.0202,
+            "e90": 0.0184,
+            "e92": 0.0129,
+            "e93": 0.0154,
+            "e95": 0.0143,
+            "e96": 0.0095,
+            "e98": 0.0086,
+            "e99": 0.0107,
+            "e101": 0.0125,
+            "e102": 0.0101,
+            "e104": 0.0137,
+            "e105": 0.0128,
+            "e107": 0.0116,
+            "e108": 0.0167,
+            "e110": 0.014,
+            "e111": 0.0125,
+            "e113": 0.0183,
+            "e114": 0.0196,
+            "e116": 0.013,
+            "e117": 0.0119,
+            "e119": 0.0206,
+            "e120": 0.0295,
+            "e122": 0.0544,
+            "e123": 0.0291,
+            "e46": 0.0536,
+            "none": 0.0534
+          }
+        },
+        "form_iframe": {
+          "type": "choice",
+          "choice": "frame1",
+          "confidence": 0.2289,
+          "probabilities": {
+            "frame0": 0.133,
+            "frame1": 0.4859,
+            "none": 0.3811
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 6753,
+        "output_tokens": 1503
+      },
+      "latency_ms": 3020.1
+    }
+  },
+  {
+    "State": {
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+      "title": "Founding Software Engineer | Linda AI | LinkedIn",
+      "open_dialogs": [
+        "Apply to Linda AI"
+      ],
+      "controls": [
+        {
+          "ref": "e38",
+          "role": "button",
+          "name": "Dismiss"
+        },
+        {
+          "ref": "e149",
+          "role": "radio",
+          "name": "Have you completed the following level of education: Bachelor's Degree?",
+          "option": "Yes",
+          "checked": false
+        },
+        {
+          "ref": "e150",
+          "role": "radio",
+          "name": "Have you completed the following level of education: Bachelor's Degree?",
+          "option": "No",
+          "checked": false
+        },
+        {
+          "ref": "e151",
+          "role": "radio",
+          "name": "Are you comfortable working in an onsite setting?",
+          "option": "Yes",
+          "checked": false
+        },
+        {
+          "ref": "e152",
+          "role": "radio",
+          "name": "Are you comfortable working in an onsite setting?",
+          "option": "No",
+          "checked": false
+        },
+        {
+          "ref": "e153",
+          "role": "radio",
+          "name": "Are you legally authorized to work in Ireland?",
+          "option": "Yes",
+          "checked": false
+        },
+        {
+          "ref": "e154",
+          "role": "radio",
+          "name": "Are you legally authorized to work in Ireland?",
+          "option": "No",
+          "checked": false
+        },
+        {
+          "ref": "e155",
+          "role": "button",
+          "name": "Back"
+        },
+        {
+          "ref": "e156",
+          "role": "button",
+          "name": "Review"
+        }
+      ],
+      "required_fields_still_empty": [],
+      "text": "Apply to Linda AI 3/4 pages Additional Questions Have you completed the following level of education: Bachelor's Degree?* Yes No Are you comfortable working in an onsite setting?* Yes No Are you legally authorized to work in Ireland?* Yes No Back Review 0 notifications"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "submitted",
+        "type": "noul",
+        "instructions": "Does the page say that a job application was just submitted, sent or received?",
+        "criteria": {
+          "true": "A confirmation such as 'Your application was submitted' or 'Thank you for applying'.",
+          "false": "No such confirmation. Counts of applicants, or a badge on another job, do not count."
+        }
+      },
+      {
+        "id": "applied",
+        "type": "noul",
+        "instructions": "Does the page say that the candidate has already applied to this job?"
+      },
+      {
+        "id": "covered",
+        "type": "noul",
+        "instructions": "Is a pop-up that is not part of the job application in front of the page, covering what is behind it?",
+        "criteria": {
+          "true": "A cookie or consent banner, a newsletter pop-up or another overlay sits over the application or the job page.",
+          "false": "Nothing covers the page, or what is in front is the application form itself."
+        }
+      },
+      {
+        "id": "actionable",
+        "type": "noul",
+        "instructions": "Besides the site's own navigation, does the page already offer something to act on for this job?",
+        "criteria": {
+          "true": "An apply button or link, a field of a form, or the buttons of a dialog about the application.",
+          "false": "Only the site's navigation links, a search box, a spinner or a loading message."
+        }
+      },
+      {
+        "id": "validation",
+        "type": "noul",
+        "instructions": "Does the page show an error message about a form field, such as 'This field is required' or 'Invalid email'?"
+      },
+      {
+        "id": "registration",
+        "type": "noul",
+        "instructions": "Does the page ask to complete a registration, create a profile or accept terms of use before going on?"
+      },
+      {
+        "id": "submit_button",
+        "type": "noul",
+        "instructions": "Is there a button that would submit the job application, such as 'Submit application', 'Send application' or 'Apply'?"
+      },
+      {
+        "id": "field_e149",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e149",
+            "role": "radio",
+            "name": "Have you completed the following level of education: Bachelor's Degree?",
+            "option": "Yes",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e150",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e150",
+            "role": "radio",
+            "name": "Have you completed the following level of education: Bachelor's Degree?",
+            "option": "No",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e151",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e151",
+            "role": "radio",
+            "name": "Are you comfortable working in an onsite setting?",
+            "option": "Yes",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e152",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e152",
+            "role": "radio",
+            "name": "Are you comfortable working in an onsite setting?",
+            "option": "No",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e153",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e153",
+            "role": "radio",
+            "name": "Are you legally authorized to work in Ireland?",
+            "option": "Yes",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e154",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e154",
+            "role": "radio",
+            "name": "Are you legally authorized to work in Ireland?",
+            "option": "No",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      }
+    ],
+    "Choice": [
+      {
+        "id": "kind",
+        "type": "choice",
+        "instructions": "What is this page, as a step of applying for a job?",
+        "criteria": {
+          "job_posting": "A job description page. It offers a button or link to start applying (Apply, Easy Apply, Apply now).",
+          "interstitial": "A step between the job posting and the application form: a job-search safety reminder, a 'you are leaving this site' notice, or a choice of how to start the application (apply manually, autofill with a resume).",
+          "application_form": "A step of the job application itself: its own fields such as name, email, phone, resume upload or screening questions, with a way to go on to the next step.",
+          "final_step": "The application's last step: a review or summary, or a form whose only way forward is a button that submits the application.",
+          "account_wall": "Asks to sign in, to create an account or to enter a password before the application can go on.",
+          "google_sign_in": "Google's own sign-in page: an account chooser, a permission request, a password or code.",
+          "captcha": "A human-verification challenge.",
+          "confirmation": "Says that the application was submitted, sent or received.",
+          "closed": "Says that the job is closed or no longer accepts applications.",
+          "error": "An error page, a page that did not load, or an empty page.",
+          "other": "None of the above."
+        }
+      },
+      {
+        "id": "account",
+        "type": "choice",
+        "instructions": "What does the page ask for about an account?",
+        "criteria": {
+          "create_account": "To create a new account: sign up, register, choose a password.",
+          "sign_in": "To sign in to an existing account or enter a password.",
+          "none": "Neither."
+        }
+      },
+      {
+        "id": "resume_input",
+        "type": "choice",
+        "instructions": "Which control uploads the candidate's resume (CV)?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e155": "Back",
+          "e156": "Review",
+          "none": "No control on this page uploads a resume."
+        }
+      },
+      {
+        "id": "google_button",
+        "type": "choice",
+        "instructions": "Which control signs in or continues with Google?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e155": "Back",
+          "e156": "Review",
+          "none": "No control signs in with Google."
+        }
+      },
+      {
+        "id": "form_iframe",
+        "type": "choice",
+        "instructions": "Which embedded frame holds the job application form?",
+        "criteria": {
+          "frame0": "https://www.linkedin.com/preload/?_bprMode=vanilla",
+          "frame1": "https://lnkd.demdex.net/dest5.html?d_nsid=0#https%3A%2F%2Fwww.linkedin.com",
+          "none": "None of these frames holds an application form."
+        }
+      }
+    ],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "kind": {
+          "type": "choice",
+          "choice": "application_form",
+          "confidence": 0.1318,
+          "probabilities": {
+            "job_posting": 0.1872,
+            "interstitial": 0.1247,
+            "application_form": 0.2107,
+            "final_step": 0.1231,
+            "account_wall": 0.023,
+            "google_sign_in": 0.0093,
+            "captcha": 0.0044,
+            "confirmation": 0.0458,
+            "closed": 0.0411,
+            "error": 0.0835,
+            "other": 0.1472
+          }
+        },
+        "submitted": {
+          "type": "noul",
+          "noul": 0.4068
+        },
+        "applied": {
+          "type": "noul",
+          "noul": 0.5026
+        },
+        "covered": {
+          "type": "noul",
+          "noul": 0.3561
+        },
+        "actionable": {
+          "type": "noul",
+          "noul": 0.8725
+        },
+        "validation": {
+          "type": "noul",
+          "noul": 0.2859
+        },
+        "registration": {
+          "type": "noul",
+          "noul": 0.1554
+        },
+        "account": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.8395,
+          "probabilities": {
+            "create_account": 0.0257,
+            "sign_in": 0.0813,
+            "none": 0.893
+          }
+        },
+        "submit_button": {
+          "type": "noul",
+          "noul": 0.7125
+        },
+        "field_e149": {
+          "type": "noul",
+          "noul": 0.6022
+        },
+        "field_e150": {
+          "type": "noul",
+          "noul": 0.6391
+        },
+        "field_e151": {
+          "type": "noul",
+          "noul": 0.5858
+        },
+        "field_e152": {
+          "type": "noul",
+          "noul": 0.6294
+        },
+        "field_e153": {
+          "type": "noul",
+          "noul": 0.5935
+        },
+        "field_e154": {
+          "type": "noul",
+          "noul": 0.6393
+        },
+        "resume_input": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.6029,
+          "probabilities": {
+            "e38": 0.0839,
+            "e155": 0.0968,
+            "e156": 0.1171,
+            "none": 0.7021
+          }
+        },
+        "google_button": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.3718,
+          "probabilities": {
+            "e38": 0.1172,
+            "e155": 0.1988,
+            "e156": 0.1551,
+            "none": 0.5289
+          }
+        },
+        "form_iframe": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.1716,
+          "probabilities": {
+            "frame0": 0.1351,
+            "frame1": 0.4172,
+            "none": 0.4477
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 2064,
+        "output_tokens": 769
+      },
+      "latency_ms": 2674.4
+    }
+  },
+  {
+    "State": {
+      "page": "Founding Software Engineer | Linda AI | LinkedIn",
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "resume_0",
+        "type": "noul",
+        "instructions": {
+          "form_question": "Have you completed the following level of education: Bachelor's Degree?",
+          "options": [
+            "Yes",
+            "No"
+          ],
+          "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing among uploaded resume files?"
+        }
+      },
+      {
+        "id": "resume_1",
+        "type": "noul",
+        "instructions": {
+          "form_question": "Are you comfortable working in an onsite setting?",
+          "options": [
+            "Yes",
+            "No"
+          ],
+          "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing among uploaded resume files?"
+        }
+      },
+      {
+        "id": "resume_2",
+        "type": "noul",
+        "instructions": {
+          "form_question": "Are you legally authorized to work in Ireland?",
+          "options": [
+            "Yes",
+            "No"
+          ],
+          "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing among uploaded resume files?"
+        }
+      }
+    ],
+    "Choice": [],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "resume_0": {
+          "type": "noul",
+          "noul": 0.5263
+        },
+        "resume_1": {
+          "type": "noul",
+          "noul": 0.4067
+        },
+        "resume_2": {
+          "type": "noul",
+          "noul": 0.4595
+        }
+      },
+      "usage": {
+        "input_tokens": 249,
+        "output_tokens": 72
+      },
+      "latency_ms": 216.7
+    }
+  },
+  {
+    "State": {
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+      "title": "Founding Software Engineer | Linda AI | LinkedIn",
+      "open_dialogs": [
+        "Apply to Linda AI"
+      ],
+      "controls": [
+        {
+          "ref": "e38",
+          "role": "button",
+          "name": "Dismiss"
+        },
+        {
+          "ref": "e149",
+          "role": "radio",
+          "name": "Have you completed the following level of education: Bachelor's Degree?",
+          "option": "Yes",
+          "checked": false
+        },
+        {
+          "ref": "e150",
+          "role": "radio",
+          "name": "Have you completed the following level of education: Bachelor's Degree?",
+          "option": "No",
+          "checked": false
+        },
+        {
+          "ref": "e151",
+          "role": "radio",
+          "name": "Are you comfortable working in an onsite setting?",
+          "option": "Yes",
+          "checked": false
+        },
+        {
+          "ref": "e152",
+          "role": "radio",
+          "name": "Are you comfortable working in an onsite setting?",
+          "option": "No",
+          "checked": false
+        },
+        {
+          "ref": "e153",
+          "role": "radio",
+          "name": "Are you legally authorized to work in Ireland?",
+          "option": "Yes",
+          "checked": false
+        },
+        {
+          "ref": "e154",
+          "role": "radio",
+          "name": "Are you legally authorized to work in Ireland?",
+          "option": "No",
+          "checked": false
+        },
+        {
+          "ref": "e155",
+          "role": "button",
+          "name": "Back"
+        },
+        {
+          "ref": "e156",
+          "role": "button",
+          "name": "Review"
+        }
+      ],
+      "required_fields_still_empty": [],
+      "text": "Apply to Linda AI 3/4 pages Additional Questions Have you completed the following level of education: Bachelor's Degree?* Yes No Are you comfortable working in an onsite setting?* Yes No Are you legally authorized to work in Ireland?* Yes No Back Review 0 notifications"
+    },
+    "Score": [],
+    "Noul": [
+      {
+        "id": "submitted",
+        "type": "noul",
+        "instructions": "Does the page say that a job application was just submitted, sent or received?",
+        "criteria": {
+          "true": "A confirmation such as 'Your application was submitted' or 'Thank you for applying'.",
+          "false": "No such confirmation. Counts of applicants, or a badge on another job, do not count."
+        }
+      },
+      {
+        "id": "applied",
+        "type": "noul",
+        "instructions": "Does the page say that the candidate has already applied to this job?"
+      },
+      {
+        "id": "covered",
+        "type": "noul",
+        "instructions": "Is a pop-up that is not part of the job application in front of the page, covering what is behind it?",
+        "criteria": {
+          "true": "A cookie or consent banner, a newsletter pop-up or another overlay sits over the application or the job page.",
+          "false": "Nothing covers the page, or what is in front is the application form itself."
+        }
+      },
+      {
+        "id": "actionable",
+        "type": "noul",
+        "instructions": "Besides the site's own navigation, does the page already offer something to act on for this job?",
+        "criteria": {
+          "true": "An apply button or link, a field of a form, or the buttons of a dialog about the application.",
+          "false": "Only the site's navigation links, a search box, a spinner or a loading message."
+        }
+      },
+      {
+        "id": "validation",
+        "type": "noul",
+        "instructions": "Does the page show an error message about a form field, such as 'This field is required' or 'Invalid email'?"
+      },
+      {
+        "id": "registration",
+        "type": "noul",
+        "instructions": "Does the page ask to complete a registration, create a profile or accept terms of use before going on?"
+      },
+      {
+        "id": "submit_button",
+        "type": "noul",
+        "instructions": "Is there a button that would submit the job application, such as 'Submit application', 'Send application' or 'Apply'?"
+      },
+      {
+        "id": "field_e149",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e149",
+            "role": "radio",
+            "name": "Have you completed the following level of education: Bachelor's Degree?",
+            "option": "Yes",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e150",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e150",
+            "role": "radio",
+            "name": "Have you completed the following level of education: Bachelor's Degree?",
+            "option": "No",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e151",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e151",
+            "role": "radio",
+            "name": "Are you comfortable working in an onsite setting?",
+            "option": "Yes",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e152",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e152",
+            "role": "radio",
+            "name": "Are you comfortable working in an onsite setting?",
+            "option": "No",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e153",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e153",
+            "role": "radio",
+            "name": "Are you legally authorized to work in Ireland?",
+            "option": "Yes",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      },
+      {
+        "id": "field_e154",
+        "type": "noul",
+        "instructions": {
+          "field": {
+            "ref": "e154",
+            "role": "radio",
+            "name": "Are you legally authorized to work in Ireland?",
+            "option": "No",
+            "checked": false
+          },
+          "question": "Is `field` one of the job application's own questions?"
+        },
+        "criteria": {
+          "true": "A question of the application form: contact details, resume, cover letter, experience, eligibility, or any other question the employer asks the candidate.",
+          "false": "Part of the site around the application: a site search box, a language picker, a job-alert or newsletter sign-up, a chat box, a filter or a sort control."
+        }
+      }
+    ],
+    "Choice": [
+      {
+        "id": "kind",
+        "type": "choice",
+        "instructions": "What is this page, as a step of applying for a job?",
+        "criteria": {
+          "job_posting": "A job description page. It offers a button or link to start applying (Apply, Easy Apply, Apply now).",
+          "interstitial": "A step between the job posting and the application form: a job-search safety reminder, a 'you are leaving this site' notice, or a choice of how to start the application (apply manually, autofill with a resume).",
+          "application_form": "A step of the job application itself: its own fields such as name, email, phone, resume upload or screening questions, with a way to go on to the next step.",
+          "final_step": "The application's last step: a review or summary, or a form whose only way forward is a button that submits the application.",
+          "account_wall": "Asks to sign in, to create an account or to enter a password before the application can go on.",
+          "google_sign_in": "Google's own sign-in page: an account chooser, a permission request, a password or code.",
+          "captcha": "A human-verification challenge.",
+          "confirmation": "Says that the application was submitted, sent or received.",
+          "closed": "Says that the job is closed or no longer accepts applications.",
+          "error": "An error page, a page that did not load, or an empty page.",
+          "other": "None of the above."
+        }
+      },
+      {
+        "id": "account",
+        "type": "choice",
+        "instructions": "What does the page ask for about an account?",
+        "criteria": {
+          "create_account": "To create a new account: sign up, register, choose a password.",
+          "sign_in": "To sign in to an existing account or enter a password.",
+          "none": "Neither."
+        }
+      },
+      {
+        "id": "resume_input",
+        "type": "choice",
+        "instructions": "Which control uploads the candidate's resume (CV)?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e155": "Back",
+          "e156": "Review",
+          "none": "No control on this page uploads a resume."
+        }
+      },
+      {
+        "id": "google_button",
+        "type": "choice",
+        "instructions": "Which control signs in or continues with Google?",
+        "criteria": {
+          "e38": "Dismiss",
+          "e155": "Back",
+          "e156": "Review",
+          "none": "No control signs in with Google."
+        }
+      },
+      {
+        "id": "form_iframe",
+        "type": "choice",
+        "instructions": "Which embedded frame holds the job application form?",
+        "criteria": {
+          "frame0": "https://www.linkedin.com/preload/?_bprMode=vanilla",
+          "frame1": "https://lnkd.demdex.net/dest5.html?d_nsid=0#https%3A%2F%2Fwww.linkedin.com",
+          "none": "None of these frames holds an application form."
+        }
+      }
+    ],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "kind": {
+          "type": "choice",
+          "choice": "application_form",
+          "confidence": 0.1318,
+          "probabilities": {
+            "job_posting": 0.1872,
+            "interstitial": 0.1247,
+            "application_form": 0.2107,
+            "final_step": 0.1231,
+            "account_wall": 0.023,
+            "google_sign_in": 0.0093,
+            "captcha": 0.0044,
+            "confirmation": 0.0458,
+            "closed": 0.0411,
+            "error": 0.0835,
+            "other": 0.1472
+          }
+        },
+        "submitted": {
+          "type": "noul",
+          "noul": 0.4068
+        },
+        "applied": {
+          "type": "noul",
+          "noul": 0.5026
+        },
+        "covered": {
+          "type": "noul",
+          "noul": 0.3561
+        },
+        "actionable": {
+          "type": "noul",
+          "noul": 0.8725
+        },
+        "validation": {
+          "type": "noul",
+          "noul": 0.2859
+        },
+        "registration": {
+          "type": "noul",
+          "noul": 0.1554
+        },
+        "account": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.8395,
+          "probabilities": {
+            "create_account": 0.0257,
+            "sign_in": 0.0813,
+            "none": 0.893
+          }
+        },
+        "submit_button": {
+          "type": "noul",
+          "noul": 0.7125
+        },
+        "field_e149": {
+          "type": "noul",
+          "noul": 0.6022
+        },
+        "field_e150": {
+          "type": "noul",
+          "noul": 0.6391
+        },
+        "field_e151": {
+          "type": "noul",
+          "noul": 0.5858
+        },
+        "field_e152": {
+          "type": "noul",
+          "noul": 0.6294
+        },
+        "field_e153": {
+          "type": "noul",
+          "noul": 0.5935
+        },
+        "field_e154": {
+          "type": "noul",
+          "noul": 0.6393
+        },
+        "resume_input": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.6029,
+          "probabilities": {
+            "e38": 0.0839,
+            "e155": 0.0968,
+            "e156": 0.1171,
+            "none": 0.7021
+          }
+        },
+        "google_button": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.3718,
+          "probabilities": {
+            "e38": 0.1172,
+            "e155": 0.1988,
+            "e156": 0.1551,
+            "none": 0.5289
+          }
+        },
+        "form_iframe": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.1716,
+          "probabilities": {
+            "frame0": 0.1351,
+            "frame1": 0.4172,
+            "none": 0.4477
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 2064,
+        "output_tokens": 769
+      },
+      "latency_ms": 2415.6
+    }
+  },
+  {
+    "State": {
+      "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+      "title": "Founding Software Engineer | Linda AI | LinkedIn",
+      "open_dialogs": [
+        "Apply to Linda AI"
+      ],
+      "controls": [
+        {
+          "ref": "e38",
+          "role": "button",
+          "name": "Dismiss"
+        },
+        {
+          "ref": "e149",
+          "role": "radio",
+          "name": "Have you completed the following level of education: Bachelor's Degree?",
+          "option": "Yes",
+          "checked": false
+        },
+        {
+          "ref": "e150",
+          "role": "radio",
+          "name": "Have you completed the following level of education: Bachelor's Degree?",
+          "option": "No",
+          "checked": false
+        },
+        {
+          "ref": "e151",
+          "role": "radio",
+          "name": "Are you comfortable working in an onsite setting?",
+          "option": "Yes",
+          "checked": false
+        },
+        {
+          "ref": "e152",
+          "role": "radio",
+          "name": "Are you comfortable working in an onsite setting?",
+          "option": "No",
+          "checked": false
+        },
+        {
+          "ref": "e153",
+          "role": "radio",
+          "name": "Are you legally authorized to work in Ireland?",
+          "option": "Yes",
+          "checked": false
+        },
+        {
+          "ref": "e154",
+          "role": "radio",
+          "name": "Are you legally authorized to work in Ireland?",
+          "option": "No",
+          "checked": false
+        },
+        {
+          "ref": "e155",
+          "role": "button",
+          "name": "Back"
+        },
+        {
+          "ref": "e156",
+          "role": "button",
+          "name": "Review"
+        }
+      ],
+      "required_fields_still_empty": [],
+      "text": "Apply to Linda AI 3/4 pages Additional Questions Have you completed the following level of education: Bachelor's Degree?* Yes No Are you comfortable working in an onsite setting?* Yes No Are you legally authorized to work in Ireland?* Yes No Back Review 0 notifications"
+    },
+    "Score": [],
+    "Noul": [],
+    "Choice": [
+      {
+        "id": "op_0",
+        "type": "choice",
+        "instructions": {
+          "question": "Have you completed the following level of education: Bachelor's Degree?",
+          "answer": "Yes",
+          "llm_inference_option_ref": "e149",
+          "ask": "How does `answer` go into the form for `question`?"
+        },
+        "criteria": {
+          "type": "Type the answer into the field: a text box, a text area or a number field.",
+          "select": "Choose the answer in a dropdown list whose options are listed on the page.",
+          "check": "Check the radio button or checkbox that is the answer.",
+          "widget": "Anything else, which needs clicks: a dropdown with no listed options, a date picker, an autocomplete."
+        }
+      },
+      {
+        "id": "option_0",
+        "type": "choice",
+        "instructions": {
+          "question": "Have you completed the following level of education: Bachelor's Degree?",
+          "answer": "Yes",
+          "llm_inference_option_ref": "e149",
+          "ask": "Which option is `answer` for `question`?"
+        },
+        "criteria": {
+          "e149": "Have you completed the following level of education: Bachelor's Degree: Yes",
+          "e150": "Have you completed the following level of education: Bachelor's Degree: No",
+          "e151": "Are you comfortable working in an onsite setting?: Yes",
+          "e152": "Are you comfortable working in an onsite setting?: No",
+          "e153": "Are you legally authorized to work in Ireland?: Yes",
+          "e154": "Are you legally authorized to work in Ireland?: No",
+          "none": "None of these options."
+        }
+      },
+      {
+        "id": "op_1",
+        "type": "choice",
+        "instructions": {
+          "question": "Are you comfortable working in an onsite setting?",
+          "answer": "Yes",
+          "llm_inference_option_ref": "e151",
+          "ask": "How does `answer` go into the form for `question`?"
+        },
+        "criteria": {
+          "type": "Type the answer into the field: a text box, a text area or a number field.",
+          "select": "Choose the answer in a dropdown list whose options are listed on the page.",
+          "check": "Check the radio button or checkbox that is the answer.",
+          "widget": "Anything else, which needs clicks: a dropdown with no listed options, a date picker, an autocomplete."
+        }
+      },
+      {
+        "id": "option_1",
+        "type": "choice",
+        "instructions": {
+          "question": "Are you comfortable working in an onsite setting?",
+          "answer": "Yes",
+          "llm_inference_option_ref": "e151",
+          "ask": "Which option is `answer` for `question`?"
+        },
+        "criteria": {
+          "e149": "Have you completed the following level of education: Bachelor's Degree: Yes",
+          "e150": "Have you completed the following level of education: Bachelor's Degree: No",
+          "e151": "Are you comfortable working in an onsite setting?: Yes",
+          "e152": "Are you comfortable working in an onsite setting?: No",
+          "e153": "Are you legally authorized to work in Ireland?: Yes",
+          "e154": "Are you legally authorized to work in Ireland?: No",
+          "none": "None of these options."
+        }
+      }
+    ],
+    "Response": {
+      "model": "kev-latest",
+      "answers": {
+        "op_0": {
+          "type": "choice",
+          "choice": "check",
+          "confidence": 0.2137,
+          "probabilities": {
+            "type": 0.1506,
+            "select": 0.2894,
+            "check": 0.4102,
+            "widget": 0.1498
+          }
+        },
+        "option_0": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.2499,
+          "probabilities": {
+            "e149": 0.328,
+            "e150": 0.1069,
+            "e151": 0.0282,
+            "e152": 0.0732,
+            "e153": 0.0251,
+            "e154": 0.0816,
+            "none": 0.357
+          }
+        },
+        "op_1": {
+          "type": "choice",
+          "choice": "select",
+          "confidence": 0.1737,
+          "probabilities": {
+            "type": 0.17,
+            "select": 0.3803,
+            "check": 0.2828,
+            "widget": 0.1669
+          }
+        },
+        "option_1": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.2562,
+          "probabilities": {
+            "e149": 0.0387,
+            "e150": 0.0705,
+            "e151": 0.3113,
+            "e152": 0.1146,
+            "e153": 0.026,
+            "e154": 0.0765,
+            "none": 0.3624
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 1027,
+        "output_tokens": 401
+      },
+      "latency_ms": 340.2
+    }
+  }
+]
