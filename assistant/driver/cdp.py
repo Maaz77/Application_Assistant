@@ -1,6 +1,6 @@
 """A small synchronous Chrome DevTools Protocol client.
 
-Ported from jev-ultrafast-mcp 0.1.5+aa6 (MIT; see LICENSE). Owned by this project (P2).
+Ported from the vendored browser package (0.1.5+aa6, MIT; see LICENSE). Owned by this project (P2).
 
 Self-contained on purpose: the only runtime dependency is a websocket client. Sessions are created
 with `Target.attachToTarget(flatten=True)` so many tabs share one socket, and every call is a plain

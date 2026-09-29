@@ -7,7 +7,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "jev-ultrafast-mcp (==0.1.5+aa6)",   # patched wheel in vendor/ (display:contents fix, DISCOVERY.md)
+    "websockets (>=13)",                 # the owned driver's CDP transport (assistant/driver/cdp.py), P2
     "httpx (>=0.27)",
     "pydantic (>=2,<3)",
     "pypdf (>=4)",
@@ -17,9 +17,6 @@ dependencies = [
 
 [tool.poetry]
 package-mode = false
-
-[tool.poetry.dependencies]
-jev-ultrafast-mcp = { path = "vendor/jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl" }
 
 [dependency-groups]
 dev = [

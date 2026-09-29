@@ -1,6 +1,6 @@
 """Session management and guarded execution — the owned browser engine.
 
-Ported from jev-ultrafast-mcp 0.1.5+aa6 `browser.py` (MIT; see LICENSE). Owned by this project (P2).
+Ported from the vendored browser package (0.1.5+aa6, MIT; see LICENSE) `browser.py` (MIT; see LICENSE). Owned by this project (P2).
 
 What changed from the vendored version:
   * one guarded mouse-press path (`_press`): every click — a click op, a toggle, a file-chooser

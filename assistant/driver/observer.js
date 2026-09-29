@@ -1,4 +1,4 @@
-/* jev-ultrafast-mcp — in-page observer + guarded execution support.
+/* the vendored browser package — in-page observer + guarded execution support.
  *
  * Installed on the TOP-LEVEL window only (same-origin frames reach it through
  * window.top). Responsibilities:
