@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from assistant import pages
-from assistant.fill import page_goal
 from assistant.browser import Element, Option, Table
 from assistant.pages import Page, classify, gate
 
@@ -67,11 +66,6 @@ def test_linkedin_entry_and_feed():
     assert pages.classify_entry(page([], url="https://www.linkedin.com/authwall?x")) == "signed_out"
     assert pages.linkedin_feed_ok("https://www.linkedin.com/feed/")
     assert not pages.linkedin_feed_ok("https://www.linkedin.com/checkpoint/lg/login?feed")
-
-
-def test_page_goal_prompt():
-    goal, steps = page_goal([("City", "Milan"), ("Do you require visa sponsorship?", "No")])
-    assert '- "City" → "Milan"' in goal and "Do not click Submit" in goal and steps == 7
 
 
 @pytest.mark.parametrize("capture", sorted(CAPTURED.glob("*/observe.txt")) or [None])

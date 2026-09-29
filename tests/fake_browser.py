@@ -138,6 +138,7 @@ class FakeSession:
         results, ok = [], True
         for op in ops:
             kind, ref = op["op"], op.get("ref", "")
+            self.mgr.log.append((kind, op))
             e = self._by_ref(ref) if ref else None
             step = {"op": kind, "ref": ref or None, "ok": True, "ms": 0}
             if kind == "eval":
@@ -211,9 +212,14 @@ class FakeManager:
         self.site, self.cur, self.name = site, start, "job"
         self.refuse_click = refuse_click
         self.sent: list[str] = []
+        self.log: list[tuple[str, dict]] = []           # (op-kind, {ref,...}) for each act op, for assertions
         self.settings = Settings(cdp_url="fake://")     # provides allow_js=True for Browser.assert_
         self.cdp = _FakeCdp(self)
         self._sessions: dict[str, FakeSession] = {}
+
+    @property
+    def page(self) -> FakePage:
+        return self.site[self.cur]
 
     def connect(self, open_timeout):  # noqa: D401
         pass
@@ -291,10 +297,11 @@ class FakeBook:
         pass
 
 
-def fake_browser(site: dict[str, FakePage], start: str, key: str = "") -> Browser:
-    """A Browser backed by FakeBrowser, with the real guard injected into its (fake) press path."""
+def fake_browser(site: dict[str, FakePage], start: str, key: str = "") -> tuple[Browser, FakeManager]:
+    """A Browser backed by FakeBrowser (real guard injected into the fake press path), and its manager
+    (`.page`, `.sent`, `.cur`, `.site`, `.log` for assertions). Returns (browser, manager)."""
     from assistant import guard
     cfg = config.load()
     mgr = FakeManager(site, start)
     mgr.refuse_click = lambda el: guard.never_click_element(el, guard.FORM)
-    return Browser(cfg, key, manager=mgr)
+    return Browser(cfg, key, manager=mgr), mgr

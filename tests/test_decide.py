@@ -142,19 +142,8 @@ def test_the_decider_follows_the_config(monkeypatch):
     assert ora.url == "https://openrouter.ai/api/alpha/decisions" and ora.model == "respan/span-01-lite:free"
 
 
-def test_the_browser_agent_follows_the_same_route(monkeypatch):
-    from assistant import config, jev
-    monkeypatch.setattr(config, "gateway_key", lambda *a: "gw-key")
-    cfg = config.load()
-    vercel = cfg.model_copy(update={"models": cfg.models.model_copy(update={
-        "system_one_decision_provider": "vercel", "vercel": cfg.models.vercel.model_copy(update={"system_one_decision_model": "typesafe-ai/jev"})})})
-    env = jev.env_values(vercel, "or-key")
-    assert env["TYPESAFE_BASE_URL"] == "https://ai-gateway.vercel.sh/typesafe/v1/systemone"
-    assert env["TYPESAFE_API_KEY"] == "gw-key" and env["TYPESAFE_MODEL"] == "typesafe-ai/jev"
-    assert env["TEXT_MODEL_API_KEY"] == "or-key" and env["TEXT_MODEL_REASONING"] == "none"
-    orouter = cfg.model_copy(update={"models": cfg.models.model_copy(update={"system_one_decision_provider": "openrouter"})})
-    env = jev.env_values(orouter, "or-key")
-    assert env["TYPESAFE_BASE_URL"] == "https://openrouter.ai/api/alpha/decisions" and "TYPESAFE_API_KEY" not in env
+# The browser-agent env-route test (jev.env_values) is dropped: the package is gone in P2, and the System One
+# route per provider is covered by test_for_config_picks_the_route_url_and_model above.
 
 
 def test_respan_questions_flattens_instructions_and_criteria_to_strings():

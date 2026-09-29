@@ -22,8 +22,7 @@ from assistant.llm_inference import (LONG_TEXT, LLMInferenceError, PageAnswers, 
 from assistant.decide import DecisionError
 from assistant.blockers import Attempts, NeedsAttention, OpenQuestion, Parked, RestartFromEntry, StopRun
 from assistant.guard import label_of
-from assistant.browser import Browser, DriverError, Table
-from assistant.driver import DriverTimeout
+from assistant.browser import Browser, DriverError, DriverTimeout, Table
 from assistant.pages import Page
 
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"

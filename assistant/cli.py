@@ -22,7 +22,6 @@ from assistant import gateway as gateway_mod
 from assistant.blockers import NeedsAttention, Parked, RestartFromEntry, StopRun
 from assistant.fill import JobCtx, run_pages
 from assistant.browser import Browser, DriverError, split_json
-from assistant.driver import DriverTimeout
 from assistant.report import EXIT_PREFLIGHT, EXIT_STOPPED, JobResult, Report
 from assistant.tracker import NEEDS_ATTENTION, PENDING_REVIEW, Tracker, TrackerError
 

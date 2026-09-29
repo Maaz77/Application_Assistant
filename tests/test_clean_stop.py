@@ -47,12 +47,13 @@ def run_until(workspace, stop, monkeypatch, tmp_path, process=None):
     """cli.run with preflight, the package and the browser stubbed out; `stop` is raised on the first job."""
     cfg = workspace.cfg
     monkeypatch.setattr(cli, "RUNS", tmp_path / "runs")
-    monkeypatch.setattr(cli, "_load_package", lambda *a: None)
     monkeypatch.setattr(cli, "connect_once", lambda *a: None)
     monkeypatch.setattr(cli, "preflight", lambda browser: iter(["stubbed"]))
-    monkeypatch.setattr(cli, "Jev", lambda *a, **k: SimpleNamespace(calls_log=None, doctor=lambda: {}))
+    monkeypatch.setattr(cli, "Browser", lambda *a, **k: SimpleNamespace(actions_log=None, doctor=lambda: {},
+                                                                        connect=lambda *a: None))
     monkeypatch.setattr(cli.tabs, "TabBook", lambda browser: SimpleNamespace(
-        handles=lambda: set(), close=lambda: None, release=lambda s: None))
+        handles=lambda: set(), close=lambda: None, release=lambda s: None,
+        current_handle=lambda s: "", close_junk=lambda s, b, k: []))
     monkeypatch.setattr(config_mod, "chat_key", lambda c: "k")
 
     def raise_stop(job, **kw):
@@ -111,9 +112,9 @@ def test_a_stop_during_preflight_exits_three_with_a_report(workspace, monkeypatc
     `test_cli.py::test_a_rejected_key_fails_preflight_and_names_the_variable`."""
     cfg = workspace.cfg
     monkeypatch.setattr(cli, "RUNS", tmp_path / "runs")
-    monkeypatch.setattr(cli, "_load_package", lambda *a: None)
     monkeypatch.setattr(cli, "connect_once", lambda *a: None)
-    monkeypatch.setattr(cli, "Jev", lambda *a, **k: SimpleNamespace(calls_log=None))
+    monkeypatch.setattr(cli, "Browser", lambda *a, **k: SimpleNamespace(actions_log=None,
+                                                                        connect=lambda *a: None))
     monkeypatch.setattr(config_mod, "chat_key", lambda c: "k")
 
     def preflight(browser):
@@ -155,111 +156,7 @@ def test_an_estimated_spend_says_so(tmp_path):
     assert "$0.5000 (estimated)" in md
 
 
-# ------------------------------------------------------------------ the cleanup path
-
-
-class _StubServer:
-    """Enough of the package's browser_* surface for a real Jev and a real TabBook to work on."""
-
-    def __init__(self):
-        self.calls = []
-
-    def _note(self, name, **kw):
-        self.calls.append(name)
-
-    def browser_open(self, url, session="default", hint=""):
-        self._note("browser_open")
-        return f"opened {url}"
-
-    def browser_observe(self, session="default", **kw):
-        self._note("browser_observe")
-        return "elements:\n"
-
-    def browser_tabs(self, session="default", action="list", **kw):
-        self._note("browser_tabs")
-        if action != "list":
-            return f"{action} ok"
-        # tabs.LIST_RE: "  [n] * #HHHHHHHH  <url>". The helper's own tab plus the job's.
-        return "  [0] * #AAAAAAAA  about:blank\n  [1]   #BBBBBBBB  https://www.linkedin.com/jobs/view/1\n"
-
-    def browser_close(self, session="default", shutdown_browser=False):
-        self._note("browser_close")
-        return "closed 1"
-
-
-def _gateway_that_trips():
-    return G.Gateway(limits=SimpleNamespace(max_in_flight=1, min_interval_s=0.0, max_attempts=1),
-                     budget=SimpleNamespace(max_usd_per_run=0.0),
-                     post=lambda *a: (402, {"error": {"message": "no credit"}}), sleep=lambda _: None)
-
-
-def test_the_call_that_trips_raises_but_the_cleanup_calls_afterwards_do_not():
-    """`Jev.call` asks the Gateway for a stop after every browser call, so that one raised on the package's own
-    thread reaches the run. It must ask only about THIS call: the tab cleanup that runs after a stop goes through
-    here too, and re-raising the old stop there escapes the `finally` blocks in cli.process and cli.run, which is
-    how the report stops being written at all."""
-    from assistant import jev as jevlib
-    gateway = _gateway_that_trips()
-    G.use(gateway)
-    try:
-        browser = jevlib.Jev(config_mod.load(), "", server=_StubServer())
-        browser.open("about:blank", "s")                       # no model request: must not raise
-        with pytest.raises(G.CreditOrKey):                     # the request that trips
-            gateway.send(G.JEV, "http://127.0.0.1:8009/v1/systemone",
-                         {"model": "m", "state": "s", "questions": {}}, {})
-        assert gateway.tripped is not None
-        browser.close("s")                                     # cleanup after the stop: must not raise
-        browser.open("about:blank", "s2")
-    finally:
-        G.use(None)
-
-
-def test_a_stop_raised_inside_a_browser_call_still_reaches_the_caller():
-    """The other half: a stop that this call caused is raised on the caller's thread, not swallowed into an
-    "error(...)" string by `Jev.call`'s broad `except Exception`."""
-    from assistant import jev as jevlib
-    gateway = _gateway_that_trips()
-    G.use(gateway)
-
-    class Tripping(_StubServer):
-        def browser_goal(self, **kw):
-            gateway.send(G.JEV, "http://127.0.0.1:8009/v1/systemone",
-                         {"model": "m", "state": "s", "questions": {}}, {})
-            return "goal: x\nstatus: done\nsteps: 1\n"
-    try:
-        browser = jevlib.Jev(config_mod.load(), "", server=Tripping())
-        with pytest.raises(G.CreditOrKey):
-            browser.call("browser_goal", goal="x", session="s")
-    finally:
-        G.use(None)
-
-
-def test_a_stop_in_a_job_still_writes_the_report_with_a_real_tabbook(workspace, monkeypatch, tmp_path):
-    """The whole path, with the real TabBook and the real Jev that the cleanup runs through: exit 3, a report that
-    names the reason, and nothing recorded."""
-    cfg = workspace.cfg
-    gateway = _gateway_that_trips()
-    server = _StubServer()
-    monkeypatch.setattr(cli, "RUNS", tmp_path / "runs")
-    monkeypatch.setattr(cli, "_load_package", lambda *a: None)
-    monkeypatch.setattr(cli, "connect_once", lambda *a: None)
-    monkeypatch.setattr(cli, "preflight", lambda browser: iter(["stubbed"]))
-    monkeypatch.setattr(cli, "Jev", lambda c, k, **kw: cli.jevlib.Jev(c, k, server=server, **kw))
-    monkeypatch.setattr(cli.gateway_mod, "for_config", lambda c, **kw: gateway)
-    monkeypatch.setattr(config_mod, "chat_key", lambda c: "k")
-
-    def process(job, *, browser, book, **kw):
-        browser.open(job.linkedin_url, f"job-{job.key}")
-        gateway.send(G.JEV, "http://127.0.0.1:8009/v1/systemone",
-                     {"model": "m", "state": "s", "questions": {}}, {})
-        raise AssertionError("unreachable: the send above trips")
-    monkeypatch.setattr(cli, "process", process)
-    args = SimpleNamespace(job=None, limit=None, no_record=False, dry_run=False, config=None)
-    code = cli.run(cfg, args)
-    inference_log.start_run(None)
-
-    assert code == EXIT_STOPPED
-    report = next((tmp_path / "runs").glob("*/report.md")).read_text()
-    assert "**Run stopped:**" in report and "no credit" in report
-    assert list((workspace.base / "Needs-Attention").iterdir()) == []
-    assert "browser_close" in server.calls          # the cleanup really did run
+# The vendored-package cleanup-path tests are dropped in P2: the owned driver makes NO model request on the
+# browser thread (no policy._post), so the Gateway stop always trips on the run's own thread — the P1 sticky
+# re-raise from Jev.call is unnecessary and gone. The clean-stop invariant (records nothing, exit 3) is proved by
+# test_a_gateway_stop_records_nothing_and_exits_three above; recorded in DISCOVERY.

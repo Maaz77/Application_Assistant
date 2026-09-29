@@ -57,7 +57,8 @@ def test_process_parks_and_releases(fixture_server, chrome, tmp_path, monkeypatc
         w.write(fh)
     baseline = {t["id"] for t in chrome.tabs()}
     forms_before = {t["id"] for t in chrome.tabs() if "f10_form.html" in t["url"]}
-    with nullcontext(Jev(cfg, "", calls_log=tmp_path / "calls.jsonl")) as browser:
+    with nullcontext(Browser(cfg, "", actions_log=tmp_path / "browser_actions.jsonl")) as browser:
+        browser.connect(5.0)
         book = tabs.TabBook(browser)
         parked = cli.process(Job.from_dir(d), browser=browser, book=book, cfg=cfg, key="", profile="", run_dir=tmp_path / "run",
                                    today=date(2026, 9, 23))

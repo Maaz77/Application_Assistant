@@ -18,8 +18,10 @@ from pydantic import BaseModel, ConfigDict
 
 from assistant import guard, probes
 from assistant.config import Config
-from assistant.driver import BrowserManager, DriverError, Settings
+from assistant.driver import BrowserManager, DriverError, DriverTimeout, Settings
 from assistant.driver.observe import Observation
+
+__all__ = ["Browser", "Table", "Element", "Option", "split_json", "DriverError", "DriverTimeout"]
 
 
 class Option(BaseModel):
