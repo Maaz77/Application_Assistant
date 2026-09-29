@@ -200,16 +200,15 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
             browser.open(job.linkedin_url, S)
             opened = True
             p = ctx.read()
-            state = pages.classify_entry(p)
-            if state == "signed_out":
+            # P2: only the signed-out check stays here — it is a deterministic URL test. The posting's entry
+            # (Easy Apply / closed / applied / external ATS) is decided by navigate.enter inside run_pages, with
+            # NO page-kind model call. The old pages.classify_entry gate asked kev "what kind of page is this?",
+            # which it cannot answer on a real posting (kind="other" at ~0.12), so every job died here as
+            # load_failure before navigation could run.
+            if any(m in p.url for m in pages.SIGNED_OUT_MARKERS):
                 raise StopRun("LinkedIn is signed out (C19); the job was left untouched")
-            if state in ("closed", "applied"):
-                raise NeedsAttention(state, "LinkedIn says this job is " + (
-                    "no longer accepting applications" if state == "closed" else "already applied to"))
-            if state != "open":
-                raise NeedsAttention("load_failure", "no Easy Apply / Apply button on the LinkedIn job page")
             try:
-                return run_pages(ctx)                          # the browser agent takes it from the posting
+                return run_pages(ctx)                          # navigate.py decides entry, then fills
             except RestartFromEntry as exc:
                 if attempt == 2:
                     raise NeedsAttention("load_failure", f"{exc} (after 2 attempts)") from exc

@@ -841,3 +841,19 @@ on `4012345610-easy-dialog` (`tests/test_navigate.py`, 6 tests): Easy Apply → 
 - **Package removed (T6).** `pip uninstall jev-ultrafast-mcp`; `websockets` is now a direct dependency (the driver's
   CDP transport). Deleted `vendor/` and the stale `golden/calls.jsonl` / `doctor_*.json`. `git grep jev_ultrafast_mcp`
   finds only `DISCOVERY.md` and `assistant/driver/LICENSE` (after the README + build-spec scrub).
+
+## P2 live gate, iteration 1 — the entry still went through the kev kind gate (`runs/20260929-160256`, 2026-09-29)
+
+First live run: all three jobs ended `load_failure` "no Easy Apply / Apply button on the LinkedIn job page", each
+after **one** System One call. The reason was a missed rewire: `cli.process` still called `pages.classify_entry(p)`
+— which asks kev `judge().kind` — **before** `run_pages`, so `navigate.enter` (the deterministic entry, the whole
+point of P2) never ran. kev answered `kind="other"` on every real posting, so `classify_entry` returned `none` and
+the job died before navigation. This is exactly the gate-critical coupling the P2 plan warned about; the offline
+tests missed it because they drive `run_pages` directly, not `cli.process`.
+
+**Fix:** `cli.process` now keeps only the deterministic signed-out URL check and calls `run_pages` straight away;
+`navigate.enter` decides Easy Apply / closed / applied / external ATS with no page-kind model call.
+`pages.classify_entry` stays as a pages helper (still unit-tested) but is no longer on the entry path.
+
+**Safety held even so:** `browser_actions.jsonl` for all three jobs shows only read-only `eval` probes — **no click,
+type or upload, and no POST**. The run was safe; it just never started an application. Re-run pending.
