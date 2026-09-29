@@ -1,0 +1,14 @@
+{
+  "url": "f14.html",
+  "title": "Application sent",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "button",
+      "name": "Done",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

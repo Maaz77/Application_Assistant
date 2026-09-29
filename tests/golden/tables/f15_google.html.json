@@ -1,0 +1,46 @@
+{
+  "url": "f15_google.html",
+  "title": "Sign in - Acme careers",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "button",
+      "name": "Sign in with Google",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "link",
+      "name": "Create account",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "textbox",
+      "name": "Email",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "textbox",
+      "name": "Password",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e5",
+      "role": "button",
+      "name": "Sign in",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

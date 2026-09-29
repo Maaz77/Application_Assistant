@@ -1,0 +1,38 @@
+{
+  "url": "f06.html",
+  "title": "f06 cookie banner",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Name",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Submit",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "button",
+      "name": "Confirm my choices",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "button",
+      "name": "Reject all",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

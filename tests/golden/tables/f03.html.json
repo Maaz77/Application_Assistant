@@ -1,0 +1,22 @@
+{
+  "url": "f03.html",
+  "title": "f03 final Apply",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "City",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Apply",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "url": "f08.html",
+  "title": "f08 widgets",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "City",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "combobox",
+      "name": "Preferred work model",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "radio",
+      "name": "Yes",
+      "value": "",
+      "checked": false,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "radio",
+      "name": "No",
+      "value": "",
+      "checked": false,
+      "options": []
+    },
+    {
+      "ref": "e5",
+      "role": "textbox",
+      "name": "Earliest start date",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e6",
+      "role": "textbox",
+      "name": "Employer 1",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e7",
+      "role": "button",
+      "name": "Add another",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e8",
+      "role": "button",
+      "name": "Next",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

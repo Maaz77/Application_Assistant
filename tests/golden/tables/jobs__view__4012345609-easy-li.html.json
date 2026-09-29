@@ -1,0 +1,49 @@
+{
+  "url": "jobs/view/4012345609-easy-li.html",
+  "title": "Junior C++ Software Engineer | Acme | LinkedIn",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "combobox",
+      "name": "Search",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "link",
+      "name": "Home",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "button",
+      "name": "Easy Apply to this job",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "button",
+      "name": "Save",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e5",
+      "role": "combobox",
+      "name": "Select language",
+      "value": "en_US",
+      "checked": null,
+      "options": [
+        "English (English)",
+        "Italiano (Italian)"
+      ]
+    }
+  ]
+}

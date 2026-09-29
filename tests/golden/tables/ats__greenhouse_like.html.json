@@ -1,0 +1,102 @@
+{
+  "url": "ats/greenhouse_like.html",
+  "title": "Job Application for AI Engineer at Acme",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "button",
+      "name": "Apply",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "textbox",
+      "name": "First Name*",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "textbox",
+      "name": "Email*",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "button",
+      "name": "Attach",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e5",
+      "role": "file",
+      "name": "Attach",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e6",
+      "role": "button",
+      "name": "Attach",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e7",
+      "role": "file",
+      "name": "Attach",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e8",
+      "role": "combobox",
+      "name": "Will you now or in the future require sponsorship for a visa?*",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e9",
+      "role": "button",
+      "name": "Toggle flyout",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e10",
+      "role": "combobox",
+      "name": "Gender",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e11",
+      "role": "button",
+      "name": "Toggle flyout",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e12",
+      "role": "button",
+      "name": "Submit application",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

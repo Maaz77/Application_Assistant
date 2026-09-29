@@ -1,0 +1,22 @@
+{
+  "url": "f02.html",
+  "title": "f02 modal steps",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Phone",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Next",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

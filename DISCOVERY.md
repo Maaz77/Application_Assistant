@@ -704,3 +704,24 @@ ladder. Three jobs took 11 s of browser work in total.
 
 **Left as it is, by user decision (2026-09-29):** `Counters.row()` does not pluralise, so the Timings rows read
 "1 attempts". Cosmetic; not fixed this phase.
+
+## P2 T1: golden observer tables captured before the driver port (2026-09-29)
+
+`tests/capture_tables.py` runs the current vendored observer over every `tests/fixtures/**/*.html` page and
+writes `tests/golden/tables/<fixture>.json` (38 files). This is the frozen parity baseline the owned driver
+(`assistant/driver/`, P2 T2) is graded against in T6; the branch is `recore/p2-driver-guard-navigation`, off `main`
+(P1 is already in main).
+
+- **Scope: `tests/fixtures/` only, not `tests/captured/`.** The fixtures are the pages the browser tests actually
+  serve and re-observe headless, so they are what the new observer can be graded against. `tests/captured/` holds
+  live-site HTML/observe snapshots for reference, not served fixtures. (Decision — the phase file says only "every
+  fixture page".)
+- **Normalization: each element is `{ref, role, name, value, checked, options:[label…]}` in table order.** These are
+  the fields T6 parity compares ("the same controls … in the same order"). The observer's other fields and any
+  longer strings are allowed to differ, so they are not stored.
+- **T6 must compare strings by prefix, not equality.** The current observer cuts name/label/value to 160 chars
+  (build spec B6); the owned driver will not (P2 removes the cut). The golden holds the cut strings, so parity
+  checks `new.startswith(golden)` after stripping any trailing ellipsis.
+- Counts sanity-checked: `f12`, `f17_captcha`, `4012345605-submitted` have 0 controls (expected);
+  `probe_lab/display_contents.html` lists its 3 children through a `display:contents` wrapper, confirming the aa
+  patch is in the baseline.

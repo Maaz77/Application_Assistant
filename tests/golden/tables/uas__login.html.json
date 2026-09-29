@@ -1,0 +1,30 @@
+{
+  "url": "uas/login.html",
+  "title": "LinkedIn Login",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Email",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "textbox",
+      "name": "Password",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "button",
+      "name": "Sign in",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "url": "jobs/view/4012345606-late.html",
+  "title": "Data Engineer | Acme | LinkedIn",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "combobox",
+      "name": "Search",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "link",
+      "name": "Home",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "link",
+      "name": "Network",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "link",
+      "name": "Jobs",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "url": "jobs/view/4012345607-late-tab.html",
+  "title": "Data Engineer | Acme | LinkedIn",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "button",
+      "name": "Apply",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Save",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

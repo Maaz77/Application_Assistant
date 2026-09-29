@@ -1,0 +1,46 @@
+{
+  "url": "ats/ashby_like.html",
+  "title": "Data Scientist @ Acme",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "link",
+      "name": "Back to Acme's Job Listings",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "tab",
+      "name": "Overview",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "tab",
+      "name": "Application",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "link",
+      "name": "Apply for this Job",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e5",
+      "role": "button",
+      "name": "Apply for this Job",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

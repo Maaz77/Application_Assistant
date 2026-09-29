@@ -1,0 +1,90 @@
+{
+  "url": "discovery.html",
+  "title": "Discovery form",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Email",
+      "value": "pre@fill.io",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "combobox",
+      "name": "Country",
+      "value": "",
+      "checked": null,
+      "options": [
+        "Choose",
+        "Italy",
+        "Iran"
+      ]
+    },
+    {
+      "ref": "e3",
+      "role": "radio",
+      "name": "Yes",
+      "value": "",
+      "checked": false,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "radio",
+      "name": "No",
+      "value": "",
+      "checked": false,
+      "options": []
+    },
+    {
+      "ref": "e5",
+      "role": "checkbox",
+      "name": "I agree",
+      "value": "",
+      "checked": false,
+      "options": []
+    },
+    {
+      "ref": "e6",
+      "role": "textbox",
+      "name": "Cover note",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e7",
+      "role": "file",
+      "name": "Resume",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e8",
+      "role": "file",
+      "name": "Cover letter",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e9",
+      "role": "button",
+      "name": "Next",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e10",
+      "role": "button",
+      "name": "Submit application",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

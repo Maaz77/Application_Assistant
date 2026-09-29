@@ -1,0 +1,38 @@
+{
+  "url": "f18_cookie.html",
+  "title": "f18 cookies + form",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Name",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Accept all",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "button",
+      "name": "Only necessary",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "button",
+      "name": "Cookie settings",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

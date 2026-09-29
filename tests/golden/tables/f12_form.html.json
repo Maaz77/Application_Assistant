@@ -1,0 +1,22 @@
+{
+  "url": "f12_form.html",
+  "title": "Greenhouse-like form",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Full name",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Submit application",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

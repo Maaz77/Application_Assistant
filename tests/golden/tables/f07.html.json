@@ -1,0 +1,22 @@
+{
+  "url": "f07.html",
+  "title": "f07 done only",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Start date",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Done",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

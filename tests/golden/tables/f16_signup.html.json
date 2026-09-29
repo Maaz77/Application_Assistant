@@ -1,0 +1,38 @@
+{
+  "url": "f16_signup.html",
+  "title": "Create your candidate account",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Email",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "textbox",
+      "name": "Password",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "button",
+      "name": "Register",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "link",
+      "name": "Apply without an account",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

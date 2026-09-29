@@ -1,0 +1,38 @@
+{
+  "url": "f01.html",
+  "title": "f01 single page",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Full name",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "textbox",
+      "name": "Email",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "file",
+      "name": "Resume",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "button",
+      "name": "Submit application",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

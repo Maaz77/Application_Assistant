@@ -1,0 +1,22 @@
+{
+  "url": "f05.html",
+  "title": "f05 send",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Why Acme?",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Send application",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

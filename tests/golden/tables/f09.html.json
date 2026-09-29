@@ -1,0 +1,22 @@
+{
+  "url": "f09.html",
+  "title": "f09 resume upload",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "file",
+      "name": "Upload resume",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Next",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

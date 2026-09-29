@@ -1,0 +1,22 @@
+{
+  "url": "f13.html",
+  "title": "f13 validation",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Phone number",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Next",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

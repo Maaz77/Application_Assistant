@@ -1,0 +1,22 @@
+{
+  "url": "ats/ashby_like_app.html",
+  "title": "Data Scientist @ Acme",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "tab",
+      "name": "Overview",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "tab",
+      "name": "Application",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}
