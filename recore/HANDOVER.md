@@ -1,214 +1,98 @@
-# Re-core HANDOVER — end of P1
+# Re-core HANDOVER — end of P2
 
-- **Phase:** P1 — paid routes, one model gateway, circuit breaker, spend cap, one Chrome connection per run.
-- **Date:** 2026-09-29 (the work and the DISCOVERY entries are dated 2026-09-28/29)
-- **Branch:** `recore/p1-infrastructure`
-- **Build spec:** v3.2
-- **State:** complete. Every task implemented, the offline suite green, and the user ran and confirmed the
-  live gate (`runs/20260929-094752`, 2026-09-29). The branch is ready to merge.
-
-The phase files still live in `~/Downloads/` (`00_common.md`, `P0_…` … `P5_…`); `recore/` holds only this file.
-
-## The three user decisions that shaped this phase
-
-P1's text assumes paid OpenRouter Jev (D14) and a `--live` contract test. Asked before any code was written, the
-user chose otherwise, and everything below follows from that:
-
-1. **System One stays `local`** (a Kev server on this Mac), not paid OpenRouter Jev.
-2. **The chat route stays `vercel`** (`mistral/mistral-small`, `mistral/mistral-nemo`), not P1's
-   `deepseek/deepseek-v4.1-flash` + `openai/gpt-5.4-mini`. The paid OpenRouter models are configured but are not the
-   default, and no `:free` model remains anywhere (T7).
-3. **No test may reach a real API.** "Use vercel for any LLM text inference completion. The tests and fixtures must
-   not hit the real api. … manage it so that it is best economic-wise."
-
-Consequence, stated to the user before starting and repeated here: **A3 (the live gate's three jobs) cannot be met
-this phase.** kev-0.8b answers `kind="other"` at 0.12 on a real LinkedIn posting (P0 finding), so no job passes the
-entry decision, and the chat fallback does not rescue it — Kev answers *badly*, not *failingly*, and the fallback
-fires only on a failure. P1 itself says "the jobs do not have to park in P1", so the gate is reduced to what T2–T6
-can show (see the live gate below).
+- **Phase:** P2 — owned browser driver, absolute never-submit guard (v2), deterministic Easy Apply navigation.
+- **Date:** 2026-09-29
+- **Branch:** `recore/p2-driver-guard-navigation` (off `main`; P1 is already in main).
+- **Build spec:** v4.0 (in progress — §3 driver, §4 guard v2, §5.1 navigation; see "Docs" below).
+- **State:** code complete, the **offline suite is green** (371 passed, 30 skipped/live, 0 failed). The live gate
+  (A4) has **not** been run by the user yet.
 
 ## What changed
 
-**New module `assistant/gateway.py`** (T2). `Gateway.send(kind, url, body, headers, …)` is the only way a model
-request leaves the program. It owns the queue (`limits.max_in_flight = 1`, `limits.min_interval_s = 0.25`), the
-single retry layer (`limits.max_attempts = 3`, on 429/529/5xx/timeout/no connection; `Retry-After` ≤ 30 s else 2 s
-then 6 s), the per-kind timeout (System One 20 s, or `models.local.timeout` on the local route; chat 45 s), the cost
-accounting, the counters, the single `inference_log` call, and the three clean stops. `gateway.required()` raises
-rather than fall back to an HTTP client; `gateway.private(post=…)` gives a test-injected sender a Gateway of its own
-so nothing has a way around one.
+**Owned driver `assistant/driver/`** (T2), ported from the vendored browser package (0.1.5+aa6, MIT; the notice is
+kept in `assistant/driver/LICENSE`) and trimmed:
+- `cdp.py` — CDP transport; a hung command raises `DriverTimeout` (a `CdpError` subclass; the `os._exit(3)` path is
+  gone), `attach_chrome` turns on `Target.setDiscoverTargets` and captures `targetCreated` openers.
+- `observe.py` / `observer.js` (helper version 13) — the aa2–aa6 observer with **no 160/300-char cut** and new
+  element fields: `type`, `tag`, `required`, `maxlength`, `placeholder`, `form`, `dialog`, `consent`, `scope`,
+  plus a `descriptor(ref)` for the live press-path guard.
+- `session.py` — one guarded mouse-press path (`_press` runs the injected `refuse_click` on the live descriptor
+  before any click / toggle / upload / type focus-click); **no `keys` op and no `type…submit`** (the driver cannot
+  send Enter/Escape); ops kept: click, type, select, toggle, upload, reload, wait_for_load, screenshot, eval; tabs
+  are `Session` methods; `Settings` via constructor; one CDP connection per run (`BrowserManager.connect`);
+  `forget()` drops a session without closing its tab; no atexit hook.
 
-**Senders rewired.**
-- `decide.Decider`: `BATCH`, `PARALLEL`, the `ThreadPoolExecutor`, `RETRY_WAITS`, `LOCAL_RETRY_WAITS` and `TIMEOUT`
-  are deleted. A judgment is one request, split only above `jev.max_questions_per_request = 24` and sent in parts
-  one after another.
-- `llm_inference._ask_model`: sends through the Gateway; its own `_httpx_post`, `_retry_after` and `RETRY_AFTER_MAX`
-  are deleted. `LLM_INFERENCE_TIMEOUT` 120 → 45 s. On the OpenRouter route the body gains
-  `provider: {require_parameters: true}`.
-- `jev.clean_requests`: the package's `policy._post` is answered from the Gateway and **never calls the package's
-  own sender**, so its internal `range(3)` and its fixed 30 s `policy.CLIENT` are off the send path.
-  `jev.set_call_timeout` was deleted with them. Failures are re-raised as the package's own `TurboUnavailable` with
-  the message strings `TRANSIENT_GOAL_RE` matches.
-- `jev.Jev.goal`: one retry (`GOAL_RETRY_WAIT = 2 s`) instead of the five-wait ladder.
-- **Logging happens once**, in the Gateway, classified by body shape (`state`+`questions` = System One,
-  `messages` = chat). Every sender's own `log_jev`/`log_llm` call was removed; leaving them would have double-logged.
+**`assistant/browser.py`** (`Browser`, T3) replaces `jev.py`/`Jev`: wraps the driver, runs `guard.check`, injects
+`guard.never_click_element`, renders the driver's structured results into the text formats callers parse (build
+spec §3.4 + the new fields), and logs to `browser_actions.jsonl`. `Table`/`Element`/`Option`/`split_json` moved
+here. **Only `browser.py` imports `assistant.driver`** (static test in `test_guard.py`).
 
-**Clean stops** (T3). `ProviderOutage` (3 in a row, or 5 of the last 10), `BudgetExceeded`
-(`budget.max_usd_per_run`, checked before each request) and `CreditOrKey` (401/402/**403**, never retried) all
-subclass `blockers.StopRun`, so `cli.run`'s existing handler gives exit 3, a report reason, and **no record** for
-the current job. `gateway.tripped` is sticky and `Jev.call` re-raises it on the run's thread, because a stop raised
-inside the package's worker thread would be swallowed by that method's broad `except Exception`. A stop during
-preflight is a stop (exit 3), not a preflight failure (exit 1).
+**Guard v2** (`assistant/guard.py`, T4): `never_click_element(el, page)` is absolute (00_common §4.1) — the full
+refused-label set (submit/send/confirm/done/finish/complete), apply once `FORM.started`, structural submit unless
+an allowlisted advance label off a non-final page, every click on a final page; the one cookie-consent exemption.
+`looks_final(elements)` reads finality from the table (no circular refused-click). The label/apply/final rules are
+scoped to click-role elements so a required "Confirm email" textbox stays fillable.
 
-**Chat fallback** (T4). `decide.ChatDecider` answers the same typed questions with the chat route's models and
-returns the shapes `Answer.parse` already reads. The Decider asks System One first and falls back once. Both the
-System One send and the fallback send defer their verdict, and the Decider reports **one** verdict for the pair.
+**`assistant/navigate.py`** (T5) replaces the three `browser_goal` calls with **no page-kind model call**: `enter`
+decides the LinkedIn posting from the Easy Apply button, closed/applied text, an external Apply, a cookie banner,
+or one last-resort Jev `choice`; `advance` clicks the allowlisted button and waits for the dialog (scoped by the
+`dialog` field) to change. `fill.run_pages` is the deterministic Easy Apply loop; `fill_page` drops the page-goal
+fallback (a required unsupported widget → `broken_form`).
 
-**One Chrome connection** (T5). `jev.connect_chrome(cfg, 180)` + `cli.connect_once`, called before preflight.
-`contract_check.connection_differences` checks the four package internals it reaches for (`MANAGER._cdp`,
-`cfg.attach_data_dirs`, `attach_chrome`'s parameters, and that `BrowserManager.cdp` still sets its own
-`open_timeout`).
-
-**Preflight** (T1). It now probes **each** configured LLM inference model, one at a time, and names the one that
-failed. A 401/402/403 during preflight is a `PreflightError` naming the key variable (`config.KEY_NAMES`) and exit 1
-— "nothing written" is the accurate outcome there, and it is what T1 asks for; the same condition during the job
-loop is a `CreditOrKey` stop with exit 3 (T3).
-
-**Report** (T6). Summary gains the model-request totals, the spend (reported/estimated), the highest number in
-flight and `Decisions by fallback: N`; Timings gains a per-job breakdown.
-
-**Config** (T1). New strict sections `[limits]`, `[budget]`, `[jev]`, `[decider]`, `[prices]`.
-
-## Four defects found before the gate
-
-1. **The sticky re-raise fired during cleanup.** `Jev.call` asked the Gateway for a stop after *every* browser call,
-   including the tab cleanup that runs after one. `StopRun` is not a `RuntimeError`, so it escaped the `except`
-   clauses in `cli.process`'s and `cli.run`'s `finally` blocks, `report.write()` never ran, and the run ended in a
-   traceback with exit 1 instead of a report and exit 3 — failing T3 exactly where it matters. `Jev.call` now notes
-   `gateway.tripped` before the call and re-raises only a stop that this call caused. Covered by three tests in
-   `test_clean_stop.py`, verified by reintroducing the bug.
-2. **The live fixture installed no Gateway.** `tests/conftest.py`'s `decider` fixture built a `Decider` without one,
-   so the first `ask` in any `--live` test (and `tripwire --live`) would have raised "may not bypass". It now
-   installs `gateway.for_config(cfg)` for a live test and none for an offline one — a sender with no Gateway refuses
-   rather than reaching a provider, which is what keeps the offline suite off the network.
-3. **The chat rotation fed the breaker per model, not per request** — the same defect as (1) in T4's terms, found by
-   a second review. On the shipped settings it trips a false outage: Vercel allows 5 requests a minute per model, so
-   a busy `mistral-small` with `mistral-nemo` answering gives failure, success, failure, success, which reaches
-   "5 of the last 10" while every page was answered. `_ask_model` now defers and `call_engine` reports one verdict.
-   Verified by reintroducing the bug. **The package's own text-helper rotation has the same shape and is not fixed**:
-   our wrapper sees individual `_post` calls and cannot group them. P2 removes the package from the send path.
-4. `Gateway.release()` was dead code: `send` frees the queue slot before returning, so the chat fallback's send was
-   never nested and could not self-deadlock. Deleted; the test that proved it stayed, because a regression there
-   would hang rather than fail.
-5. `llm_inference` still carried an `httpx` sender no longer on any path. A static test now forbids `httpx.post` in
-   any model-sending module, so a second path cannot be reintroduced quietly.
+**Rewired:** `cli.py` (one `Browser` per run, one connection, `browser_actions.jsonl`, no package load),
+`tabs.py` (driver-native, `release`→`forget`), `pages.py`, `google_signin.py`. **Deleted:** `jev.py`,
+`contract_check.py`, the goal prompts, `vendor/` (wheel + patch), `fake_mcp.py`, and obsolete tests; the package is
+uninstalled and `websockets` is now a direct dep.
 
 ## Evidence
 
-**Offline:** 331 unit + 50 browser pass; `contract_check` clean; `run --dry-run` unchanged (7 jobs);
-`test_baseline_p0` green after the one intended golden change (`provider.require_parameters`).
-
-**New tests, 62 functions in four files:** `tests/test_gateway.py` (30, against a real local `http.server`),
-`tests/test_fallback.py` (16), `tests/test_clean_stop.py` (9 — one parametrized over the three stops, three over the
-cleanup path with a real `Jev` and `TabBook`, all on temp copies of the tracker and the job folders),
-`tests/test_no_bypass.py` (7, both HTTP clients sealed off plus a static check), plus five P1 config-default tests
-and three preflight-probe tests in `tests/test_config.py` / `tests/test_cli.py`.
-
-**Changed assertions**, each required by P1 and recorded in `DISCOVERY.md`: `test_decide`'s batching and retry
-ladders; `test_jev`'s goal retry; the 401 assertions in `test_answers` (now a clean stop, not one model's failure).
-No guard, tripwire or records test was touched.
-
-**Live gate** — `runs/20260929-094752`, `run --no-record --limit 3` with the Kev server up. Every check in
-`LIVE_TEST.md` § "P1 re-core gate" holds:
-
-| Check | Observed |
-|---|---|
-| the "Allow" line before any model probe | printed first; one connection for the run |
-| highest number of requests in flight | **1** |
-| model spend | **$0.0002**, reported (not estimated) |
-| attempts | **6 requests, 6 attempts** — nothing retried |
-| `:free` models | none (`mistral/mistral-small`, `mistral/mistral-nemo`) |
-| log key sets | exactly §6.2 / §6.3; no key string |
-| submission | no click, no `needs_confirmation`, no submit — only read-only `eval` probes |
-| job tabs | left open; the logged `browser_close` calls are `TabBook.release`'s scratch tabs |
-| `--no-record` | honoured — 7 folders still in `Applications/`, the other two directories empty |
-
-**The batching change is visible live:** each job's entry judgment (12 questions, 4 choice + 8 noul) went out as
-**one** request, where pre-P1 it was three batches of four side by side. Three jobs took 11 s of browser work.
-Worst case per goal step is now at most 6 HTTP requests, down from ~18 (spec §13.1).
-
-**Outcome:** 3 jobs, 0 parked, 3 Needs Attention `load_failure` — expected on these settings, and it still passes
-the gate (P1: "the jobs do not have to park").
+- **Offline suite (A1): 371 passed, 30 skipped (live), 0 failed** (`pytest -m "unit or browser"`).
+- **Parity (T6):** `tests/test_parity.py` — the owned observer matches the T1 golden on all 38 fixtures.
+- **Never-submit (T7):** `tests/test_tripwire.py` — the walk clicks every button (nothing sent); a direct submit
+  click is refused by the driver press path; `tests/test_guard_v2.py` (17) covers the rule + the T5 label cases.
+- **Navigation:** `tests/test_navigate.py` — Easy Apply on `4012345610-easy-dialog` opens the dialog and advances
+  Contact → Resume → Questions → Review → final with **zero POSTs**.
+- **A2:** `git grep` for the package literal finds only `DISCOVERY.md` and `assistant/driver/LICENSE` **once README.md and
+  the build spec are scrubbed** (in progress — see below).
+- **A3:** no `browser_goal`, no text helper; `run --dry-run` prints the 7-job queue.
 
 ## Known issues / open questions
 
-- **kev-0.8b still cannot classify a real LinkedIn posting.** Confirmed again by the gate run: on a posting whose
-  State contained "Easy Apply to this job" it answered `kind="other"` at confidence **0.1234**, with a flat
-  distribution over eleven options (`other` 0.2031, `job_posting` 0.1652, `application_form` 0.1577) — the same
-  shape as P0's 0.1238. Model capacity, not anything P1 changed. Needs a stronger or fine-tuned System One model
-  (P3/P4); the logged `jev_inference_logs.json` entries are already in the shape `kev.train` takes.
-- **D12's `external_ats` class is not implemented, and the gate run shows why that matters.** Two of the three
-  queued jobs (Genesys, Mastercard) carry "Apply on company website" and **no Easy Apply control**; they should be
-  Needs Attention `external_ats`, and were reported as `load_failure`. There is no occurrence of `external_ats` in
-  `assistant/` or `tests/`. P5 owns the class itself, but the consequence is immediate: **that "3 job" run was
-  really testing one Easy Apply job.** Before P3's gate ("one job parked end-to-end") and P4's ("≥ 7 of 10"), the
-  queue has to be verified to hold actual Easy Apply postings, or the numbers mean nothing.
-- **Cosmetic, left by user decision (2026-09-29):** `Counters.row()` does not pluralise, so a Timings row reads
-  "1 attempts".
-- **Paid System One is unavailable on the account:** OpenRouter 402, Vercel 403.
-- **P1 T1's single endpoint is only half-done.** On the `local` route both senders already share one URL
-  (`models.local.base_url` + `/v1/systemone`), which is the task's goal. The OpenRouter value stays
-  `https://openrouter.ai/api/alpha/decisions`; P1 asked for `api/v1/systemone`, but DISCOVERY 2026-09-28 measured
-  that this is not the System One route, and the contract test that would settle it needs a real API.
-- **Not measured, because no test may reach a real API:** whether large requests fail on OpenRouter (the
-  `max_questions_per_request = 24` split is P1's number, justified only by the 2026-09-24 Vercel evidence), and the
-  behaviour of `provider.require_parameters` when no provider qualifies.
-- **`tests/test_model_access.py`** still has no `live_model` marker, by the earlier user decision recorded in
-  `CLAUDE.md`. It is the one file a plain `pytest` spends money through. Left untouched; ask the user before
-  changing it.
+- **The live gate (A4) has not been run.** The user runs `LIVE_TEST.md` § "P2 gate".
+- **Queue reality:** of the 7 queued jobs, the P1 gate found Genesys + Mastercard carry "Apply on company website"
+  (→ now `external_ats`). Confirm at least one **Easy Apply** job is queued or the gate shows only external_ats.
+- **"Page is final" heuristic** (`guard.looks_final`): a design choice (submit-like present, no advance button),
+  deterministic and table-only — **confirm at the live gate**.
+- **Top-card scoping:** `navigate.enter` matches text/controls page-wide; a real posting has a "similar jobs"
+  sidebar (its cards carry their own "Applied"/"Easy Apply" badges). Checking the Easy Apply *button* first covers
+  the common case; confirm on a real posting.
+- **Resume upload button type:** if LinkedIn's in-dialog "Upload resume" is a `<button>` with no `type` inside the
+  form, the structural rule refuses it — watch item in the live gate.
+- `websockets` sync `connect()` prints a `DeprecationWarning` (used as in the vendored code); functional.
 
 ## Deviations from the phase file
 
-1. **T1's defaults** — the user kept `local` + `vercel` instead of paid OpenRouter (above).
-2. **T1's contract test and T7's `--live` items** — not implemented; no test may reach a real API.
-3. **A1's "the `--live` contract tests pass"** — dropped, for the same reason.
-4. **T3 covers 403 as well as 401/402** — Vercel answers 403 for an account with no card, which is the same
-   condition and is not cured by retrying or by another model.
-5. **T2's timeout for the local route** — `models.local.timeout` (120 s), not the 20 s P1 names for System One: a
-   pass on an Apple GPU is seconds, not a data-centre's milliseconds.
-6. **A key failure is exit 1 in preflight and exit 3 in the job loop.** T1 says it "fails preflight"; T3 says it
-   stops the run. Both hold, split by where it happens.
-7. **`ChatDecider` answers `noul` and `choice`, not `score`.** T4 names score answers, but nothing in the program
-   builds a score question — `decide.noul` and `decide.choice` are the only builders, and `Answer.parse` reads only
-   those two. Adding a third shape with no caller would be dead code; `inference_log`'s `Score` bucket already exists
-   for the day one is sent.
-8. **One bypass path remains in `jev.clean_requests`**, by choice: when no Gateway is installed it calls the
-   package's own sender, which is what lets `tests/test_jev.py` drive the package directly. Every command installs a
-   Gateway first (`run`, `preflight`, `capture`), and `tests/test_no_bypass.py` proves the gateway path is the one
-   taken when one exists. P2 removes the package from the send path altogether.
-9. **A model rotation hands over before it retries** — a chat request passes `attempts=1` while an untried model
-   remains. P1 caps attempts per request; this keeps the cheaper behaviour the live 2026-09-24 evidence encodes,
-   and is still one retry layer (another model is a different request).
+- The goal-based navigation/fill tests could not be "ported" verbatim (the behaviour is gone); the equivalent
+  coverage moved to `test_navigate.py` (real driver) + a rewritten `test_fill_loop.py` (fake driver). Recorded in
+  DISCOVERY.
+- `test_baseline_p0` (a P0 no-behaviour-change snapshot) and its golden were deleted: P2 intentionally rewrites the
+  browser-call stream, so the pre-P2 baseline cannot hold.
+- `test_clean_stop`'s P1 sticky-re-raise/real-Jev cleanup tests were dropped: the driver makes no model request on
+  its own thread, so the P1 threading bug they guarded cannot occur in P2.
 
-## The live gate the user still has to run
+## Docs still to finish (§9)
 
-`LIVE_TEST.md` § "P1 re-core gate" has it in full. In short: start `./run_kev_server.command`, then
-`preflight` (one "Allow" click), then `run --no-record --limit 3`; check one "Allow" click for the whole run,
-`Highest number of requests in flight: 1`, spend under $1, no request over 3 attempts, no `:free` model in the
-logs, nothing submitted, and a clean untouched job if a provider failed. Every job ending in Needs Attention
-`load_failure` is expected on these settings and still passes.
+- Rewrite `application_assistant_build_spec.md` §3 (driver), §4 (guard v2), §5.1 (navigation) and bump to **v4.0**;
+  scrub the package name (7 occurrences).
+- Scrub `README.md` (4 occurrences; update setup to the owned driver + websockets).
+- `LIVE_TEST.md`: add the P2 gate procedure.
 
 ## Commands the next session needs
 
 ```bash
 # from Tools/Application_Assistant/
-./run_kev_server.command                                    # the System One route is "local": start it first
+./run_kev_server.command                                    # System One route is "local": start it first
 .venv/bin/python -m assistant preflight                     # LLM inference + System One + one Chrome connection
-.venv/bin/python -m assistant run --no-record --limit 3     # the P1 gate
-.venv/bin/pytest -m "unit or browser" -q                    # the offline suite — never a plain `pytest`
-.venv/bin/python -m assistant.contract_check                # the four package hooks still apply
+.venv/bin/python -m assistant run --no-record --limit 3     # the P2 live gate
+.venv/bin/pytest -m "unit or browser" -q                    # the offline suite (371 pass)
 ```
-
-Next phase is **P2** (`P2_driver_guard_navigation.md`): an owned browser driver, the absolute never-submit guard,
-deterministic Easy Apply navigation. Note for P2: the package's text helper still rotates models inside
-`policy.text_for`, and that rotation does not know about `attempts=1`, so it gets the full ladder per model; P2
-removes the package from the send path anyway.

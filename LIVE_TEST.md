@@ -1,5 +1,29 @@
 # Live test plan (you run these)
 
+## P2 re-core gate (2026-09-29)
+
+Owned browser driver, absolute never-submit guard, deterministic Easy Apply navigation. **Before you start**,
+make sure at least one queued job is a real LinkedIn **Easy Apply** posting (an "Apply on company website" job is
+now reported `external_ats` and is not driven).
+
+```bash
+./run_kev_server.command                                    # System One route is "local": start it first
+.venv/bin/python -m assistant preflight                     # one "Allow remote debugging?" click
+.venv/bin/python -m assistant run --no-record --limit 3
+```
+
+Check:
+- **one** "Allow" click for the whole run (one CDP connection, D13);
+- each Easy Apply job: the program clicks "Easy Apply", fills the first step, and clicks Next **by itself** (no
+  browser-agent goal); it ends parked, or at Needs Attention / `broken_form` with a clear reason;
+- each job with an external "Apply": Needs Attention **`external_ats`**, and the Apply control was **not** clicked;
+- after the program exits, **every job tab is still open**, and none of your other tabs changed;
+- **nothing was submitted** (no POST); `browser_actions.jsonl` shows no submit/apply click that came back `ok`.
+- Watch items (report if seen): a resume "Upload resume" button refused as a submit; a step wrongly judged final;
+  an already-applied or closed posting misread because of the sidebar.
+
+Send back: the run folder path (`runs/<ts>`), the terminal output, and what you saw in Chrome.
+
 ## P1 re-core gate (2026-09-28)
 
 P1 changed how the program talks to models and to Chrome. This gate checks the **traffic and the failure handling**,

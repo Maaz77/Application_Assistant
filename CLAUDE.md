@@ -29,22 +29,22 @@ This folder is its own git repo, nested inside the job-search repo, which ignore
 
 ## Commands
 
-A plain venv is used, because Poetry's pyenv shim is broken on this Mac. The browser package comes from the patched wheel in `vendor/`:
+A plain venv is used, because Poetry's pyenv shim is broken on this Mac. The browser driver is owned in
+`assistant/driver/` (P2), so there is no vendored wheel to install — only the runtime deps:
 
 ```bash
 /opt/homebrew/bin/python3 -m venv .venv
-.venv/bin/pip install vendor/jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl httpx "pydantic>=2" pypdf python-dotenv numbers-parser pytest
+.venv/bin/pip install websockets httpx "pydantic>=2" pypdf python-dotenv numbers-parser pytest
 ```
 
 ```bash
-.venv/bin/python -m assistant preflight                  # key, Jev, package, tracker, Chrome, LinkedIn sign-in; writes nothing
+.venv/bin/python -m assistant preflight                  # key, System One, driver, tracker, Chrome, LinkedIn sign-in; writes nothing
 .venv/bin/python -m assistant run --dry-run              # print the queue; no browser, no writes
 .venv/bin/python -m assistant run --no-record --job URL  # fill and park one job; no tracker/folder/job.md writes
 .venv/bin/python -m assistant run --limit 3              # a recorded run
 .venv/bin/python -m assistant requeue [--job URL]        # Needs-Attention/ → Applications/, Status back to Resume Built
 .venv/bin/python -m assistant capture URL                # read-only page snapshot into tests/captured/
 .venv/bin/python -m assistant tripwire [--live]          # the never-submit test suite
-.venv/bin/python -m assistant.contract_check             # package browser_* signatures vs what jev.py expects
 ```
 
 Exit codes: 0 all parked, 1 preflight failed (nothing written), 2 some job needs attention, 3 run stopped (alarm, signed out, tracker changed on disk, folder clash, hung browser call, or one of the three clean stops: a provider outage, the spend cap, a key/credit failure).
@@ -62,10 +62,11 @@ Tests (markers are defined in `pyproject.toml`; there is no linter configured):
 
 ## The model gateway
 
-Every model request — `decide.Decider`, `decide.ChatDecider`, `llm_inference`, and the browser package's own
-`policy._post` — leaves through one `Gateway` (`assistant/gateway.py`, installed per run by `gateway.use`). Nothing
-else may send: `gateway.required()` raises instead of falling back to an HTTP client, and `tests/test_no_bypass.py`
-seals off both `httpx.post` and the package's `policy.CLIENT` to prove it. The Gateway owns the queue
+Every model request — `decide.Decider`, `decide.ChatDecider` and `llm_inference` — leaves through one `Gateway`
+(`assistant/gateway.py`, installed per run by `gateway.use`). The owned browser driver (P2) makes no model request
+at all: navigation is deterministic (`assistant/navigate.py`) and the only Jev calls are `decide`'s. Nothing else
+may send: `gateway.required()` raises instead of falling back to an HTTP client, and `tests/test_no_bypass.py`
+seals off `httpx.post` and `httpx.Client.post` to prove it. The Gateway owns the queue
 (`[limits] max_in_flight`, `min_interval_s`), the **only** retry layer (`max_attempts`, on 429/5xx/timeout/no
 connection, waiting `Retry-After` ≤ 30 s else 2 s then 6 s), the per-kind timeout (System One 20 s, or
 `models.local.timeout` on the local route; chat 45 s), the counters the report prints, and the single call to
@@ -73,15 +74,16 @@ connection, waiting `Retry-After` ≤ 30 s else 2 s then 6 s), the per-kind time
 
 Three conditions end a run instead of one job (`[budget]`, `gateway.ProviderOutage/BudgetExceeded/CreditOrKey`).
 Each subclasses `blockers.StopRun`, which is what keeps it out of the `NeedsAttention` paths in `cli.py` and
-`fill.py` — a `NeedsAttention` writes a record, and a stopped run must leave its job untouched. A stop raised on the
-package's worker thread is kept in `gateway.tripped` and re-raised by `Jev.call` on the run's own thread.
+`fill.py` — a `NeedsAttention` writes a record, and a stopped run must leave its job untouched. Every model send
+now happens on the run's own thread (the driver has no sender thread), so a stop propagates directly; a
+`DriverTimeout` (a hung CDP call) is caught in `run_pages` and raised as a `StopRun` (exit 3).
 
 `decide.ChatDecider` (`[decider] fallback`) answers the same typed questions with the chat models when the System
 One model fails; the breaker counts the pair as one request.
 
 ## Keys and models
 
-`.env` (git-ignored) holds `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` (Vercel AI Gateway) and, only when the local Kev server was started with one, `KEV_API_KEY`; which one each model call uses follows `models.chat_route` and `models.system_one_decision_provider`. `config.toml` is strict: unknown keys are errors. `models.chat_route` (`openrouter` or `vercel`) picks who serves the chat models, and with it the `[models.openrouter]` or `[models.vercel]` table, the key (`config.chat_key`) and the URL (`config.chat_url`); `cfg.models.llm_inference`/`text_helper` are properties that read the active table. Each is a list of models tried in turn (`rotation.Rotation`; the text helper's rotation is a wrap of the package's `policy.text_for` installed by `jev.load()`). `models.system_one_decision_provider` picks who serves the System One decision model, and each route names it differently: `typesafe-ai/jev` on Vercel AI Gateway, `typesafe/jev-1.13` on OpenRouter, `kev-latest` on `local` — a [Kev](https://github.com/jaredpalmer/kev) server on the user's Mac (`[models.local]`: `base_url`, `state_chars`, `timeout`), which serves the same System One API (`POST /v1/systemone`) and needs no key, so only the URL changes (`decide.endpoint`, `jev.agent_route`). On that route the state is sent as an object, not as a JSON string (Kev renders objects as labeled text), and preflight first reads `GET /v1/models` (`decide.server_card`). Never print keys: `browser_actions.jsonl` redacts the OpenRouter key, and the inference logs (`llm_inference_logs.json`, `jev_inference_logs.json`) never contain a key.
+`.env` (git-ignored) holds `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` (Vercel AI Gateway) and, only when the local Kev server was started with one, `KEV_API_KEY`; which one each model call uses follows `models.chat_route` and `models.system_one_decision_provider`. `config.toml` is strict: unknown keys are errors. `models.chat_route` (`openrouter` or `vercel`) picks who serves the chat models, and with it the `[models.openrouter]` or `[models.vercel]` table, the key (`config.chat_key`) and the URL (`config.chat_url`); `cfg.models.llm_inference`/`text_helper` are properties that read the active table. Each is a list of models tried in turn (`rotation.Rotation`). The package's text helper is gone (P2), so `models.text_helper` is now unused config. `models.system_one_decision_provider` picks who serves the System One decision model, and each route names it differently: `typesafe-ai/jev` on Vercel AI Gateway, `typesafe/jev-1.13` on OpenRouter, `kev-latest` on `local` — a [Kev](https://github.com/jaredpalmer/kev) server on the user's Mac (`[models.local]`: `base_url`, `state_chars`, `timeout`), which serves the same System One API (`POST /v1/systemone`) and needs no key, so only the URL changes (`decide.endpoint`). On that route the state is sent as an object, not as a JSON string (Kev renders objects as labeled text), and preflight first reads `GET /v1/models` (`decide.server_card`). Never print keys: `browser_actions.jsonl` redacts the OpenRouter key, and the inference logs (`llm_inference_logs.json`, `jev_inference_logs.json`) never contain a key.
 
 ## graphify
 

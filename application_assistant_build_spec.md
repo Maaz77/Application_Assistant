@@ -1,6 +1,8 @@
 # Application Assistant v2: Build Spec, as built
 
-Spec v3.2 · 2026-09-28 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the package behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems.
+Spec v4.0 · 2026-09-29 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the observer behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems.
+
+**v4.0 (re-core P2, 2026-09-29):** the vendored browser package is **removed** and its CDP code is owned in `assistant/driver/` (§3): the aa2–aa6 observer (now with `type`/`tag`/`required`/`maxlength`/`placeholder`/`form`/`dialog`/`consent`/`scope` fields and no 160-char cut), a guarded op executor with **one mouse-press path** that enforces the never-submit rule, and one CDP connection per run. `assistant/browser.py` (`Browser`) replaces `jev.py`; only it imports the driver. The **never-submit rule is absolute** (§4, `guard.never_click_element`): the full refused-label set, structural submits, an advance allowlist, the final-page judgment and one cookie-consent exemption; the driver has no op that sends Enter/Escape. **Navigation is deterministic** (§5.1, `assistant/navigate.py`) with no page-kind model call — the three `browser_goal` calls are gone, and `fill_page` drops its page-goal fallback. See `recore/HANDOVER.md` (end of P2) and `DISCOVERY.md` (P2 entries) for the full change list, and note that §3/§4/§5.1 below still carry some v3.2 prose about the package that the P2 entries supersede.
 
 **v3.2 (re-core P1, 2026-09-28):** every model request — the System One client, the LLM inference, the chat fallback and the browser package's own requests — now leaves through **one `Gateway`** (`assistant/gateway.py`, §3.3): one request in flight at a time, one retry layer, one timeout per kind, one logging point, and the counters the report prints. Batching (`BATCH`/`PARALLEL`) and both retry ladders are gone. A run stops cleanly on a **provider outage**, the **spend cap** or a **key/credit** failure (§4.3), leaving the current job untouched and exiting 3. A **chat fallback** (`decide.ChatDecider`) answers the same typed questions when the System One model fails. The run's single CDP connection is opened before preflight, so one "Allow remote debugging?" click covers the whole run (§3.4). New config sections `[limits]`, `[budget]`, `[jev]`, `[decider]`, `[prices]`. See `recore/HANDOVER.md` for the P1 change list and deviations.
 
@@ -9,7 +11,7 @@ Spec v3.2 · 2026-09-28 · describes the code as it is. It replaces spec v2 (202
 **The program**, *the wrapper*, lives in `Tools/Application_Assistant/`. For every job at Status "Resume Built" it fills the application in the user's own signed-in Chrome, **stops one click before submission**, leaves that tab open, and records the result.
 
 Who does what:
-- **The browser package** `jev-ultrafast-mcp` (a patched 0.1.5 wheel) is called in-process.
+- **The browser driver** is owned in `assistant/driver/` (P2), ported from the vendored package (MIT).
 - **The System One decision model** (config `models.system_one_decision_provider`; TypeSafe's **Jev** instance, or a local **Kev** server) judges every page and plans every fill; the package's goal agent also uses it to pick each click.
 - **The LLM inference**, a chat model, writes the answers, and only from the user's files.
 - **The code keeps:** the answer checks, the resume upload, the records, and one fixed never-submit rule (§4.2).
@@ -20,8 +22,8 @@ Who does what:
 2. Live runs act in the user's real Chrome on the user's real jobs. Prefer `--no-record` when testing. Chrome's "Allow remote debugging?" prompt is the user's to click. Development and the offline tests use local fixture pages in a throwaway Chrome (§9).
 3. Never write `Profile.md`. Tests use temp copies of the tracker and job folders.
 4. Tracker I/O is imported from `Tools/Reconcile/reconcile.py`; its behaviour is not changed.
-5. The package is pinned to the vendored wheel `vendor/jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl`, and preflight refuses any other version. `.env` is never committed or printed.
-6. Only `jev.py` imports `jev_ultrafast_mcp`. It calls the public `server.browser_*` functions and changes exactly three internals, each checked by `contract_check.py` (§3.3).
+5. The browser driver is owned in `assistant/driver/`; there is no external browser package. `.env` is never committed or printed.
+6. Only `assistant/browser.py` imports `assistant/driver/` (the interface boundary; a static test enforces it).
 7. Every judgment about a page, a question or a fill is Jev's (§6). A `DecisionError` sends the job to Needs Attention (class `decision`). There is no rule-based fallback in the program; the old rules live only in the offline test stand-in (§9).
 
 ## 1. What the program does
@@ -66,7 +68,7 @@ Tools/Application_Assistant/
   pyproject.toml  config.toml  .env (git-ignored)  run_application_assistant.command
   README.md  CLAUDE.md  DISCOVERY.md  LIVE_TEST.md  application_assistant_build_spec.md
   prompts/  llm_inference.md  navigate_goal.md  next_step_goal.md  page_goal.md
-  vendor/   jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl  jev_ultrafast_mcp-0.1.5+aa6.patch
+  assistant/driver/   the owned CDP driver (cdp, observe, session, observer.js, LICENSE)
   assistant/  __main__.py cli.py config.py jev.py gateway.py guard.py probes.py pages.py decide.py fill.py
               llm_inference.py inference_log.py rotation.py google_signin.py blockers.py tabs.py records.py
               tracker.py report.py contract_check.py
@@ -77,7 +79,7 @@ Tools/Application_Assistant/
 ```
 
 Dependencies (`pyproject.toml`, Python ≥ 3.11):
-- `jev-ultrafast-mcp ==0.1.5+aa6`, from `vendor/`;
+- `websockets` (the owned driver's CDP transport);
 - `httpx >=0.27`, `pydantic >=2,<3`, `pypdf >=4`, `python-dotenv >=1.0`, `numbers-parser >=4.19,<5`;
 - dev: `pytest >=8`.
 
@@ -85,7 +87,7 @@ A plain venv is used, because Poetry's pyenv shim is broken on this Mac:
 
 ```
 /opt/homebrew/bin/python3 -m venv .venv
-.venv/bin/pip install vendor/jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl httpx "pydantic>=2" pypdf python-dotenv numbers-parser pytest
+.venv/bin/pip install websockets httpx "pydantic>=2" pypdf python-dotenv numbers-parser pytest
 ```
 
 CLI (`python -m assistant [--config PATH] …`):
@@ -175,7 +177,7 @@ The config code in `config.py`:
 
 `.env`: `OPENROUTER_API_KEY=` and `AI_GATEWAY_API_KEY=` (read from `.env` first, then the process environment).
 
-## 3. jev-ultrafast-mcp 0.1.5+aa6: interface
+## 3. The owned browser driver (`assistant/driver/`)
 
 The wheel is 0.1.5 plus three observer fixes (`vendor/*.patch`, "aa"):
 - `display:contents` wrappers hide nothing;

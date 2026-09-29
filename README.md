@@ -122,16 +122,15 @@ Three pictures: what happens to one job, what happens on one form page, and whic
   └─ probes.py ............ small read-only scripts that measure the page
   │
   ▼
- jev-ultrafast-mcp 0.1.5+aa6, patched, in vendor/ ──► your Chrome, port 9222
- (its goal agent picks each click with the same decision model, on the same route)
+ assistant/driver/ (owned CDP driver, P2) ──► your Chrome, port 9222
+ (deterministic Easy Apply navigation in navigate.py — no browser-agent goal)
 ```
 
 Also in this folder:
-- `prompts/`: what the models are told. `llm_inference.md` is used by `answers.py`; `navigate_goal.md`, `next_step_goal.md` and `page_goal.md` are the browser agent's goals.
-- `vendor/`: the patched browser package, and the patch itself.
+- `prompts/`: what the models are told. `llm_inference.md` is used by `llm_inference.py` (navigation is code now, so the goal prompts are gone).
+- `assistant/driver/`: the owned browser driver, ported from the vendored package (MIT; see `assistant/driver/LICENSE`).
 - `tests/`: see [Tests](#tests).
 - `runs/`: one folder per run, see [Running](#running).
-- `assistant/contract_check.py`: checks that the package's functions still match what `jev.py` calls.
 
 ## Setup (once)
 
@@ -140,17 +139,19 @@ Also in this folder:
    ```bash
    cd Tools/Application_Assistant
    /opt/homebrew/bin/python3 -m venv .venv
-   .venv/bin/pip install vendor/jev_ultrafast_mcp-0.1.5+aa6-py3-none-any.whl httpx "pydantic>=2" pypdf python-dotenv numbers-parser pytest
+   .venv/bin/pip install websockets httpx "pydantic>=2" pypdf python-dotenv numbers-parser pytest
    ```
 
-   The browser package is a **patched 0.1.5** kept in `vendor/`, with fixes found on the live sites:
+   The browser driver is **owned** in `assistant/driver/` (P2), ported from the vendored package (MIT). Its
+   observer carries the live-site fixes the package's patch added:
    - content inside `display: contents` wrappers becomes visible (LinkedIn's job card);
    - only the topmost modal dialog is read (Easy Apply, and its "Save this application?" prompt);
    - custom-styled `opacity: 0` radios, checkboxes and file inputs are listed;
    - ARIA radios and checkboxes report their state;
    - the resume can be uploaded through a file-chooser button (LinkedIn has no file input).
 
-   The changes are in `vendor/jev_ultrafast_mcp-0.1.5+aa6.patch`, and preflight refuses to run on the stock package. Once Poetry works again, `poetry install` does the same from `pyproject.toml`.
+   The only runtime browser dependency is `websockets` (the CDP transport). `poetry install` does the same from
+   `pyproject.toml` once Poetry works again.
 
 2. **Keys.** Create `.env` in this folder. It is git-ignored. The decision model on the `local` route needs none
    of them; the LLM inference and the text helper always need their route's key.
@@ -280,7 +281,7 @@ Each run writes `runs/<YYYYMMDD-HHMMSS>/`, with a `_run/` folder for preflight a
 
 `python -m assistant tripwire` proves the rule on local forms that end in Submit, Send or Apply. `--live` also has the model try to submit them, which costs a few model calls.
 
-## Known limits (jev-ultrafast-mcp 0.1.5+aa6)
+## Known limits (owned driver, from the vendored package's behaviour)
 
 See [DISCOVERY.md](DISCOVERY.md):
 - Inputs without a `type` attribute are invisible to the server, so such a required field ends in Needs-Attention.

@@ -808,3 +808,36 @@ on `4012345610-easy-dialog` (`tests/test_navigate.py`, 6 tests): Easy Apply → 
 - **Live-gate watch item (top-card scoping):** entry text/controls are matched page-wide; the fixtures have no
   "similar jobs" sidebar, but a real posting does (its cards carry their own "Applied"/"Easy Apply" badges).
   Checking the Easy Apply *button* first covers the common case; confirm on a real posting.
+
+## P2 T3/T6: Browser facade, package removed, test migration (2026-09-29)
+
+- **`assistant/browser.py` replaces `jev.py`.** `Browser` wraps the owned driver, runs `guard.check`, injects
+  `guard.never_click_element` into the driver press path, renders the driver's structured results into the text
+  formats the callers parse, and logs to `browser_actions.jsonl`. `Table`/`Element`/`Option`/`split_json` moved
+  here. Only `browser.py` imports `assistant.driver` (static test).
+- **One `Browser` (one CDP connection) per run** (cli.py), fixing a latent bug the review caught: each `Browser`
+  owns a `BrowserManager`, so building three of them (run/preflight/capture) would have given three "Allow" prompts
+  (breaks D13). cli now builds one and `connect_once(browser)` opens the single socket.
+- **`DriverTimeout` subclasses `CdpError`** so the op executor and observe/settle polls still swallow a
+  mid-navigation eval timeout; `run_pages` catches it before `DriverError` and raises `StopRun` (a hung browser
+  call is exit 3, matching CLAUDE.md).
+- **`never_click_element` scopes the label/apply/final rules to click-role elements.** A required textbox
+  "Confirm email address" or checkbox "I confirm…" reaches `_press` via type/toggle and must stay fillable; the
+  structural rule still applies to every element, so `<input type=submit>` is refused whatever its role reads as.
+- **Tabs are reported only when this tab opened them** (`opener_id == session.target_id`), so junk-closing never
+  touches a tab the user opened; `TabBook.release` is now `Browser.forget` (drop bookkeeping, leave the tab open),
+  and there is no exit hook — a tab the driver opened survives the process (D13).
+- **Test migration.** The old browser_goal navigation/fill tests could not be ported verbatim (the behaviour is
+  gone). The equivalent coverage moved to `tests/test_navigate.py` (real driver on the Easy Apply fixtures) and a
+  rewritten `tests/test_fill_loop.py` (`tests/fake_browser.py`: a fake driver injected as `Browser(manager=…)`, so
+  the real facade + guard + renderers + probe parser run offline). `test_tripwire`'s goal cases became a direct
+  submit-click refused by the press path; `test_guard`'s `guard_clicks` test became "the driver refuses the press,
+  no keys op"; `test_rules` kept `Attempts` + the job-card judgment and dropped the Google/sign-up/external-ATS
+  entry tests (P5). Deleted: `test_jev`, `test_jev_browser`, `test_text_helper_live`, `test_baseline_p0`
+  (+`golden/p0_baseline`), `fake_mcp.py`, `discover.py`, `release_child.py`. Dropped individual tests:
+  `test_the_browser_agent_follows_the_same_route` (env_values), the `clean_requests`/`rotate_text_helper`
+  package-sender tests, and `test_clean_stop`'s sticky-re-raise/real-Jev cleanup tests (no model sender on the
+  browser thread in P2, so the P1 threading bug cannot occur). **Result: 371 offline tests pass.**
+- **Package removed (T6).** `pip uninstall jev-ultrafast-mcp`; `websockets` is now a direct dependency (the driver's
+  CDP transport). Deleted `vendor/` and the stale `golden/calls.jsonl` / `doctor_*.json`. `git grep jev_ultrafast_mcp`
+  finds only `DISCOVERY.md` and `assistant/driver/LICENSE` (after the README + build-spec scrub).
