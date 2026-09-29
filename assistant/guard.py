@@ -1,10 +1,16 @@
-"""Checks on every browser_act op our code sends (§4.1), before it reaches the server.
+"""The never-submit guard (00_common §4.1).
 
-The never-submit rule (never_click, user decision 2026-09-24: only "Submit" and "Send", and "Apply" once the form
-is being filled) is applied by the package to every click, the agent's and ours (jev.guard_clicks), and here to an upload,
-which clicks a non-input target to open its file chooser. The other checks keep our own ops on their intended
-paths: scripts are only the read-only probes (model text never becomes JavaScript), tabs go through tabs.py,
-navigation through browser_open, and nothing asks the server to override a refusal.
+Two generations live here during the P2 migration:
+  * v1 — `never_click(name, role)` and `check(op, table)` — the label/role rule the vendored package
+    applied (only "Submit"/"Send", and "Apply" once filling started). Still used by `jev.py` and its
+    tests until they are removed.
+  * v2 — `never_click_element(el, page)` and `looks_final(elements)` — the absolute element-level rule
+    P2 enforces in the owned driver's press path: the full refused-label set, structural submits, the
+    advance allowlist, the final-page judgment, and the one cookie-consent exemption.
+
+`Browser` injects `never_click_element` into the driver, so a click, a toggle, a file-chooser upload
+and the focus click of a `type` are all refused before the mouse is dispatched (defence in depth).
+The rule is absolute: no code path may click, press or trigger a control that sends an application.
 """
 from __future__ import annotations
 
@@ -17,24 +23,37 @@ class GuardError(RuntimeError):
     pass
 
 
-# User decision 2026-09-24: the one guard against sending an application is this rule, with no model call. A
-# button or link whose label says "Submit" or "Send" is never clicked; one that says "Apply" is not clicked once the
-# application form is being filled (before that, "Apply" / "Easy Apply" is how the application starts).
+# --- v1 (label/role only; kept until jev.py is removed) ---------------------
 SUBMIT_RE = re.compile(r"\bsubmit", re.I)
 SEND_RE = re.compile(r"\bsend\b", re.I)
 APPLY_RE = re.compile(r"\bapply\b", re.I)
 CLICK_ROLES = {"button", "link", "menuitem", "tab"}
 
+# --- v2 (element-level, absolute) -------------------------------------------
+# A label that names a submit is refused on every page (whole words, case-insensitive).
+REFUSE_LABEL_RE = re.compile(r"\b(submit|send|confirm|done|finish|complete)\b", re.I)
+# The cookie-consent exemption is denied only for these three (a consent control may say "confirm").
+SUBMIT_SEND_APPLY_RE = re.compile(r"\b(submit|send|apply)\b", re.I)
+# A structural-submit control is allowed only when its label is one of these AND the page is not final.
+ADVANCE_RE = re.compile(r"^(next|continue to next step|continue|review your application|review|"
+                        r"save and continue)\b", re.I)
+# Cookie-consent containers (kept in sync with observer.js CONSENT_SELECTOR).
+CONSENT_CONTAINERS = (
+    "#onetrust-banner-sdk", "#onetrust-consent-sdk", "#CybotCookiebotDialog", "#didomi-host",
+    "#usercentrics-root", "#truste-consent-track", ".qc-cmp2-container",
+)
+
 
 class _FormStage:
-    started = False      # set when the program starts filling the job's form (fill.fill_page), reset per job
+    started = False      # set when the program starts filling the job's form; reset per job
+    final = False        # set when the page is judged final (looks_final); reset per page
 
 
 FORM = _FormStage()
 
 
 def never_click(name: str, role: str = "") -> str | None:
-    """Why a click on this control is refused, or None."""
+    """v1: why a click on this control is refused, or None (label/role only)."""
     if role and role.lower() not in CLICK_ROLES:
         return None
     if SUBMIT_RE.search(name or ""):
@@ -46,8 +65,77 @@ def never_click(name: str, role: str = "") -> str | None:
     return None
 
 
+def _field(el, name: str):
+    """Read a field from either a driver descriptor (dict) or a pydantic Element (object)."""
+    if isinstance(el, dict):
+        return el.get(name)
+    return getattr(el, name, None)
+
+
+def never_click_element(el, page: _FormStage | None = None) -> str | None:
+    """v2: why a click/press on this element is refused, or None. `el` is a driver descriptor or an
+    Element; `page` carries `.started` and `.final` (defaults to the module `FORM`)."""
+    page = page or FORM
+    name = _field(el, "name") or ""
+    value = _field(el, "value") or ""
+    tag = (_field(el, "tag") or "").upper()
+    typ = (_field(el, "type") or "").lower()
+    form = _field(el, "form") or ""
+    dialog = _field(el, "dialog") or ""
+    consent = _field(el, "consent") or ""
+    label = f"{name} {value}".strip()
+
+    # The one exemption: a cookie-consent control, outside any application form and the application
+    # dialog, whose label is not submit/send/apply — e.g. "Accept all", "Reject", "Confirm my choices".
+    if consent and not form and not dialog and not SUBMIT_SEND_APPLY_RE.search(label):
+        return None
+
+    if REFUSE_LABEL_RE.search(label):
+        return f"the program never clicks a control labelled like a submit ({label!r})"
+    if page.started and APPLY_RE.search(label):
+        return "the program never clicks Apply once the form is being filled"
+
+    structural = typ == "submit" or (tag == "INPUT" and typ == "image") or (tag == "BUTTON" and not typ and bool(form))
+    if structural:
+        if ADVANCE_RE.search(label) and not page.final:
+            return None      # an allowlisted advance control on a page that is not final
+        return f"the program never clicks a control that would submit a form ({label!r})"
+
+    if page.final:
+        return "the page is final; the program parks rather than click further"
+    return None
+
+
+def _submit_like(el) -> bool:
+    """True if this element is a submit control by label or structure (used to judge finality)."""
+    name = _field(el, "name") or ""
+    value = _field(el, "value") or ""
+    tag = (_field(el, "tag") or "").upper()
+    typ = (_field(el, "type") or "").lower()
+    form = _field(el, "form") or ""
+    label = f"{name} {value}".strip()
+    if REFUSE_LABEL_RE.search(label):
+        return True
+    return typ == "submit" or (tag == "INPUT" and typ == "image") or (tag == "BUTTON" and not typ and bool(form))
+
+
+def looks_final(elements) -> bool:
+    """The deterministic final-page judgment: a submit-like control is present and no allowlisted advance
+    control (Next / Continue / Review / Save and continue) is. Read from the table, so it never depends
+    on a refused click (which would be circular now that the driver refuses submits itself)."""
+    has_submit = False
+    has_advance = False
+    for e in elements:
+        label = f"{_field(e, 'name') or ''} {_field(e, 'value') or ''}".strip()
+        if ADVANCE_RE.search(label) and not REFUSE_LABEL_RE.search(label):
+            has_advance = True
+        if _submit_like(e):
+            has_submit = True
+    return has_submit and not has_advance
+
+
 def label_of(ref: str, table) -> str | None:
-    """The label the server will test for a ref (option refs 'e2:1' resolve to the option label)."""
+    """The label the guard would test for a ref (option refs 'e2:1' resolve to the option label)."""
     base, _, opt = str(ref).partition(":")
     for e in table.elements:
         if e.ref == base:
@@ -58,8 +146,17 @@ def label_of(ref: str, table) -> str | None:
     return None
 
 
+def element_of(ref: str, table):
+    """The Element a base ref points at (option refs resolve to their base element), or None."""
+    base = str(ref).partition(":")[0]
+    for e in table.elements:
+        if e.ref == base:
+            return e
+    return None
+
+
 def check(op: dict, table) -> None:
-    """Raise GuardError if `op` leaves our intended paths. `table` is the latest jev.Table."""
+    """Raise GuardError if `op` leaves our intended paths. `table` is the latest table."""
     kind = str(op.get("op") or "").strip().lower()
     if "confirm" in op:
         raise GuardError(f"'confirm' would override the server's refusal (op={kind})")
@@ -73,6 +170,7 @@ def check(op: dict, table) -> None:
         label = label_of(op.get("ref", ""), table)
         if label is None:
             raise GuardError(f"{kind} target {op.get('ref')!r} is not in the latest element table")
-        # The package opens the file chooser of a non-input upload target by clicking it (aa6): the same rule.
+        # The package/driver opens the file chooser of a non-input upload target by clicking it (aa6):
+        # the same rule applies to an upload target as to a click.
         if kind == "upload" and never_click(label):
             raise GuardError(f"upload on {label!r}: {never_click(label)}")

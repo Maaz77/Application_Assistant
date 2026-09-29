@@ -757,3 +757,28 @@ from jev-ultrafast-mcp 0.1.5+aa6 (MIT; `assistant/driver/LICENSE` kept). Parity 
   the package (T3).
 - Known: `websockets`' sync `connect()` prints a `DeprecationWarning` (used without a context manager, as in the
   vendored code); functional, left for now.
+
+## P2 T4: guard v2 — the absolute never-submit rule (2026-09-29)
+
+`guard.never_click_element(el, page)` is the element-level rule the owned driver enforces in its press path;
+`guard.looks_final(elements)` is the deterministic final-page judgment. Both are added **alongside** v1
+(`never_click` / `check`), which `jev.py` still uses until T3 removes it, so the offline suite stays green
+(`tests/test_guard.py` unchanged, 36 tests; `tests/test_guard_v2.py` new, 16 tests).
+
+- **Absolute (00_common §4.1):** refuses a label matching `\b(submit|send|confirm|done|finish|complete)\b`
+  everywhere; `apply` once `FORM.started`; a structural submit (`type=submit`, a `<button>` without `type` inside a
+  `<form>`, `<input type=image>`) unless its label is on the advance allowlist
+  (`^(next|continue|continue to next step|review|review your application|save and continue)\b`) **and** the page is
+  not final; and every click on a final page.
+- **Behavior change from v3:** done / finish / complete / confirm are now refused. v3 deliberately allowed them
+  (`test_the_rule_covers_only_submit_and_apply`); v2 makes the rule absolute as P2 requires.
+- **Exemption:** a cookie-consent control (observer.js emits `consent`, the matched container) outside any
+  application form and the application dialog, whose label is not submit/send/apply — so "Confirm my choices",
+  "Accept all", "Reject all" in a banner are allowed. A `<div class="consent">` is **not** a known container
+  (`consent=""`), so a "Submit" inside it is refused (T5 fixture).
+- **`looks_final` avoids v3's circularity.** v3 inferred final *from* a refused click; now the driver refuses
+  submits itself, so final is read from the table: a submit-like control present and no advance control. This
+  "page is judged final" definition is a design choice (other heuristics are possible); it is deterministic and
+  table-only, and is flagged for the user to confirm at the live gate.
+- The driver never imports guard: `Browser` injects `never_click_element` as the `refuse_click` callable and passes
+  the page state (T3), keeping job state out of the driver.
