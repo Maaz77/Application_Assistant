@@ -128,14 +128,16 @@ class Browser:
     """Typed browser control; every act goes through the guard (§4.1) and every call is logged."""
 
     def __init__(self, cfg: Config, key: str = "", *, actions_log: Path | None = None,
-                 refuse_click=None, on_timeout=None):
+                 refuse_click=None, on_timeout=None, manager=None):
         self.cfg = cfg
         self.actions_log = actions_log
         # The driver's press path refuses a click the never-submit rule forbids (defence in depth). The
         # guard reads the module page-stage (guard.FORM), which fill/navigate keep current.
         refuse = refuse_click or (lambda el: guard.never_click_element(el, guard.FORM))
         self._settings = Settings(cdp_url=cfg.browser.cdp_url, max_actions=cfg.browser.max_actions)
-        self._mgr = BrowserManager(self._settings, refuse_click=refuse)
+        # `manager` is injected by the offline tests (FakeBrowser) and lets one connection be shared for a
+        # whole run (D13). Only one Browser is built per run, so only one CDP handshake happens.
+        self._mgr = manager if manager is not None else BrowserManager(self._settings, refuse_click=refuse)
 
     # -- connection ---------------------------------------------------------
     def connect(self, open_timeout: float) -> None:
@@ -262,8 +264,15 @@ class Browser:
         return list(getattr(s.last, "new_tabs", []) or [])
 
     def close(self, session: str) -> str:
+        """Close a session's tab. Use only for the program's own scratch tabs (preflight); never for a
+        job tab — the job tab must stay open (D13). Use `forget` to drop a job session's bookkeeping."""
         t0 = time.monotonic()
         closed = self._mgr.close(session)
         text = f"closed {closed or 'nothing'}"
         self._log("close", {"session": session}, text, int((time.monotonic() - t0) * 1000))
         return text
+
+    def forget(self, session: str) -> str:
+        """Drop a session's bookkeeping without closing its tab (a job tab is left open, D13)."""
+        self._mgr.forget(session)
+        return f"forgot {session}"

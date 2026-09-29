@@ -78,21 +78,27 @@ def never_click_element(el, page: _FormStage | None = None) -> str | None:
     page = page or FORM
     name = _field(el, "name") or ""
     value = _field(el, "value") or ""
+    role = (_field(el, "role") or "").lower()
     tag = (_field(el, "tag") or "").upper()
     typ = (_field(el, "type") or "").lower()
     form = _field(el, "form") or ""
     dialog = _field(el, "dialog") or ""
     consent = _field(el, "consent") or ""
     label = f"{name} {value}".strip()
+    # The label, apply and final rules test click targets only. A textbox "Confirm email address" or a
+    # checkbox "I confirm the details are correct" reaches `_press` too (type/toggle focus-click) and must
+    # not be refused for its label. The structural rule below applies to every element, so an
+    # <input type=submit> — role "button" — is still refused whatever else it is.
+    is_click_target = (not role) or role in CLICK_ROLES
 
     # The one exemption: a cookie-consent control, outside any application form and the application
     # dialog, whose label is not submit/send/apply — e.g. "Accept all", "Reject", "Confirm my choices".
-    if consent and not form and not dialog and not SUBMIT_SEND_APPLY_RE.search(label):
+    if is_click_target and consent and not form and not dialog and not SUBMIT_SEND_APPLY_RE.search(label):
         return None
 
-    if REFUSE_LABEL_RE.search(label):
+    if is_click_target and REFUSE_LABEL_RE.search(label):
         return f"the program never clicks a control labelled like a submit ({label!r})"
-    if page.started and APPLY_RE.search(label):
+    if is_click_target and page.started and APPLY_RE.search(label):
         return "the program never clicks Apply once the form is being filled"
 
     structural = typ == "submit" or (tag == "INPUT" and typ == "image") or (tag == "BUTTON" and not typ and bool(form))
@@ -101,7 +107,7 @@ def never_click_element(el, page: _FormStage | None = None) -> str | None:
             return None      # an allowlisted advance control on a page that is not final
         return f"the program never clicks a control that would submit a form ({label!r})"
 
-    if page.final:
+    if is_click_target and page.final:
         return "the page is final; the program parks rather than click further"
     return None
 

@@ -324,7 +324,9 @@ class Session:
         tabs = self._refresh_tabs()
         seen = {tab["target_id"] for tab in tabs}
         if previous is not None:
-            observation.new_tabs = [tab for tab in tabs if tab["target_id"] not in self._known_targets]
+            # Only tabs THIS tab opened (openerId), never ones the user opened, so junk-closing is safe.
+            observation.new_tabs = [tab for tab in tabs if tab["target_id"] not in self._known_targets
+                                    and tab.get("opener_id") == self.target_id]
         observation.tabs = tabs
         self._known_targets = seen
         self.last = observation
@@ -731,6 +733,10 @@ class BrowserManager:
             self._sessions.pop(key, None)
             closed.append(key)
         return closed
+
+    def forget(self, name: str) -> None:
+        """Drop a session's bookkeeping without closing its tab (D13: a job tab stays open)."""
+        self._sessions.pop(name, None)
 
     def detach(self) -> None:
         """Drop the sessions' bookkeeping and close the socket. Never closes the user's tabs (D13);

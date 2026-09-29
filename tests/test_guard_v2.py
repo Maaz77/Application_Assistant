@@ -72,6 +72,18 @@ def test_div_named_consent_is_not_a_real_container():
     assert guard.never_click_element(el(name="Submit", type="submit", form="app", consent=""), FRESH)
 
 
+def test_fields_are_not_refused_for_their_label():
+    # type/toggle reach _press too; a field whose label contains a refused word must still be fillable.
+    assert guard.never_click_element(el(name="Confirm email address", role="textbox", tag="INPUT",
+                                        type="email"), STARTED) is None
+    assert guard.never_click_element(el(name="I confirm the information is accurate", role="checkbox",
+                                        tag="INPUT", type="checkbox"), STARTED) is None
+    assert guard.never_click_element(el(name="Send me job alerts", role="checkbox", tag="INPUT",
+                                        type="checkbox"), STARTED) is None
+    # but a submit-typed control is refused whatever its role reads as (structural rule applies to all).
+    assert guard.never_click_element(el(name="", role="button", tag="INPUT", type="submit", form="f"), FRESH)
+
+
 def test_looks_final():
     submit = el(name="Submit application", type="submit", form="f")
     nxt = el(name="Next", type="submit", form="f")

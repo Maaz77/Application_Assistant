@@ -37,8 +37,13 @@ class CdpError(DriverError):
     """A CDP method returned an error, or the transport failed."""
 
 
-class DriverTimeout(DriverError):
-    """A CDP command did not return within its timeout. The process stays alive (P2)."""
+class DriverTimeout(CdpError):
+    """A CDP command did not return within its timeout. The process stays alive (P2).
+
+    A subclass of CdpError on purpose: the op executor and the settle/observe polls swallow a CdpError
+    from an eval issued while the page is mid-navigation (`_safe_eval`), and a short-eval timeout there
+    must behave the same. The fill loop still tells the two apart — it catches DriverTimeout (a hung
+    browser call → StopRun, exit 3) before DriverError (→ load_failure)."""
 
 
 class ChromeLaunchError(DriverError):
