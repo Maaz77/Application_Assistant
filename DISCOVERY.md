@@ -725,3 +725,35 @@ writes `tests/golden/tables/<fixture>.json` (38 files). This is the frozen parit
 - Counts sanity-checked: `f12`, `f17_captcha`, `4012345605-submitted` have 0 controls (expected);
   `probe_lab/display_contents.html` lists its 3 children through a `display:contents` wrapper, confirming the aa
   patch is in the baseline.
+
+## P2 T2: owned browser driver in `assistant/driver/` (2026-09-29)
+
+Ported `cdp.py`, `observe.py`, `session.py` (from the package's `browser.py`), `observer.js` and `assertions.py`
+from jev-ultrafast-mcp 0.1.5+aa6 (MIT; `assistant/driver/LICENSE` kept). Parity holds on all 38 fixtures
+(`tests/test_parity.py`): the same controls in the same order as the golden capture. Changes from the vendored code:
+
+- **One guarded mouse-press path** (`Session._press`). Every click — a click op, a toggle, a file-chooser upload,
+  and the focus click of a `type` — runs an injected `refuse_click(descriptor)` on the element's **live** descriptor
+  (`window.__jevMcp.descriptor`, added to `observer.js`) before dispatching. This is the never-submit defence in
+  depth (00_common §4.1): even a `type` on `<input type=submit>` is refused, which the vendored code allowed (it
+  checked only `click`, via `confirm_reason`). The check reads the live node, not `self.last`, which is stale after
+  the first op of a batch.
+- **No `keys` op and no `type … submit` Enter branch**; `_dispatch_keys`/`KEY_SPECS`/`MODIFIERS` are deleted. The
+  driver has no way to send Enter / NumpadEnter / Escape.
+- **Ops kept:** click, type, select, toggle, upload, reload, wait_for_load, screenshot, eval (the §3.4 keep-list).
+  `hover`/`scroll`/`wait`/`wait_for_*`/`nav`/`back`/`forward` and the `tab` op are gone; tab actions are `Session`
+  methods (`switch_tab`/`close_tab`), navigation is `Session.navigate`.
+- **`DriverTimeout`** (a `DriverError` subclass) replaces the `os._exit(3)` path: a hung CDP call raises and the
+  process stays alive. `JevError` → `DriverError`.
+- **A tab opened by the page** is found through `Target.targetCreated` openers (`Cdp.openers`, targetId→openerId,
+  never cleared even when `events` is), and `attach_chrome` now calls `Target.setDiscoverTargets` so those events
+  arrive. The vendored `tabbook` helper/scratch tab is gone; nothing is closed at process exit (no `atexit`).
+- **New element fields** from `observer.js`: `type`, `tag`, `required`, `maxlength`, `placeholder`, `form`,
+  `dialog`, `consent`, `scope`. The 160-char cut on name/label and the 300-char cut on value are gone (a 4000-char
+  sanity bound); the eval result's 200-char cap is now 256 KB. Whitespace is still collapsed, so the driver's
+  strings prefix-match the golden.
+- **`Settings`** (constructor, from `config.toml`'s `[browser]`) replaces `JEVMCP_*` / `Config.from_env`. Macros,
+  the `browser_goal` support, `launch_chrome` and the domain envelope are dropped. Only `assistant.browser` imports
+  the package (T3).
+- Known: `websockets`' sync `connect()` prints a `DeprecationWarning` (used without a context manager, as in the
+  vendored code); functional, left for now.
