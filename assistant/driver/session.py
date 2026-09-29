@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,6 +28,25 @@ from .observe import Observation
 
 HELPER_SRC = (Path(__file__).with_name("observer.js")).read_text(encoding="utf-8")
 HELPER_VERSION = 13
+
+
+def chrome_data_dirs() -> list[Path]:
+    """Where a Chromium-family browser keeps `DevToolsActivePort` (Chrome 144+ serves debugging over a
+    WebSocket-only endpoint, so the port and browser WebSocket path are read from this file). Most likely
+    first. Ported from the vendored config.py."""
+    home = Path.home()
+    if sys.platform == "darwin":
+        base = home / "Library" / "Application Support"
+        names = ["Google/Chrome", "Chromium", "Google/Chrome Beta", "Microsoft Edge",
+                 "BraveSoftware/Brave-Browser"]
+    elif sys.platform.startswith("win"):
+        base = Path(os.environ.get("LOCALAPPDATA", str(home / "AppData" / "Local")))
+        names = ["Google/Chrome/User Data", "Chromium/User Data", "Microsoft/Edge/User Data",
+                 "BraveSoftware/Brave-Browser/User Data"]
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", str(home / ".config")))
+        names = ["google-chrome", "chromium", "microsoft-edge", "BraveSoftware/Brave-Browser"]
+    return [base / name for name in names]
 
 # The only ops the driver executes (build spec §3.4, P2 keep-list). Everything else raises.
 CLICKABLE_KINDS = {"click", "type", "select", "toggle", "upload"}
@@ -52,7 +73,7 @@ class Settings:
     """Driver settings. `cdp_url` and `max_actions` come from config.toml's [browser]; the rest are
     constants that do not vary for this program."""
     cdp_url: str
-    data_dirs: list[Path] = field(default_factory=list)
+    data_dirs: list[Path] = field(default_factory=chrome_data_dirs)
     window: tuple[int, int] = (1280, 860)
     max_actions: int = 250
     max_text: int = 6000
