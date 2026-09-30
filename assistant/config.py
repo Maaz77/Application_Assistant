@@ -119,6 +119,7 @@ class SystemOneLimits(_Strict):
     """TypeSafe fails a whole request when any one question fails, so a request is split above this many
     questions and the parts are sent one after another (never side by side: see Limits)."""
     max_questions_per_request: int = 24
+    max_requests_per_job: int = 40
 
 
 class Decider(_Strict):

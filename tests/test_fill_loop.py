@@ -106,8 +106,8 @@ def test_multi_step_easy_apply_walks_to_the_final_step(tmp_path):
 
 
 def test_mismatches_holds_a_verbatim_field_without_asking_the_model(tmp_path):
-    """A field whose value already equals the answer holds — decided in code, no read-back model call (kev-0.8b
-    false-flagged a verbatim phone as 'different', live 2026-09-29). Only reformatted fields reach the model."""
+    """P3: mismatches is all code, no model call. Verbatim match, reformatted phone (digits-suffix), and
+    genuinely different values are all decided by _fuzzy_holds."""
     from assistant import decide, fill, pages
     from assistant.browser import Element, Table
     from assistant.llm_inference import PageAnswers
@@ -119,18 +119,14 @@ def test_mismatches_holds_a_verbatim_field_without_asking_the_model(tmp_path):
 
     class Boom:
         def ask(self, *a, **k):
-            raise AssertionError("read-back asked the model for a field that already holds the answer verbatim")
+            raise AssertionError("mismatches must not call the model at all (P3)")
     decide.use(Boom())
     try:
-        assert fill.mismatches([q], p) == []                     # holds; no model call
-        # a reformatted value is still sent to the model (not short-circuited)
+        assert fill.mismatches([q], p) == []                     # verbatim: holds
         p.elements[0].value = "+393519358813"
-        raised = False
-        try:
-            fill.mismatches([q], p)
-        except AssertionError:
-            raised = True
-        assert raised                                            # the ambiguous, reformatted field WAS asked
+        assert fill.mismatches([q], p) == []                     # reformatted phone: digits match, holds
+        p.elements[0].value = "+1 555 000 0000"
+        assert fill.mismatches([q], p) == [q]                    # genuinely different: mismatch
     finally:
         decide.use(None)
 

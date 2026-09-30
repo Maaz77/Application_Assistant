@@ -59,6 +59,8 @@ class JobCtx:
     stage: str = "entry"
     last: Page | None = None
     sleep: Callable[[float], None] = time.sleep
+    jev_budget: int = 40
+    _jev_start: int = 0
 
     def read(self) -> Page:
         """The current page. Read directly, without pages.settle: settle calls judge()/kev on every read,
@@ -214,32 +216,84 @@ def _option_choices(p: Page) -> dict[str, str]:
     return dict(list(out.items())[:MAX_CHOICES])
 
 
+def _code_how(q: Question, by_ref: dict) -> str | None:
+    """Fill operation from element role. None when refs are missing or element unrecognised."""
+    opt = by_ref.get(q.option_ref or "")
+    if opt is not None and opt.role in TOGGLES:
+        return "check"
+    if q.option_ref and OPTION_REF_RE.match(q.option_ref):
+        return "select"
+    el = by_ref.get(q.ref or "")
+    if el is not None:
+        if el.role in LISTS:
+            return "select"
+        if el.role in TYPEABLE and el.editable:
+            return "type"
+    return None
+
+
 def plan_fill(items: list[Question], p: Page) -> list[dict | None]:
-    """How and where each answer goes in, as Jev decides, in one round (jev-ultrafast's speculative fan-out: the
-    operation, and a target for each kind of operation). The code then only checks that the pick can be carried out
-    and acts with the LLM inference's own text, so no rule chooses by the kind of control (it replaces direct_op,
-    2026-09-24). None: a page goal sets that answer (custom widgets)."""
+    """Code decides how each answer goes in from element roles and LLM refs.
+    Jev asked only for option mapping (answer != visible option) or items without refs."""
     if not items:
         return []
-    fields, options = _field_choices(p), _option_choices(p)
-    qs: dict[str, dict] = {}
+    by_ref = {e.ref: e for e in p.elements}
+    result: list[dict | None] = [None] * len(items)
+    need_option_map: list[int] = []
+    need_full: list[int] = []
+
     for i, q in enumerate(items):
+        how = _code_how(q, by_ref)
+        if how is None:
+            need_full.append(i)
+            continue
+        op = _carry_out(q, how, q.ref, q.option_ref, by_ref)
+        if op is not None:
+            result[i] = op
+        elif how == "select":
+            need_option_map.append(i)
+
+    qs: dict[str, dict] = {}
+    fields_map, options_map = _field_choices(p), _option_choices(p)
+    for idx in need_option_map:
+        q = items[idx]
+        about = {"question": q.question, "answer": q.answer}
+        if options_map:
+            qs[f"option_{idx}"] = decide.choice(
+                {**about, "ask": "Which option is `answer` for `question`?"},
+                {**options_map, "none": "None of these options."})
+    for idx in need_full:
+        q = items[idx]
         about = {"question": q.question, "answer": q.answer}
         about.update({k: v for k, v in (("llm_inference_ref", q.ref), ("llm_inference_option_ref", q.option_ref)) if v})
-        qs[f"op_{i}"] = decide.choice({**about, "ask": "How does `answer` go into the form for `question`?"}, FILL_OPS)
-        if fields:
-            qs[f"field_{i}"] = decide.choice({**about, "ask": "Which field is the one for `question`?"},
-                                             {**fields, "none": "None of these fields."})
-        if options:
-            qs[f"option_{i}"] = decide.choice({**about, "ask": "Which option is `answer` for `question`?"},
-                                              {**options, "none": "None of these options."})
+        qs[f"op_{idx}"] = decide.choice({**about, "ask": "How does `answer` go into the form for `question`?"}, FILL_OPS)
+        if fields_map:
+            qs[f"field_{idx}"] = decide.choice({**about, "ask": "Which field is the one for `question`?"},
+                                               {**fields_map, "none": "None of these fields."})
+        if options_map:
+            qs[f"option_{idx}"] = decide.choice({**about, "ask": "Which option is `answer` for `question`?"},
+                                                {**options_map, "none": "None of these options."})
+    if not qs:
+        return result
+
     a = decide.current().ask("fill", pages.page_state(p), qs)
-    by_ref = {e.ref: e for e in p.elements}
 
     def chosen(key: str) -> str | None:
         return a[key].choice if key in a and a[key].choice != "none" else None
-    return [_carry_out(q, a[f"op_{i}"].choice, chosen(f"field_{i}"), chosen(f"option_{i}"), by_ref)
-            for i, q in enumerate(items)]
+
+    for idx in need_option_map:
+        picked = chosen(f"option_{idx}")
+        if picked:
+            q = items[idx]
+            op = _carry_out(q, "select", q.ref, picked, by_ref)
+            if op is None:
+                op = _carry_out(q, "check", q.ref, picked, by_ref)
+            result[idx] = op
+    for idx in need_full:
+        q = items[idx]
+        result[idx] = _carry_out(q, a[f"op_{idx}"].choice, chosen(f"field_{idx}"), chosen(f"option_{idx}"), by_ref)
+
+    return result
 
 
 def _carry_out(q: Question, how: str | None, field: str | None, option: str | None, by_ref: dict) -> dict | None:
@@ -275,46 +329,43 @@ def _wrapper_types(q: Question) -> bool:
         q.source == "generated" or len(q.answer or "") > LONG_TEXT)
 
 
-HELD = {"holds": "The answer, maybe formatted by the page: other spacing or punctuation, a country code or area code "
-                 "added in front of the same number, other letter case.",
-        "different": "A different answer.",
-        "empty": "Nothing, or a placeholder such as 'Select…'."}
+_NON_DIGIT = re.compile(r"\D")
+_NON_ALNUM = re.compile(r"[^a-z0-9]")
 
 
-def _held_question(q: Question) -> dict:
-    field = {"question": q.question, "answer": q.answer}
-    field.update({k: v for k, v in (("ref", q.ref), ("option_ref", q.option_ref)) if v})
-    return decide.choice({**field, "ask": "What does the form's field for `question` hold now, compared with `answer`?"},
-                         HELD)
+def _fuzzy_holds(answer: str, held: str) -> bool:
+    """Does `held` contain the same answer after page reformatting?  Handles phone country-code prepend,
+    whitespace/punctuation/case differences.  No model call — the Linda AI false-flag (see DISCOVERY.md)
+    showed kev-0.8b cannot reliably answer this; code is both faster and more correct."""
+    na, nh = pages.norm_label(answer), pages.norm_label(held)
+    if na == nh:
+        return True
+    da, dh = _NON_DIGIT.sub("", answer), _NON_DIGIT.sub("", held)
+    if da and dh and (dh.endswith(da) or da.endswith(dh)):
+        return True
+    sa, sh = _NON_ALNUM.sub("", na), _NON_ALNUM.sub("", nh)
+    return sa == sh and sa != ""
 
 
 def mismatches(items: list[Question], p: Page) -> list[Question]:
-    """The questions whose field does not hold the answer. A field whose value already equals the answer (or a
-    toggle whose option is checked) holds — a fact the code decides here, with NO model call: the read-back is
-    asked (`ask("readback")`, `HELD`) only for fields the page reformatted, so it stays for the genuinely
-    ambiguous case (a select shown as text, a phone the page rewrote) while a verbatim match is never sent.
-
-    Why the code decides the exact match: kev-0.8b false-flags a verbatim-correct field on the read-back — live
-    2026-09-29 (Linda AI), the mobile phone held "+39 351 935 8813" byte-for-byte yet kev answered "different"
-    (0.3987) over "holds" (0.2348), a near-uniform miss that failed a correctly-filled field as broken_form. The
-    re-core target: code decides facts, Jev only what stays ambiguous."""
+    """Questions whose field does not hold the answer. All code, no model call: exact match, then fuzzy
+    (phone digits suffix, stripped punctuation). A toggle holds when checked; a text field when its shown
+    value fuzzy-matches the answer."""
     if not items:
         return []
     by_ref = {e.ref: e for e in p.elements}
 
-    def already_holds(q: Question) -> bool:
+    def holds(q: Question) -> bool:
         opt = by_ref.get(q.option_ref or "")
         if opt is not None:
-            return bool(opt.checked)                        # a radio/checkbox: it holds when its option is checked
+            return bool(opt.checked)
         e = by_ref.get(q.ref or "")
-        return e is not None and pages.norm_label(e.current or e.value) == pages.norm_label(q.answer)
+        if e is None:
+            return False
+        held = (e.current or e.value or "").strip()
+        return bool(held) and _fuzzy_holds(q.answer or "", held)
 
-    ambiguous = [(i, q) for i, q in enumerate(items) if not already_holds(q)]
-    if not ambiguous:
-        return []
-    a = decide.current().ask("readback", pages.page_state(p),
-                             {f"held_{i}": _held_question(q) for i, q in ambiguous})
-    return [q for i, q in ambiguous if a[f"held_{i}"].choice != "holds"]
+    return [q for q in items if not holds(q)]
 
 
 def fill_page(ctx: JobCtx, p: Page) -> None:
@@ -325,10 +376,7 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
     except LLMInferenceError as exc:
         raise NeedsAttention("llm_inference", str(exc)) from exc
     log_answers(ctx, p, pa)
-    try:
-        judge_questions(pa, p)                                   # Jev: resume and cover-letter questions
-    except DecisionError as exc:
-        raise NeedsAttention("decision", str(exc)) from exc
+    judge_questions(pa, p)
     for q in pa.questions:
         if q.kind == "file" and q.required and q.cover_letter:
             raise NeedsAttention("broken_form", f"required cover-letter file: {q.question!r}")   # C15
@@ -425,6 +473,16 @@ def follow_new_tab(ctx: JobCtx, known: set[str], seconds: int, before: Page | No
     return False
 
 
+def _check_jev_budget(ctx: JobCtx) -> None:
+    d = decide._current
+    if d is None:
+        return
+    used = d.calls - ctx._jev_start
+    if used > ctx.jev_budget:
+        raise NeedsAttention("decision_budget",
+                             f"decision request count ({used}) exceeds per-job budget ({ctx.jev_budget})")
+
+
 # ------------------------------------------------------------------ the loop (deterministic, §5.1)
 
 def run_pages(ctx: JobCtx) -> Parked:
@@ -436,6 +494,8 @@ def run_pages(ctx: JobCtx) -> Parked:
     Raises NeedsAttention / StopRun / RestartFromEntry. Never clicks a transmit label (the guard refuses)."""
     guard.FORM.started = False        # a new job starts at its posting, where "Apply" starts the application
     guard.FORM.final = False
+    ctx._jev_start = decide._current.calls if decide._current else 0
+    ctx.jev_budget = ctx.browser.cfg.jev.max_requests_per_job
     filled, gate_retry, entered, guard_rounds = False, False, False, 0
     try:
         while True:
@@ -456,6 +516,7 @@ def run_pages(ctx: JobCtx) -> Parked:
                 ctx.browser.open(ctx.last.url, ctx.session)
                 continue
             if navigate.dialog_fields(p) and not filled:
+                _check_jev_budget(ctx)
                 try:
                     fill_page(ctx, p)
                 except _Refill as rf:

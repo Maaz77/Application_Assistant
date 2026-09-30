@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from assistant import decide, gateway as gateway_mod, inference_log
+from assistant import decide, gateway as gateway_mod, inference_log, pages
 from assistant.decide import THRESHOLDS as T
 from assistant.pages import Page
 from assistant.rotation import NoModelAvailable, Rotation
@@ -40,8 +40,8 @@ class Question(BaseModel):
     quote: str | None
     relies_on: list[str] | None
     note: str | None = None      # set by the checks (why an answer was dropped); not part of the model schema
-    resume_upload: bool = False  # Jev (judge_questions): the resume upload answers this question
-    cover_letter: bool = False   # Jev (judge_questions): an upload that asks for a cover letter
+    resume_upload: bool = False  # code rule (judge_questions): the resume upload answers this question
+    cover_letter: bool = False   # code rule (judge_questions): an upload that asks for a cover letter
 
 
 class PageAnswers(BaseModel):
@@ -323,7 +323,7 @@ YEARS_KINDS = {
 
 @dataclass
 class Verdicts:
-    """Jev's verdicts for check_answers, keyed by the normalised question text or shown value."""
+    """Verdicts for check_answers: Jev for gen/years, code regex for placeholders."""
     must_not_generate: set[str] = field(default_factory=set)
     total_years: set[str] = field(default_factory=set)
     placeholders: set[str] = field(default_factory=set)
@@ -333,9 +333,16 @@ def _shown(e) -> str:
     return "" if e is None else ((e.current or "") if e.options else (e.current or e.value or "")).strip()
 
 
+_PLACEHOLDER_RE = re.compile(
+    r"^\s*(select( an? option)?|choose(\.{3}|…)?|please select|--|—|select\.{3})\s*$", re.I)
+
+
+def _is_placeholder(value: str) -> bool:
+    return bool(_PLACEHOLDER_RE.match(value))
+
+
 def judge_answers(pa: "PageAnswers", p: Page) -> Verdicts:
-    """One Jev call for the page's answers: which generated answers ask for a fact that must not be written, which
-    computed answers ask for total years of experience, and which shown values are placeholder prompts."""
+    """Jev call for generated/computed questions only; placeholder detection is a code regex."""
     by_ref = {e.ref: e for e in p.elements}
     qs: dict[str, dict] = {}
     for i, q in enumerate(pa.questions):
@@ -346,35 +353,29 @@ def judge_answers(pa: "PageAnswers", p: Page) -> Verdicts:
         elif q.source == "computed":
             qs[f"years_{i}"] = decide.choice({"form_question": q.question,
                                               "question": "What does `form_question` ask for?"}, YEARS_KINDS)
-    values = sorted({v for q in pa.questions if (v := _shown(by_ref.get(q.ref or "")))})
-    for j, v in enumerate(values):
-        qs[f"shown_{j}"] = decide.noul({"value": v, "question": "Is `value` a placeholder prompt, such as 'Select "
-                                        "an option', 'Choose…' or '--', rather than a real answer?"})
-    a = decide.current().ask("answers", {"page": p.title, "url": p.url}, qs)
     v = Verdicts()
-    for i, q in enumerate(pa.questions):
-        if f"gen_{i}" in a and a[f"gen_{i}"].yes(T["must_not_generate"]):
-            v.must_not_generate.add(norm(q.question))
-        if f"years_{i}" in a and a[f"years_{i}"].choice == "total":
-            v.total_years.add(norm(q.question))
-    v.placeholders = {norm(val) for j, val in enumerate(values) if a[f"shown_{j}"].yes(T["placeholder"])}
+    if qs:
+        a = decide.current().ask("answers", {"page": p.title, "url": p.url}, qs)
+        for i, q in enumerate(pa.questions):
+            if f"gen_{i}" in a and a[f"gen_{i}"].yes(T["must_not_generate"]):
+                v.must_not_generate.add(norm(q.question))
+            if f"years_{i}" in a and a[f"years_{i}"].choice == "total":
+                v.total_years.add(norm(q.question))
+    values = sorted({val for q in pa.questions if (val := _shown(by_ref.get(q.ref or "")))})
+    v.placeholders = {norm(val) for val in values if _is_placeholder(val)}
     return v
 
 
+_COVER_LETTER_RE = re.compile(r"cover\s*letter", re.I)
+
+
 def judge_questions(pa: "PageAnswers", p: Page) -> None:
-    """One Jev call: flag the questions the resume upload answers, and the uploads that ask for a cover letter."""
-    qs: dict[str, dict] = {}
-    for i, q in enumerate(pa.questions):
-        qs[f"resume_{i}"] = decide.noul(
-            {"form_question": q.question, "options": q.options or [],
-             "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing "
-                         "among uploaded resume files?"})
-        if q.kind == "file":
-            qs[f"cover_{i}"] = decide.noul({"upload": q.question, "question": "Does `upload` ask for a cover letter?"})
-    a = decide.current().ask("questions", {"page": p.title, "url": p.url}, qs)
-    for i, q in enumerate(pa.questions):
-        q.resume_upload = a[f"resume_{i}"].yes(T["resume_upload"])
-        q.cover_letter = f"cover_{i}" in a and a[f"cover_{i}"].yes(T["cover_letter"])
+    """Code rule: flag resume-upload questions and cover-letter uploads. No model call."""
+    for q in pa.questions:
+        text = q.question or ""
+        q.resume_upload = bool(pages._RESUME_RE.search(text)) or any(
+            pages.RESUME_FILE_RE.search(o) for o in (q.options or []))
+        q.cover_letter = q.kind == "file" and bool(_COVER_LETTER_RE.search(text))
 
 
 def _held(e, v: Verdicts) -> str:

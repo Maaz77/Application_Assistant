@@ -23,8 +23,8 @@ RESUME_FILE_RE = re.compile(r"\.(pdf|docx?|rtf|txt)\b", re.I)
 
 # Code-rule patterns (ported from RuleDecider, P3 T2).
 _CLOSED_RE = re.compile(r"no longer accepting applications|this job is (closed|no longer)", re.I)
-_APPLIED_RE = re.compile(r"\bapplied\b|application submitted|see application", re.I)
-_VALIDATION_RE = re.compile(r"this field is required|is required\.|please (enter|select|fill|provide)|"
+_APPLIED_RE = re.compile(r"\bapplied \d+ \w+ ago\b|application submitted|see application", re.I)
+_VALIDATION_RE = re.compile(r"this field is required|is required\.|please enter a valid |"
                             r"invalid (value|format|email|phone)", re.I)
 _REGISTRATION_RE = re.compile(r"create (an |your )?(account|profile)|terms of (use|service)|"
                               r"complete (your )?registration", re.I)
@@ -388,7 +388,7 @@ def fields(p: Page) -> list[Element]:
 
 
 def real_fields(p: Page) -> list[Element]:
-    """The fields Jev counts as the application's own (not a site search, language picker or job alert)."""
+    """The application's own fields (not site search, language picker or job alert). Code-determined."""
     refs = judge(p).app_fields
     return [e for e in fields(p) if e.ref in refs]
 
@@ -398,11 +398,8 @@ def has_fields(p: Page) -> bool:
 
 
 def form_is_here(p: Page) -> bool:
-    """The application form is on screen and nothing covers it."""
+    """The application form is on screen and nothing covers it. Code-determined (P3 T2)."""
     j = judge(p)
-    # Jev's top choice decides (user decision 2026-09-24), not the summed probability of the form kinds or a
-    # confidence floor. A near-tie goes either way; a wrong "form" fails the final check, a wrong "not yet" costs
-    # one agent action.
     return j.kind in FORM_KINDS and not j.covered
 
 
@@ -415,7 +412,7 @@ def is_final(p: Page) -> bool:
 
 
 def is_alarm(p: Page) -> bool:
-    """Confirmation text: Jev's answer, or the tripwire rule (the safety floor)."""
+    """Confirmation text detected by ALARM_RE (code rule, no model call)."""
     return bool(ALARM_RE.search(p.text)) or judge(p).submitted
 
 

@@ -136,8 +136,8 @@ def test_a_rescued_request_is_not_a_failure_for_the_breaker():
     """Three System One requests in a row fail, but the fallback answers each: the run goes on (T4)."""
     post, _ = router(systemone=(503, {"error": "down"}), chat=(200, chat_reply(BOTH)))
     d, gateway = wired(post)
-    for _ in range(5):
-        d.ask("page", "s", QS)
+    for i in range(5):
+        d.ask("page", f"state-{i}", QS)
     assert gateway.tripped is None and gateway.run.failures == 0 and d.by_fallback == 5
 
 
