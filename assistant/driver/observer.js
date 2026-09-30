@@ -424,6 +424,13 @@
         consent: consentEl ? (consentEl.id ? '#' + consentEl.id : '.' + (consentEl.className || '').trim().split(/\s+/)[0]) : '',
         // plan's `scope`: the nearest role=dialog / <dialog> / <form>, dialog first.
         scope: dialogId || formId,
+        // P3: radio/checkbox group key for question extraction.
+        // Native inputs: the HTML name attribute (the browser's radio-group key).
+        // ARIA radios: the accessible name of the nearest radiogroup or fieldset.
+        group: (['radio', 'checkbox'].includes(typeOf(e)) && e.tagName === 'INPUT' && e.name) ? e.name
+          : (['radio', 'checkbox'].includes(it.role) && e.closest
+             && e.closest('[role="radiogroup"],fieldset'))
+            ? nameOf(e.closest('[role="radiogroup"],fieldset'), new Set()) : '',
         editable, occluded, inViewport,
         rank: (inViewport ? 100 : 0) + (editable || PRIMARY.has(it.role) ? 40 : 0)
           + (SECONDARY.has(it.role) ? 15 : 0),

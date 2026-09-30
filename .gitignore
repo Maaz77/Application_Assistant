@@ -7,3 +7,4 @@ tests/fixtures/posts.log
 graphify-out/
 .DS_Store
 .vscode/
+.omc/

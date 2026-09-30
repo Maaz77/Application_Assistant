@@ -144,14 +144,15 @@ def canned(*responses):
     return post, calls
 
 
-GOOD = json.dumps({"questions": [q(question="Notice period", ref="e2", answer="3 months", source="profile",
-                                    quote="What is your notice period? 3 months")]})
+GOOD = json.dumps({"answers": [{"id": "t_e2", "answer": "3 months", "source": "profile",
+                                 "quote": "What is your notice period? 3 months", "relies_on": None}]})
 
 
 def test_schema_400_falls_back_to_json_object():
     post, calls = canned((400, {"error": "response_format"}), (200, GOOD))
     pa = A.answer_page(PAGE, SRC, key="k", models="m", policy=Policy(), today=TODAY, post=post)
-    assert pa.questions[0].answer == "3 months"
+    q = next(x for x in pa.questions if x.question == "Notice period")
+    assert q.answer == "3 months"
     assert calls[0]["response_format"]["type"] == "json_schema" and calls[1]["response_format"] == {"type": "json_object"}
     assert calls[0]["temperature"] == 0
 
@@ -245,13 +246,14 @@ def test_the_run_keeps_asking_the_model_that_answered_last():
 
 def test_fenced_json_is_accepted_and_bad_generated_regenerated_once():
     fact = "I built a real-time computer vision pipeline reaching 200 FPS on an NPU."
-    first = json.dumps({"questions": [q(question="Why Acme?", kind="longtext", ref="e3", answer="made up",
-                                        source="generated", relies_on=["Not in sources."])]})
-    second = json.dumps({"questions": [q(question="Why Acme?", kind="longtext", ref="e3", answer="Real text.",
-                                         source="generated", relies_on=[fact])]})
+    first = json.dumps({"answers": [{"id": "t_e3", "answer": "made up", "source": "generated",
+                                     "quote": None, "relies_on": ["Not in sources."]}]})
+    second = json.dumps({"answers": [{"id": "t_e3", "answer": "Real text.", "source": "generated",
+                                      "quote": None, "relies_on": [fact]}]})
     post, calls = canned((200, "```json\n" + first + "\n```"), (200, second))
     pa = A.answer_page(PAGE, SRC, key="k", models="m", policy=Policy(), today=TODAY, post=post)
-    assert pa.questions[0].answer == "Real text." and "regenerate" in json.loads(calls[1]["messages"][1]["content"])
+    q = next(x for x in pa.questions if x.question == "Why Acme?")
+    assert q.answer == "Real text." and "regenerate" in json.loads(calls[1]["messages"][1]["content"])
 
 
 def test_schema_is_strict_mode_shaped():
