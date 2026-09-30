@@ -89,21 +89,15 @@ RESUME_CONFIDENCE = 0.5     # below this, Jev cannot tell which of several uploa
 
 
 def resume_input(p: Page, engine_pick: str | None = None) -> str | None:
-    """The control that uploads the resume (a file input, or LinkedIn's "Upload resume" button that opens the file
-    chooser, aa6), as Jev picks it. Several uploads and Jev unsure: Jev is asked again over its two likeliest picks;
-    still unsure, the LLM inference's pick (`engine_pick`, an LLM's ref for the resume question) settles it when it is
-    one of those two. Only when neither settles it is it a blocker (C25)."""
+    """The control that uploads the resume. Code rules pick it; when unsure among several file inputs,
+    the LLM inference's ref (`engine_pick`) settles it. Only when neither settles it is it a blocker."""
     j = pages.judge(p)
     if j.resume_ref is None:
         return None
     files = [e for e in p.elements if e.role == "file"]
     if len(files) <= 1 or j.resume_confidence >= RESUME_CONFIDENCE:
         return j.resume_ref
-    probs = j.resume_probabilities or {j.resume_ref: j.resume_confidence}
-    again = decide.narrow("page", pages.page_state(p), "resume_input", pages.page_questions(p)["resume_input"], probs)
-    if again.choice not in (None, "none") and (again.confidence or 0.0) >= RESUME_CONFIDENCE:
-        return again.choice
-    finalists = set(sorted(probs, key=probs.get, reverse=True)[:2]) - {"none"}
+    finalists = set(sorted(j.resume_probabilities, key=j.resume_probabilities.get, reverse=True)[:2]) - {"none"}
     if engine_pick in finalists:
         return engine_pick
     raise NeedsAttention("broken_form", "several file inputs and it is unclear which one takes the resume")

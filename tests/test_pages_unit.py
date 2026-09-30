@@ -46,10 +46,11 @@ def test_final_step_and_submit_button_come_from_the_judgment():
     assert pages.is_final(q) and pages.judge(q).submit_button
 
 
-def test_one_decision_call_per_page_snapshot(decider):
+def test_no_decision_call_for_page_judgment(decider):
+    """P3: judge() is all code rules — no Jev call at all."""
     p = page([Element(ref="e1", role="textbox", name="City"), Element(ref="e2", role="button", name="Next")])
     pages.classify(p), pages.is_final(p), pages.real_fields(p), pages.covered(p), pages.unsettled(p)
-    assert [t for t, _ in decider.asked] == ["page"]                           # cached on the Page
+    assert decider.asked == []
 
 
 def test_google_rules():
