@@ -127,9 +127,10 @@ def _hash(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
 
 
-def _jev_key(state: Any, question_ids: list[str]) -> str:
+def _jev_key(state: Any, questions: dict[str, Any]) -> str:
     s = json.dumps(state, sort_keys=True, ensure_ascii=False)
-    return _hash(s + "|" + "|".join(sorted(question_ids)))
+    q = json.dumps(questions, sort_keys=True, ensure_ascii=False)
+    return _hash(s + "|" + q)
 
 
 def _llm_key(messages: list, parameters: dict) -> str:
@@ -150,8 +151,9 @@ def replay_gateway_post(jev_logs: list[dict], llm_logs: list[dict], *, mode: str
     """
     jev_cache: dict[str, Any] = {}
     for entry in jev_logs:
-        qids = [q["id"] for q in entry.get("Score", []) + entry.get("Noul", []) + entry.get("Choice", [])]
-        key = _jev_key(entry["State"], qids)
+        qs = {q["id"]: {k: v for k, v in q.items() if k != "id"} for q in
+              entry.get("Score", []) + entry.get("Noul", []) + entry.get("Choice", [])}
+        key = _jev_key(entry["State"], qs)
         jev_cache[key] = entry["Response"]
 
     llm_cache: dict[str, dict] = {}
@@ -167,14 +169,14 @@ def replay_gateway_post(jev_logs: list[dict], llm_logs: list[dict], *, mode: str
 
     def post(url: str, body: dict, headers: dict, timeout: float) -> tuple[int, Any]:
         if _is_jev(url):
-            qids = list((body.get("questions") or {}).keys())
-            key = _jev_key(body.get("state"), qids)
+            questions = body.get("questions") or {}
+            key = _jev_key(body.get("state"), questions)
             if key in jev_cache:
                 stats.jev_hits += 1
                 return 200, jev_cache[key]
             stats.jev_misses += 1
             if mode == "strict":
-                raise ReplayMiss(f"Jev request not in fixture (key={key}, {len(qids)} questions)")
+                raise ReplayMiss(f"Jev request not in fixture (key={key}, {len(questions)} questions)")
         else:
             params = {k: v for k, v in body.items() if k not in ("model", "messages")}
             key = _llm_key(body.get("messages", []), params)

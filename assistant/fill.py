@@ -341,7 +341,7 @@ def _fuzzy_holds(answer: str, held: str) -> bool:
     if na == nh:
         return True
     da, dh = _NON_DIGIT.sub("", answer), _NON_DIGIT.sub("", held)
-    if da and dh and (dh.endswith(da) or da.endswith(dh)):
+    if da and dh and min(len(da), len(dh)) >= 7 and (dh.endswith(da) or da.endswith(dh)):
         return True
     sa, sh = _NON_ALNUM.sub("", na), _NON_ALNUM.sub("", nh)
     return sa == sh and sa != ""

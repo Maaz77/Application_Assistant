@@ -127,6 +127,10 @@ def test_mismatches_holds_a_verbatim_field_without_asking_the_model(tmp_path):
         assert fill.mismatches([q], p) == []                     # reformatted phone: digits match, holds
         p.elements[0].value = "+1 555 000 0000"
         assert fill.mismatches([q], p) == [q]                    # genuinely different: mismatch
+        # short digit suffix must NOT match: "5" vs "15" is not a phone reformat
+        q2 = PageAnswers.model_validate({"questions": [Q("Years", "5", ref="e1")]}).questions[0]
+        p.elements[0].value = "15"
+        assert fill.mismatches([q2], p) == [q2]                  # short digits: mismatch, not suffix
     finally:
         decide.use(None)
 

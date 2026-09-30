@@ -196,3 +196,24 @@ def test_the_fallback_uses_the_chat_route_and_its_primary_model(monkeypatch, tmp
     cfg = config.load()
     chat = decide.for_config(cfg).fallback
     assert chat.url == config.chat_url(cfg) and chat.models == list(cfg.models.llm_inference)
+
+
+# ------------------------------------------------------------------ cache
+
+
+def test_cache_keys_on_full_question_body_not_just_ids():
+    """Same state, same IDs, different question body must produce two requests, not a cache hit."""
+    calls = []
+
+    def counting_post(url, body, headers, timeout):
+        calls.append(body)
+        return 200, {"answers": BOTH}
+
+    d, _ = wired(counting_post, fallback=False)
+    q1 = {"x": decide.noul("Is the sky blue?")}
+    q2 = {"x": decide.noul("Is the ocean green?")}
+    d.ask("page", "same-state", q1)
+    d.ask("page", "same-state", q2)
+    assert len(calls) == 2, "different question body with same ID should not cache-hit"
+    d.ask("page", "same-state", q1)
+    assert len(calls) == 2, "identical repeat should cache-hit"

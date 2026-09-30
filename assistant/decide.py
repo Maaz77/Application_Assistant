@@ -214,18 +214,18 @@ class Decider:
         return self._gateway or gateway_mod.required()
 
     @staticmethod
-    def _cache_key(fitted: Any, questions: dict[str, dict]) -> str:
+    def _cache_key(topic: str, fitted: Any, questions: dict[str, dict]) -> str:
         import hashlib
-        raw = json.dumps(fitted, ensure_ascii=False, sort_keys=True) + "\0" + json.dumps(
-            sorted(questions.keys()))
+        raw = topic + "\0" + json.dumps(fitted, ensure_ascii=False, sort_keys=True) + "\0" + json.dumps(
+            questions, ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def ask(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
-        """Every question answered, or DecisionError. Cached by fitted state + question IDs."""
+        """Every question answered, or DecisionError. Cached by topic + fitted state + full questions."""
         if not questions:
             return {}
         ids, fitted = list(questions), fit_state(state, self.state_chars, self.keep_object_state)
-        key = self._cache_key(fitted, questions)
+        key = self._cache_key(topic, fitted, questions)
         cached = self._cache.get(key)
         if cached is not None:
             return cached
