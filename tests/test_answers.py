@@ -353,3 +353,72 @@ def test_a_quote_that_differs_only_in_formatting_still_counts():
     (email,), _ = run(q(question="Email", ref="e1", answer="amin@example.com", source="resume",
                         quote="AMIN @ example . com"))
     assert email.answer == "amin@example.com" and email.note is None
+
+
+# ------------------------------------------------------------------ extraction tests (T6)
+
+def test_extract_questions_ids_are_stable():
+    """Each field gets a stable ID: t_{ref} for text, s_{ref} for selects, r_{group} for radios."""
+    from assistant.llm_inference import extract_questions
+    p = Page(url="https://x.io/apply", title="Apply", text="City Work model Visa",
+             table=Table(url="https://x.io/apply", elements=[
+                 Element(ref="e1", role="textbox", name="City", required=True),
+                 Element(ref="e2", role="combobox", name="Work model", required=True),
+                 Element(ref="e3", role="radio", name="Yes", group="Visa needed?", required=True),
+                 Element(ref="e4", role="radio", name="No", group="Visa needed?"),
+             ]))
+    ext = extract_questions(p)
+    ids = [q.id for q in ext.questions]
+    assert "t_e1" in ids       # textbox → t_
+    assert "s_e2" in ids      # combobox → s_
+    assert any(ids)            # at least one question
+    # radio group should use r_ prefix
+    radio_q = next(q for q in ext.questions if q.kind == "choice")
+    assert radio_q.id.startswith("r_")
+
+
+def test_extract_questions_radio_grouping():
+    """Two radios with the same group get one choice question with both options."""
+    from assistant.llm_inference import extract_questions
+    p = Page(url="https://x.io/apply", title="Apply", text="Remote or Hybrid?",
+             table=Table(url="https://x.io/apply", elements=[
+                 Element(ref="e1", role="radio", name="Remote", group="Work mode", checked=True),
+                 Element(ref="e2", role="radio", name="Hybrid", group="Work mode"),
+             ]))
+    ext = extract_questions(p)
+    assert len(ext.questions) == 1
+    q = ext.questions[0]
+    assert q.kind == "choice"
+    assert "Remote" in q.options
+    assert "Hybrid" in q.options
+
+
+def test_extract_questions_option_map_builds_correctly():
+    """option_maps maps qid to {option_label: element_ref} for post-check assignment."""
+    from assistant.llm_inference import extract_questions
+    p = Page(url="https://x.io/apply", title="Apply", text="Visa?",
+             table=Table(url="https://x.io/apply", elements=[
+                 Element(ref="e1", role="radio", name="Yes", group="Visa"),
+                 Element(ref="e2", role="radio", name="No", group="Visa"),
+             ]))
+    ext = extract_questions(p)
+    qid = ext.questions[0].id
+    omap = ext.option_maps[qid]
+    assert omap.get("Yes") == "e1"
+    assert omap.get("No") == "e2"
+
+
+def test_extract_questions_current_values_tracked():
+    """Pre-checked radios and pre-filled textboxes go into current_values."""
+    from assistant.llm_inference import extract_questions
+    p = Page(url="https://x.io/apply", title="Apply", text="City Salary",
+             table=Table(url="https://x.io/apply", elements=[
+                 Element(ref="e1", role="textbox", name="City", value="Milan", required=True),
+                 Element(ref="e2", role="radio", name="Yes", group="Visa", checked=True),
+                 Element(ref="e3", role="radio", name="No", group="Visa"),
+             ]))
+    ext = extract_questions(p)
+    city_q = next(q for q in ext.questions if "City" in q.question)
+    visa_q = next(q for q in ext.questions if q.kind == "choice")
+    assert ext.current_values.get(city_q.id) == "Milan"
+    assert ext.current_values.get(visa_q.id) == "Yes"
