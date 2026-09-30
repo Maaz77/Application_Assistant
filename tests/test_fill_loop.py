@@ -4,7 +4,7 @@ replaced by tests/test_navigate.py (which drives the real driver against the Eas
 import pytest
 
 from assistant.llm_inference import PageAnswers
-from assistant.blockers import NeedsAttention
+from assistant.blockers import NeedsAttention, Parked
 from assistant.fill import JobCtx, run_pages
 from tests.fake_browser import El, FakeBook, FakePage, fake_browser
 
@@ -208,9 +208,9 @@ def test_uncovered_required_question_goes_to_needs_attention(tmp_path):
     site = single_dialog()
     site["s1"].els.insert(1, El("textbox", "Salary expectation", required=True, dialog="d"))
     browser, fake = fake_browser(site, "job")
-    with pytest.raises(NeedsAttention) as exc:
-        run_pages(ctx_for(browser, answers, tmp_path))
-    assert exc.value.cls == "unanswered" and fake.sent == []
+    result = run_pages(ctx_for(browser, answers, tmp_path))
+    assert isinstance(result, Parked) and result.parked_at and fake.sent == []
+    assert len(result.parked_at) == 1 and result.parked_at[0].question == "Salary expectation"
 
 
 def test_required_widget_is_a_broken_form(tmp_path):

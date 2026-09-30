@@ -30,6 +30,15 @@ class StopRun(Exception):
     """Stop the whole run now, exit 3 (§4.6 alarms, C19 signed out, tracker changed, folder clash)."""
 
 
+class ParkedAtQuestion(Exception):
+    """A required question had no answer. Catch at run_pages — park the job, don't raise NeedsAttention."""
+
+    def __init__(self, missing: list[OpenQuestion], *, what: str = ""):
+        super().__init__(what or f"{len(missing)} required question(s) have no answer in the files")
+        self.what = what or self.args[0]
+        self.missing = missing
+
+
 class RestartFromEntry(Exception):
     """Load failure, attempt 2: reopen the job from its LinkedIn URL."""
 
@@ -42,6 +51,7 @@ class Parked:
     generated: list[tuple[str, str]] = field(default_factory=list)   # (question, text)
     prefills: list[tuple[str, str]] = field(default_factory=list)    # (question, kept value)
     optional_empty: list[OpenQuestion] = field(default_factory=list)
+    parked_at: list[OpenQuestion] = field(default_factory=list)      # unanswered required at park (T5)
     screenshot: str = ""
 
 

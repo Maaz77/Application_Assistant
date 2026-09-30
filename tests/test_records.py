@@ -144,7 +144,18 @@ def test_job_md_note_heading_rules(tmp_path):
     assert "## Application Assistant" not in text
 
 
-def test_needs_attention_note_format():
+def test_parked_note_includes_unanswered_questions(tmp_path):
+    """T5: a parked job with unanswered required questions shows them in the note."""
+    from assistant.blockers import OpenQuestion, Parked
+    parked = Parked("https://acme.io/a", "Apply", 2, parked_at=[
+        OpenQuestion("Salary?", "text"),
+        OpenQuestion("Visa?", "choice", ["Yes", "No"])])
+    note = records.parked_note(parked, WHEN)
+    lines = note.splitlines()
+    assert lines[0] == "## 2026-09-23 14:03 — Pending Review"
+    assert "- Answer before you submit:" in lines
+    assert '  - "Salary?" — text' in lines
+    assert '  - "Visa?" — choice; options: Yes | No' in lines
     na = NeedsAttention("unanswered", "2 required question(s) have no answer in the files",
                         questions=[OpenQuestion("Salary?", "text"), OpenQuestion("Visa?", "choice", ["Yes", "No"])])
     na.url, na.title, na.page, na.stage, na.filled = "https://acme.io/a", "Apply", 2, "fill", 5

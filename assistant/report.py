@@ -97,10 +97,14 @@ class Report:
         for r in parked:
             L.append(f"### {r.label}")
             L += [f"- URL: {r.url}", f"- Folder: {r.folder}", f"- Parked on: {r.parked.url} (page {r.parked.pages})"]
-            for q, t in r.parked.generated:
-                L.append(f"- Generated — \"{q}\": {t}")
+            L += [f"- Generated — \"{q}\": {t}" for q, t in r.parked.generated]
             for q, v in r.parked.prefills:
                 L.append(f"- Kept pre-fill — \"{q}\": {v}")
+            if r.parked.parked_at:
+                L.append("")
+                L.append("  Questions for your Scratch Pad:")
+                for q in r.parked.parked_at:
+                    L.append(f"    - \"{q.question}\" — {q.kind}" + (f"; options: {' | '.join(q.options)}" if q.options else ""))
             L.append("")
         L += ["## Needs Attention", ""]
         for r in attention:

@@ -20,7 +20,7 @@ from assistant import decide, navigate, pages, tabs, guard
 from assistant.llm_inference import (LONG_TEXT, LLMInferenceError, PageAnswers, Question, judge_questions,
                                uncovered_optional, uncovered_required)
 from assistant.decide import DecisionError
-from assistant.blockers import Attempts, NeedsAttention, OpenQuestion, Parked, RestartFromEntry, StopRun
+from assistant.blockers import Attempts, NeedsAttention, OpenQuestion, Parked, RestartFromEntry, StopRun, ParkedAtQuestion
 from assistant.guard import label_of
 from assistant.browser import Browser, DriverError, DriverTimeout, Table
 from assistant.pages import Page
@@ -407,8 +407,7 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
     ctx.optional_empty += [_open_q(q) for q in uncovered_optional(pa)]
     missing = [q for q in uncovered_required(pa) if not (resume_in_place and is_resume_question(q))]
     if missing:                                                                  # D2
-        raise NeedsAttention("unanswered", f"{len(missing)} required question(s) have no answer in the files",
-                             questions=[_open_q(q) for q in missing])
+        raise ParkedAtQuestion([_open_q(q) for q in missing])
     if items:                                                                    # read-back
         q = ctx.read()
         bad = mismatches(items, q)
@@ -563,6 +562,17 @@ def run_pages(ctx: JobCtx) -> Parked:
         except NeedsAttention as na:
             raise _where(na, ctx) from exc
         raise RestartFromEntry(str(exc)) from exc
+    except ParkedAtQuestion as exc:
+        # T5: unanswered required question — park the job with the question noted
+        p = ctx.last
+        shot = ""
+        if ctx.shots_dir:
+            ctx.shots_dir.mkdir(parents=True, exist_ok=True)
+            shot = str(ctx.shots_dir / "screenshot.jpg")
+            ctx.browser.act([{"op": "screenshot", "path": shot, "full": True}], ctx.session, p.table,
+                            observe_after=False, stop_on_error=False)
+        return Parked(url=p.url, title=p.title, pages=ctx.pages + 1, generated=ctx.generated, prefills=ctx.prefills,
+                      optional_empty=ctx.optional_empty, parked_at=exc.missing, screenshot=shot)
     return _park(ctx)
 
 
