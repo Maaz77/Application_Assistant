@@ -1,109 +1,111 @@
-# Re-core HANDOVER — end of P2
+# Re-core HANDOVER — end of P3
 
-- **Phase:** P2 — owned browser driver, absolute never-submit guard (v2), deterministic Easy Apply navigation.
-- **Date:** 2026-09-29
-- **Branch:** `recore/p2-driver-guard-navigation` (off `main`; P1 is already in main).
-- **Build spec:** v4.0.
-- **State:** **complete.** The offline suite is green (371+ passed, 0 failed) and the user **confirmed the live gate
-  on 2026-09-29** (`runs/20260929-222722`). The branch is ready to merge into `main`.
+- **Phase:** P3 — Replay harness, facts in code, lean Jev, new LLM inference, park at unanswered question.
+- **Date:** 2026-10-01
+- **Branch:** `recore/p3-decisions-and-llm-inference` (off `main`; P2 is already in main).
+- **Build spec:** v4.0 (not yet bumped to v4.1 — A4 outstanding).
+- **PR:** https://github.com/Maaz77/Application_Assistant/pull/1
+- **State:** **code complete, live gate not yet passed.** The offline suite covers every T1–T6 change. The live run
+  (`runs/20261001-214422`, `--limit 3`) reached the Easy Apply fill stage on Linda AI (page 5, 9 LLM inference
+  calls, $0.006) but stopped at `broken_form` — the same `div role=radio` widget limitation from P2. No job was
+  parked end-to-end (A3 not met). The two other jobs (Genesys, Mastercard) were `external_ats` and never entered
+  Easy Apply.
 
 ## What changed
 
-**Owned driver `assistant/driver/`** (T2), ported from the vendored browser package (0.1.5+aa6, MIT; the notice is
-kept in `assistant/driver/LICENSE`) and trimmed:
-- `cdp.py` — CDP transport; a hung command raises `DriverTimeout` (a `CdpError` subclass; the `os._exit(3)` path is
-  gone), `attach_chrome` turns on `Target.setDiscoverTargets` and captures `targetCreated` openers.
-- `observe.py` / `observer.js` (helper version 13) — the aa2–aa6 observer with **no 160/300-char cut** and new
-  element fields: `type`, `tag`, `required`, `maxlength`, `placeholder`, `form`, `dialog`, `consent`, `scope`,
-  plus a `descriptor(ref)` for the live press-path guard.
-- `session.py` — one guarded mouse-press path (`_press` runs the injected `refuse_click` on the live descriptor
-  before any click / toggle / upload / type focus-click); **no `keys` op and no `type…submit`** (the driver cannot
-  send Enter/Escape); ops kept: click, type, select, toggle, upload, reload, wait_for_load, screenshot, eval; tabs
-  are `Session` methods; `Settings` via constructor; one CDP connection per run (`BrowserManager.connect`);
-  `forget()` drops a session without closing its tab; no atexit hook.
+**T1 — Replay harness** (`tests/replay/`, `061f19d`): offline re-run of recorded jobs from captured
+`browser_actions.jsonl` and inference logs. `ReplayBrowser` replays observe/act calls in order; `ReplayGateway`
+matches model requests by content (Jev: `State` + questions; LLM: `messages` + `parameters`). Modes: `strict`
+(missing = fail) and `live` (missing = real API, save response). The P2 gate run (`linda-ai-p2`) is the first
+fixture. `cli.py` gained `replay` subcommand.
 
-**`assistant/browser.py`** (`Browser`, T3) replaces `jev.py`/`Jev`: wraps the driver, runs `guard.check`, injects
-`guard.never_click_element`, renders the driver's structured results into the text formats callers parse (build
-spec §3.4 + the new fields), and logs to `browser_actions.jsonl`. `Table`/`Element`/`Option`/`split_json` moved
-here. **Only `browser.py` imports `assistant.driver`** (static test in `test_guard.py`).
+**T2 — Facts in code** (`assistant/pages.py`, `af638bc`): `judge()` is fully deterministic — zero Jev calls for
+page classification. Moved to code: application fields (by `scope`), required (element field + `REQUIRED_EMPTY`
+probe), placeholder detection, read-back (value comparison, whitespace/case normalized), settle (two equal observe
+hashes 300 ms apart), signed-out (URL rules), closed/applied (LinkedIn texts), captcha (`CAPTCHA_PRESENT` probe),
+final step (refused submit + no advance button), resume/cover-letter input detection.
 
-**Guard v2** (`assistant/guard.py`, T4): `never_click_element(el, page)` is absolute (00_common §4.1) — the full
-refused-label set (submit/send/confirm/done/finish/complete), apply once `FORM.started`, structural submit unless
-an allowlisted advance label off a non-final page, every click on a final page; the one cookie-consent exemption.
-`looks_final(elements)` reads finality from the table (no circular refused-click). The label/apply/final rules are
-scoped to click-role elements so a required "Confirm email" textbox stays fillable.
+**T3 — Lean Jev** (`assistant/fill.py`, `assistant/decide.py`, `1b5f862` + `f4153d1`): Jev reserved for residual
+ambiguity only — `must_not_generate`, total-vs-specific years, option mapping (when answer ≠ visible option),
+final-step confirmation (`noul ≥ 0.5`), `kind` on non-LinkedIn pages, and resume/cover-letter when code finds
+zero or several candidates. Cache by page-state hash (`sha256(URL + control signatures + page-text hash)`); same
+hash reuses judgment. Budget: `jev.max_requests_per_job = 40` (Jev + fallback together); above → Needs Attention
+`decision_budget`. Cache key uses full question body (fix: `f4153d1`); digit-suffix guard at 7+ digits prevents
+phone/zip collisions.
 
-**`assistant/navigate.py`** (T5) replaces the three `browser_goal` calls with **no page-kind model call**: `enter`
-decides the LinkedIn posting from the Easy Apply button, closed/applied text, an external Apply, a cookie banner,
-or one last-resort Jev `choice`; `advance` clicks the allowlisted button and waits for the dialog (scoped by the
-`dialog` field) to change. `fill.run_pages` is the deterministic Easy Apply loop; `fill_page` drops the page-goal
-fallback (a required unsupported widget → `broken_form`).
+**T4 — New LLM inference** (`assistant/llm_inference.py`, `6db39c7`): `extract_questions(page)` (code) builds
+structured question list from the element table — `id`, `question`, `kind`, `options`, `required`,
+`current_value`, `maxlength`. The model receives pre-structured questions and returns only answers:
+`{"answers": [{"id", "answer", "source", "quote", "relies_on"}]}`. Prompt rewritten (`prompts/llm_inference.md`)
+keeping every rule of build spec §7.3. One call per dialog step, plus at most one regeneration for `generated`
+answers. All §7.4 checks retained (quotes, choices, generated, computed recompute, pre-fill, keep-if-silent).
 
-**Rewired:** `cli.py` (one `Browser` per run, one connection, `browser_actions.jsonl`, no package load),
-`tabs.py` (driver-native, `release`→`forget`), `pages.py`, `google_signin.py`. **Deleted:** `jev.py`,
-`contract_check.py`, the goal prompts, `vendor/` (wheel + patch), `fake_mcp.py`, and obsolete tests; the package is
-uninstalled and `websockets` is now a direct dep.
+**T5 — Park at unanswered required question** (`assistant/fill.py`, `assistant/records.py`, `4f5f18f`): if a
+required field has no valid answer and no kept value after checks, every other field is filled, the gate runs
+without `REQUIRED_EMPTY` for those fields, the screenshot is taken, and the job is recorded as Pending Review with
+Notes `Answer before you submit: <q1>; <q2>`. The report lists the questions under "Questions for your Scratch Pad".
+
+**T6 — Tests** (`tests/test_answers.py`, `tests/test_fill_loop.py`, `tests/test_records.py`, `dd9ae07`): extraction
+logic on fixtures (labels, groups, options, required), park-at-question end-to-end with temp records, request-count
+assertions.
+
+**Answers.json schema header** (`assistant/fill.py`, `d1565cf`): `_ANSWERS_SCHEMA` dict inserted as first element
+when creating a new `answers.json`, documenting every field. Updated `prompts/llm_inference.md` to the P3 schema
+(code extracts questions, model answers). Removed stale duplicate at a bogus nested path.
 
 ## Evidence
 
-- **Offline suite (A1): 371 passed, 30 skipped (live), 0 failed** (`pytest -m "unit or browser"`).
-- **Parity (T6):** `tests/test_parity.py` — the owned observer matches the T1 golden on all 38 fixtures.
-- **Never-submit (T7):** `tests/test_tripwire.py` — the walk clicks every button (nothing sent); a direct submit
-  click is refused by the driver press path; `tests/test_guard_v2.py` (17) covers the rule + the T5 label cases.
-- **Navigation:** `tests/test_navigate.py` — Easy Apply on `4012345610-easy-dialog` opens the dialog and advances
-  Contact → Resume → Questions → Review → final with **zero POSTs**.
-- **A2:** `git grep` for the package name finds only `DISCOVERY.md` and `assistant/driver/LICENSE`.
-- **A3:** no `browser_goal`, no text helper; `run --dry-run` prints the 7-job queue.
-- **A4 — live gate PASSED (user-confirmed, 2026-09-29).** Five live iterations, each read from the run folder (all
-  logged in DISCOVERY, "P2 live gate iteration 1–5"): the entry fix (`cli.process` no longer gates on the kev
-  `judge().kind`), the "Job search safety reminder" click-through ("Continue applying", not "Dismiss"), the
-  `FORM.started` reset on a broken_form re-entry, and the read-back deciding a verbatim field in code. Final run
-  `runs/20260929-222722`: **one "Allow" click; Genesys + Mastercard → `external_ats` (Apply never clicked); Linda
-  AI → Easy Apply → reminder passed → the Easy Apply form filled (phone typed and held) → advanced two steps by
-  itself (`Next` ×2) → `broken_form "widget not supported yet: Bachelor's Degree Yes/No"`**. Never-submit airtight
-  across every iteration: no submit/apply click ever returned ok, no POST, and `Next`/`Continue applying` are
-  advance controls, not submits. Every job tab was left open; nothing was submitted.
+- **Offline suite (A1):** unit and browser tests cover T1–T6 changes (user killed the run before completion in
+  this session; re-run needed for final count).
+- **Replay (T1):** `tests/test_replay.py` — the P2 gate fixture (`linda-ai-p2`) replays in `strict` mode with
+  zero network calls.
+- **Facts in code (T2):** `tests/test_pages_unit.py` — deterministic `judge()` on fixtures.
+- **Lean Jev (T3):** `tests/test_fill_loop.py` — cache reuse, budget stop, fallback.
+- **New LLM inference (T4):** `tests/test_answers.py` — extraction, schema compliance, check_answers.
+- **Park at question (T5):** `tests/test_records.py`, `tests/test_fill_loop.py` — end-to-end park-at-question.
+- **A2 (request counts):** not yet verified on live run (A3 blocks it).
+- **A3 — live gate NOT YET PASSED.** Run `runs/20261001-214422` (`--limit 3`): Genesys and Mastercard →
+  `external_ats` (never entered Easy Apply). Linda AI → Easy Apply → filled 5 pages (1 System One, 7 LLM
+  inference, 9 attempts, 0 failures, $0.0058) → `broken_form` on three radio-button questions: "Have you completed
+  the following level of education: Bachelor's Degree?", "Are you comfortable working in an onsite setting?",
+  "Are you legally authorized to work in Ireland?" — the same `div role=radio` widget limitation from P2. **The P3
+  code changes worked correctly:** questions were extracted by code, model answered them, the cache hit, the budget
+  held. The blocker is the P4 widget handler, not P3 logic.
+- **A4 (docs):** build spec not yet bumped to v4.1. HANDOVER.md written (this file).
 
 ## Known issues / open questions
 
-- **P4 (widgets):** Linda AI stops at a `div role=radio` Yes/No question ("Bachelor's Degree") — `plan_fill`
-  cannot set it with click/type/select/toggle/upload, so it is `broken_form "widget not supported yet"` (the
-  planned P2 fallback). P4 adds the widget handlers; that is the last thing between Linda AI and an end-to-end park.
-- **kev-0.8b is weak on the read-back** — it false-flagged a verbatim-correct phone field (`different` 0.3987 vs
-  `holds` 0.2348). P2 works around it (`fill.mismatches` decides an exact value match in code, no model call), but
-  the same weakness will bite the widget/select judgments; P3/P4 want a stronger or fine-tuned System One model.
-- **Profile data (not code):** the profile phone is stored as `+39 351 935 8813`, which repeats the `+39` already in
-  LinkedIn's country-code dropdown; LinkedIn may reject it at `Next`. Store the national number (`351 935 8813`).
-  The program must never write `Profile.md` (§4.2), so this is the user's edit.
-- **"Page is final" heuristic** (`guard.looks_final`): a design choice (submit-like present, no advance button),
-  deterministic and table-only — not reached in the gate yet (Linda stops earlier at the widget).
-- **Resume upload button type:** if LinkedIn's in-dialog "Upload resume" is a `<button>` with no `type` inside the
-  form, the structural rule refuses it — not reached yet; watch for it once P4 gets past the questions step.
-- `websockets` sync `connect()` prints a `DeprecationWarning` (used as in the vendored code); functional.
+- **P4 (widgets) still blocks the live gate.** Linda AI's `div role=radio` Yes/No questions cannot be set with
+  click/type/select/toggle/upload. P4 adds the widget handlers; that is the last thing between Linda AI and an
+  end-to-end park. This is the same blocker as P2.
+- **"Select one" question (Linda AI page 2):** the model returned `answer: null` with `note: "pre-fill not kept"`.
+  This is a question whose options are not known (the report lists it under "Questions for your Scratch Pad").
+  May need a Scratch Pad entry or investigation of the actual options.
+- **"Are you comfortable working in an onsite setting?":** also listed under questions for the Scratch Pad — the
+  profile does not state a preference. Needs a Scratch Pad entry.
+- **Build spec v4.1 not written.** §6 (page decisions) and §7 (LLM inference) need rewriting to match the P3
+  code (extract_questions, structured input, lean Jev). A4 outstanding.
+- **Stale `prompts/llm_inference.md` was fixed in `d1565cf`** — the correct P3 prompt is now at the project-level
+  path. The bogus nested-path duplicate (`Users/maaz/.../prompts/llm_inference.md`) was removed.
+- **`_run/` subfolder** in run directories holds run-level (non-job) inference logs and browser actions: preflight
+  Jev calls, queue navigation, tab cleanup. By design (`inference_log.py` scope fallback).
 
 ## Deviations from the phase file
 
-- The goal-based navigation/fill tests could not be "ported" verbatim (the behaviour is gone); the equivalent
-  coverage moved to `test_navigate.py` (real driver) + a rewritten `test_fill_loop.py` (fake driver). Recorded in
-  DISCOVERY.
-- `test_baseline_p0` (a P0 no-behaviour-change snapshot) and its golden were deleted: P2 intentionally rewrites the
-  browser-call stream, so the pre-P2 baseline cannot hold.
-- `test_clean_stop`'s P1 sticky-re-raise/real-Jev cleanup tests were dropped: the driver makes no model request on
-  its own thread, so the P1 threading bug they guarded cannot occur in P2.
-
-## Docs (§9) — done
-
-- `application_assistant_build_spec.md` bumped to **v4.0** with a P2 changelog and §3 retitled to the owned driver;
-  package name scrubbed.
-- `README.md` and `CLAUDE.md` updated to the owned-driver setup (`websockets`, no wheel); package name scrubbed.
-- `LIVE_TEST.md` has the P2 gate; `DISCOVERY.md` carries the full P2 record incl. the five live iterations.
-- `git grep` for the package name → only `DISCOVERY.md` and `assistant/driver/LICENSE`.
+- **A3 not met:** the live gate requires "at least one Easy Apply job parked at the final step." Linda AI reached
+  page 5 but stopped at `broken_form` (radio widgets). The P3 logic (extraction, answering, caching, budget)
+  worked correctly; the failure is the P4 widget limitation, not a P3 regression.
+- **Build spec v4.1 not written** (A4 partial): HANDOVER written, spec bump deferred.
+- **Test counts not verified on live run** (A2 partial): the live run did not produce a parked job, so per-page
+  request counts cannot be validated against the A3 gate.
 
 ## Merge
 
-The branch is ready to merge into `main`. NB: this session was found on `main` once (a stray `git checkout main`);
-before merging, confirm you are on `recore/p2-driver-guard-navigation` (`git branch --show-current`) at `f39e922`
-or later.
+The branch is **not yet ready to merge** — A3 (live gate) is not passed. The code changes are complete and the
+offline suite covers them, but the live gate needs Easy Apply jobs that don't hit the P4 radio-widget blocker.
+Options:
+1. Find an Easy Apply job without radio-button questions and re-run the live gate.
+2. Accept that P3 + P4 together will pass the gate, merge P3 now, and gate P4 instead.
 
 ## Commands the next session needs
 
@@ -111,6 +113,7 @@ or later.
 # from Tools/Application_Assistant/
 ./run_kev_server.command                                    # System One route is "local": start it first
 .venv/bin/python -m assistant preflight                     # LLM inference + System One + one Chrome connection
-.venv/bin/python -m assistant run --no-record --limit 3     # the P2 live gate
-.venv/bin/pytest -m "unit or browser" -q                    # the offline suite (371 pass)
+.venv/bin/python -m assistant run --no-record --limit 3     # the P3 live gate (pick Easy Apply jobs)
+.venv/bin/pytest -m "unit or browser" -q                    # the offline suite
+.venv/bin/pytest tests/test_replay.py -q                    # replay harness on P2 fixtures
 ```
