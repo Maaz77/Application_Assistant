@@ -434,11 +434,30 @@ class _Refill(Exception):
         self.url = url
 
 
+_ANSWERS_SCHEMA = {
+    "_schema": "answers.json — LLM inference answers per form question",
+    "page": "form page number (1-based)",
+    "url": "page URL at time of answering",
+    "model": "chat model that produced the answer",
+    "question": "form field label exactly as shown",
+    "answer": "model's answer (null when sources don't cover it)",
+    "ref": "DOM element ref for the field (null for radio groups)",
+    "option_ref": "DOM ref of the radio/checkbox/option to pick (null for text fields)",
+    "source": "profile | job | resume | generated | computed | linkedin-prefill",
+    "quote": "exact sentence from source backing the answer (null when N/A)",
+    "relies_on": "list of source sentences used (for generated/computed answers)",
+    "note": "edge-case annotation (null normally)",
+}
+
+
 def log_answers(ctx: JobCtx, p: Page, pa: PageAnswers) -> None:
     if not ctx.answers_log:
         return
     ctx.answers_log.parent.mkdir(parents=True, exist_ok=True)
-    data = json.loads(ctx.answers_log.read_text()) if ctx.answers_log.exists() else []
+    if ctx.answers_log.exists():
+        data = json.loads(ctx.answers_log.read_text())
+    else:
+        data = [_ANSWERS_SCHEMA]
     data += [{"page": ctx.pages + 1, "url": p.url, "model": pa.model, "question": q.question, "answer": q.answer,
               "ref": q.ref, "option_ref": q.option_ref, "source": q.source, "quote": q.quote, "relies_on": q.relies_on, "note": q.note} for q in pa.questions]
     ctx.answers_log.write_text(json.dumps(data, indent=2, ensure_ascii=False))
