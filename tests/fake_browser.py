@@ -94,7 +94,8 @@ class FakeSession:
                  "occluded": e.occluded, "checked": e.checked, "context": e.context, "label": e.label,
                  "value": "" if e.role == "combobox" else e.value, "current": None,
                  "tag": e.tag_of(), "type": e.type_of(), "required": e.required,
-                 "maxlength": e.maxlength or None, "form": e.form, "dialog": e.dialog, "consent": e.consent}
+                 "maxlength": e.maxlength or None, "form": e.form, "dialog": e.dialog, "consent": e.consent,
+                 "scope": e.dialog or e.form, "group": e.group or ""}
             if e.role == "combobox":
                 d["current"] = e.value or "Select"
                 d["options"] = [{"ref": f"{ref}:{j + 1}", "label": o, "value": o, "selected": o == e.value}

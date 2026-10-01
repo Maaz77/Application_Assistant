@@ -144,14 +144,15 @@ def canned(*responses):
     return post, calls
 
 
-GOOD = json.dumps({"questions": [q(question="Notice period", ref="e2", answer="3 months", source="profile",
-                                    quote="What is your notice period? 3 months")]})
+GOOD = json.dumps({"answers": [{"id": "t_e2", "answer": "3 months", "source": "profile",
+                                 "quote": "What is your notice period? 3 months", "relies_on": None}]})
 
 
 def test_schema_400_falls_back_to_json_object():
     post, calls = canned((400, {"error": "response_format"}), (200, GOOD))
     pa = A.answer_page(PAGE, SRC, key="k", models="m", policy=Policy(), today=TODAY, post=post)
-    assert pa.questions[0].answer == "3 months"
+    q = next(x for x in pa.questions if x.question == "Notice period")
+    assert q.answer == "3 months"
     assert calls[0]["response_format"]["type"] == "json_schema" and calls[1]["response_format"] == {"type": "json_object"}
     assert calls[0]["temperature"] == 0
 
@@ -245,13 +246,14 @@ def test_the_run_keeps_asking_the_model_that_answered_last():
 
 def test_fenced_json_is_accepted_and_bad_generated_regenerated_once():
     fact = "I built a real-time computer vision pipeline reaching 200 FPS on an NPU."
-    first = json.dumps({"questions": [q(question="Why Acme?", kind="longtext", ref="e3", answer="made up",
-                                        source="generated", relies_on=["Not in sources."])]})
-    second = json.dumps({"questions": [q(question="Why Acme?", kind="longtext", ref="e3", answer="Real text.",
-                                         source="generated", relies_on=[fact])]})
+    first = json.dumps({"answers": [{"id": "t_e3", "answer": "made up", "source": "generated",
+                                     "quote": None, "relies_on": ["Not in sources."]}]})
+    second = json.dumps({"answers": [{"id": "t_e3", "answer": "Real text.", "source": "generated",
+                                      "quote": None, "relies_on": [fact]}]})
     post, calls = canned((200, "```json\n" + first + "\n```"), (200, second))
     pa = A.answer_page(PAGE, SRC, key="k", models="m", policy=Policy(), today=TODAY, post=post)
-    assert pa.questions[0].answer == "Real text." and "regenerate" in json.loads(calls[1]["messages"][1]["content"])
+    q = next(x for x in pa.questions if x.question == "Why Acme?")
+    assert q.answer == "Real text." and "regenerate" in json.loads(calls[1]["messages"][1]["content"])
 
 
 def test_schema_is_strict_mode_shaped():
@@ -351,3 +353,72 @@ def test_a_quote_that_differs_only_in_formatting_still_counts():
     (email,), _ = run(q(question="Email", ref="e1", answer="amin@example.com", source="resume",
                         quote="AMIN @ example . com"))
     assert email.answer == "amin@example.com" and email.note is None
+
+
+# ------------------------------------------------------------------ extraction tests (T6)
+
+def test_extract_questions_ids_are_stable():
+    """Each field gets a stable ID: t_{ref} for text, s_{ref} for selects, r_{group} for radios."""
+    from assistant.llm_inference import extract_questions
+    p = Page(url="https://x.io/apply", title="Apply", text="City Work model Visa",
+             table=Table(url="https://x.io/apply", elements=[
+                 Element(ref="e1", role="textbox", name="City", required=True),
+                 Element(ref="e2", role="combobox", name="Work model", required=True),
+                 Element(ref="e3", role="radio", name="Yes", group="Visa needed?", required=True),
+                 Element(ref="e4", role="radio", name="No", group="Visa needed?"),
+             ]))
+    ext = extract_questions(p)
+    ids = [q.id for q in ext.questions]
+    assert "t_e1" in ids       # textbox → t_
+    assert "s_e2" in ids      # combobox → s_
+    assert any(ids)            # at least one question
+    # radio group should use r_ prefix
+    radio_q = next(q for q in ext.questions if q.kind == "choice")
+    assert radio_q.id.startswith("r_")
+
+
+def test_extract_questions_radio_grouping():
+    """Two radios with the same group get one choice question with both options."""
+    from assistant.llm_inference import extract_questions
+    p = Page(url="https://x.io/apply", title="Apply", text="Remote or Hybrid?",
+             table=Table(url="https://x.io/apply", elements=[
+                 Element(ref="e1", role="radio", name="Remote", group="Work mode", checked=True),
+                 Element(ref="e2", role="radio", name="Hybrid", group="Work mode"),
+             ]))
+    ext = extract_questions(p)
+    assert len(ext.questions) == 1
+    q = ext.questions[0]
+    assert q.kind == "choice"
+    assert "Remote" in q.options
+    assert "Hybrid" in q.options
+
+
+def test_extract_questions_option_map_builds_correctly():
+    """option_maps maps qid to {option_label: element_ref} for post-check assignment."""
+    from assistant.llm_inference import extract_questions
+    p = Page(url="https://x.io/apply", title="Apply", text="Visa?",
+             table=Table(url="https://x.io/apply", elements=[
+                 Element(ref="e1", role="radio", name="Yes", group="Visa"),
+                 Element(ref="e2", role="radio", name="No", group="Visa"),
+             ]))
+    ext = extract_questions(p)
+    qid = ext.questions[0].id
+    omap = ext.option_maps[qid]
+    assert omap.get("Yes") == "e1"
+    assert omap.get("No") == "e2"
+
+
+def test_extract_questions_current_values_tracked():
+    """Pre-checked radios and pre-filled textboxes go into current_values."""
+    from assistant.llm_inference import extract_questions
+    p = Page(url="https://x.io/apply", title="Apply", text="City Salary",
+             table=Table(url="https://x.io/apply", elements=[
+                 Element(ref="e1", role="textbox", name="City", value="Milan", required=True),
+                 Element(ref="e2", role="radio", name="Yes", group="Visa", checked=True),
+                 Element(ref="e3", role="radio", name="No", group="Visa"),
+             ]))
+    ext = extract_questions(p)
+    city_q = next(q for q in ext.questions if "City" in q.question)
+    visa_q = next(q for q in ext.questions if q.kind == "choice")
+    assert ext.current_values.get(city_q.id) == "Milan"
+    assert ext.current_values.get(visa_q.id) == "Yes"

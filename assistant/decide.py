@@ -206,20 +206,33 @@ class Decider:
         self.calls = 0
         self.cost = 0.0
         self.by_fallback = 0
+        self._cache: dict[str, dict[str, Answer]] = {}
         self._lock = threading.Lock()         # a goal runs on a worker thread: the counters are shared
 
     @property
     def gateway(self) -> "gateway_mod.Gateway":
         return self._gateway or gateway_mod.required()
 
+    @staticmethod
+    def _cache_key(topic: str, fitted: Any, questions: dict[str, dict]) -> str:
+        import hashlib
+        raw = topic + "\0" + json.dumps(fitted, ensure_ascii=False, sort_keys=True) + "\0" + json.dumps(
+            questions, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(raw.encode()).hexdigest()
+
     def ask(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
-        """Every question answered, or DecisionError."""
+        """Every question answered, or DecisionError. Cached by topic + fitted state + full questions."""
         if not questions:
             return {}
         ids, fitted = list(questions), fit_state(state, self.state_chars, self.keep_object_state)
+        key = self._cache_key(topic, fitted, questions)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
         out: dict[str, Answer] = {}
         for i in range(0, len(ids), self.max_questions):
             out.update(self._one(topic, fitted, {k: questions[k] for k in ids[i:i + self.max_questions]}))
+        self._cache[key] = out
         return out
 
     def _one(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:

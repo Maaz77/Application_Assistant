@@ -61,6 +61,7 @@ class Element(BaseModel):
     dialog: str = ""
     consent: str = ""
     scope: str = ""
+    group: str = ""
 
 
 class Table(BaseModel):

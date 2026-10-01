@@ -66,6 +66,7 @@ class Element:
     dialog: str = ""
     consent: str = ""
     scope: str = ""
+    group: str = ""
 
     @property
     def code(self) -> str:
@@ -103,6 +104,7 @@ class Element:
             dialog=raw.get("dialog") or "",
             consent=raw.get("consent") or "",
             scope=raw.get("scope") or "",
+            group=raw.get("group") or "",
         )
 
     # ---------------------------------------------------------------- helpers
@@ -318,7 +320,7 @@ class Observation:
                      if k in {"ref", "role", "name", "value", "editable", "occluded",
                               "checked", "current", "options", "context",
                               "type", "tag", "required", "maxlength", "placeholder",
-                              "form", "dialog", "consent", "scope"}}
+                              "form", "dialog", "consent", "scope", "group"}}
                     for element in self.elements
                 ],
             })),

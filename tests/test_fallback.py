@@ -136,8 +136,8 @@ def test_a_rescued_request_is_not_a_failure_for_the_breaker():
     """Three System One requests in a row fail, but the fallback answers each: the run goes on (T4)."""
     post, _ = router(systemone=(503, {"error": "down"}), chat=(200, chat_reply(BOTH)))
     d, gateway = wired(post)
-    for _ in range(5):
-        d.ask("page", "s", QS)
+    for i in range(5):
+        d.ask("page", f"state-{i}", QS)
     assert gateway.tripped is None and gateway.run.failures == 0 and d.by_fallback == 5
 
 
@@ -196,3 +196,24 @@ def test_the_fallback_uses_the_chat_route_and_its_primary_model(monkeypatch, tmp
     cfg = config.load()
     chat = decide.for_config(cfg).fallback
     assert chat.url == config.chat_url(cfg) and chat.models == list(cfg.models.llm_inference)
+
+
+# ------------------------------------------------------------------ cache
+
+
+def test_cache_keys_on_full_question_body_not_just_ids():
+    """Same state, same IDs, different question body must produce two requests, not a cache hit."""
+    calls = []
+
+    def counting_post(url, body, headers, timeout):
+        calls.append(body)
+        return 200, {"answers": BOTH}
+
+    d, _ = wired(counting_post, fallback=False)
+    q1 = {"x": decide.noul("Is the sky blue?")}
+    q2 = {"x": decide.noul("Is the ocean green?")}
+    d.ask("page", "same-state", q1)
+    d.ask("page", "same-state", q2)
+    assert len(calls) == 2, "different question body with same ID should not cache-hit"
+    d.ask("page", "same-state", q1)
+    assert len(calls) == 2, "identical repeat should cache-hit"

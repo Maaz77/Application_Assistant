@@ -4,7 +4,7 @@ replaced by tests/test_navigate.py (which drives the real driver against the Eas
 import pytest
 
 from assistant.llm_inference import PageAnswers
-from assistant.blockers import NeedsAttention
+from assistant.blockers import NeedsAttention, Parked
 from assistant.fill import JobCtx, run_pages
 from tests.fake_browser import El, FakeBook, FakePage, fake_browser
 
@@ -106,8 +106,8 @@ def test_multi_step_easy_apply_walks_to_the_final_step(tmp_path):
 
 
 def test_mismatches_holds_a_verbatim_field_without_asking_the_model(tmp_path):
-    """A field whose value already equals the answer holds — decided in code, no read-back model call (kev-0.8b
-    false-flagged a verbatim phone as 'different', live 2026-09-29). Only reformatted fields reach the model."""
+    """P3: mismatches is all code, no model call. Verbatim match, reformatted phone (digits-suffix), and
+    genuinely different values are all decided by _fuzzy_holds."""
     from assistant import decide, fill, pages
     from assistant.browser import Element, Table
     from assistant.llm_inference import PageAnswers
@@ -119,18 +119,18 @@ def test_mismatches_holds_a_verbatim_field_without_asking_the_model(tmp_path):
 
     class Boom:
         def ask(self, *a, **k):
-            raise AssertionError("read-back asked the model for a field that already holds the answer verbatim")
+            raise AssertionError("mismatches must not call the model at all (P3)")
     decide.use(Boom())
     try:
-        assert fill.mismatches([q], p) == []                     # holds; no model call
-        # a reformatted value is still sent to the model (not short-circuited)
+        assert fill.mismatches([q], p) == []                     # verbatim: holds
         p.elements[0].value = "+393519358813"
-        raised = False
-        try:
-            fill.mismatches([q], p)
-        except AssertionError:
-            raised = True
-        assert raised                                            # the ambiguous, reformatted field WAS asked
+        assert fill.mismatches([q], p) == []                     # reformatted phone: digits match, holds
+        p.elements[0].value = "+1 555 000 0000"
+        assert fill.mismatches([q], p) == [q]                    # genuinely different: mismatch
+        # short digit suffix must NOT match: "5" vs "15" is not a phone reformat
+        q2 = PageAnswers.model_validate({"questions": [Q("Years", "5", ref="e1")]}).questions[0]
+        p.elements[0].value = "15"
+        assert fill.mismatches([q2], p) == [q2]                  # short digits: mismatch, not suffix
     finally:
         decide.use(None)
 
@@ -208,9 +208,9 @@ def test_uncovered_required_question_goes_to_needs_attention(tmp_path):
     site = single_dialog()
     site["s1"].els.insert(1, El("textbox", "Salary expectation", required=True, dialog="d"))
     browser, fake = fake_browser(site, "job")
-    with pytest.raises(NeedsAttention) as exc:
-        run_pages(ctx_for(browser, answers, tmp_path))
-    assert exc.value.cls == "unanswered" and fake.sent == []
+    result = run_pages(ctx_for(browser, answers, tmp_path))
+    assert isinstance(result, Parked) and result.parked_at and fake.sent == []
+    assert len(result.parked_at) == 1 and result.parked_at[0].question == "Salary expectation"
 
 
 def test_required_widget_is_a_broken_form(tmp_path):

@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from assistant import decide, gateway as gateway_mod, inference_log
+from assistant import decide, gateway as gateway_mod, inference_log, pages
 from assistant.decide import THRESHOLDS as T
 from assistant.pages import Page
 from assistant.rotation import NoModelAvailable, Rotation
@@ -40,14 +40,36 @@ class Question(BaseModel):
     quote: str | None
     relies_on: list[str] | None
     note: str | None = None      # set by the checks (why an answer was dropped); not part of the model schema
-    resume_upload: bool = False  # Jev (judge_questions): the resume upload answers this question
-    cover_letter: bool = False   # Jev (judge_questions): an upload that asks for a cover letter
+    resume_upload: bool = False  # code rule (judge_questions): the resume upload answers this question
+    cover_letter: bool = False   # code rule (judge_questions): an upload that asks for a cover letter
 
 
 class PageAnswers(BaseModel):
     model_config = ConfigDict(extra="forbid")
     questions: list[Question]
     model: str | None = None     # set by call_engine: the model that answered; not part of the model schema
+
+
+class ModelAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    answer: str | None
+    source: Source | None
+    quote: str | None
+    relies_on: list[str] | None
+
+
+class ModelResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answers: list[ModelAnswer]
+    model: str | None = None
+
+
+@dataclass
+class Extraction:
+    questions: list[Question]
+    option_maps: dict[str, dict[str, str]]   # qid → {option_label: element_ref}
+    current_values: dict[str, str]           # qid → current held value
 
 
 def _nullable(t: dict) -> dict:
@@ -72,6 +94,21 @@ QUESTION_SCHEMA = {
 }
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["questions"],
           "properties": {"questions": {"type": "array", "items": QUESTION_SCHEMA}}}
+
+ANSWER_ITEM_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["id", "answer", "source", "quote", "relies_on"],
+    "properties": {
+        "id": {"type": "string"},
+        "answer": _nullable({"type": "string"}),
+        "source": {"type": ["string", "null"],
+                   "enum": ["profile", "job", "resume", "generated", "computed", "linkedin-prefill", None]},
+        "quote": _nullable({"type": "string"}),
+        "relies_on": _nullable({"type": "array", "items": {"type": "string"}}),
+    },
+}
+ANSWER_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["answers"],
+                 "properties": {"answers": {"type": "array", "items": ANSWER_ITEM_SCHEMA}}}
 
 LONG_TEXT = 300
 # Vercel AI Gateway caps a new team at 5 requests a minute per model and says when to come back (HTTP 429 with
@@ -130,6 +167,202 @@ def resume_text(pdf: Path) -> str:
     return "\n".join(page.extract_text() or "" for page in PdfReader(str(pdf)).pages)
 
 
+# ------------------------------------------------------------------ T4: code extracts questions
+
+_UUID_RE = re.compile(r"^[0-9a-f-]{20,}$", re.I)
+
+
+def _is_required(name: str, attr_required: bool, p: Page) -> bool:
+    if attr_required:
+        return True
+    if (name or "").rstrip().endswith("*"):
+        return True
+    for label, _kind, *_ in p.required_empty.get("items", []):
+        if label and pages.norm_label(name)[:20] == pages.norm_label(label)[:20]:
+            return True
+    return False
+
+
+def _group_radios(radios: list) -> dict[str, list]:
+    """Group radio elements: by group field, then by shared name, then by scope."""
+    grouped: dict[str, list] = {}
+    ungrouped: list = []
+    for r in radios:
+        if r.group:
+            grouped.setdefault(r.group, []).append(r)
+        else:
+            ungrouped.append(r)
+    if not ungrouped:
+        return grouped
+    by_name: dict[str, list] = {}
+    for r in ungrouped:
+        by_name.setdefault(r.name, []).append(r)
+    for name, members in by_name.items():
+        if len(members) > 1:
+            grouped[f"_name_{name}"] = members
+        else:
+            r = members[0]
+            grouped.setdefault(f"_scope_{r.scope or '_page'}", []).append(r)
+    return grouped
+
+
+def _group_label(group_key: str, members: list) -> str:
+    """Human-readable question text from a radio group key."""
+    if not group_key or group_key.startswith("_"):
+        return members[0].context or "Select one"
+    if _UUID_RE.match(group_key) or len(group_key) > 80:
+        return members[0].context or "Select one"
+    all_native = all(m.tag == "INPUT" for m in members)
+    if not all_native:
+        return group_key
+    return re.sub(r"[_-]+", " ", group_key).strip().capitalize()
+
+
+def _radio_q(group_key: str, members: list, p: Page) -> tuple[str, list[str], dict[str, str], str]:
+    """(question_text, option_labels, {label: ref}, current_checked_label) for one radio group."""
+    names = [m.name for m in members]
+    labels = [m.label for m in members if m.label]
+    same_name = len(set(names)) == 1
+
+    if same_name:
+        q_text = members[0].name.rstrip(" *")
+        opts = labels if len(labels) == len(members) else names
+    else:
+        q_text = _group_label(group_key, members)
+        opts = names
+
+    seen, unique = set(), []
+    for o in opts:
+        if o not in seen:
+            unique.append(o)
+            seen.add(o)
+
+    omap: dict[str, str] = {}
+    for m in members:
+        label = (m.label or m.name) if same_name else m.name
+        if label not in omap:
+            omap[label] = m.ref
+
+    checked = next((m for m in members if m.checked), None)
+    cur = ""
+    if checked:
+        cur = (checked.label or checked.name) if same_name else checked.name
+
+    return q_text, unique, omap, cur
+
+
+def _single_question(e, p: Page) -> tuple[Question | None, str]:
+    """One question from a non-radio app field."""
+    name = (e.name or e.label or "").rstrip(" *")
+    req = _is_required(e.name or e.label or "", e.required, p)
+
+    if e.role in ("textbox", "searchbox", "spinbutton"):
+        kind: Kind = "longtext" if e.tag == "TEXTAREA" or (e.maxlength and e.maxlength > 200) else "text"
+        return (Question(id=f"t_{e.ref}", question=name, kind=kind, ref=e.ref, option_ref=None,
+                         options=None, required=req, answer=None, source=None, quote=None, relies_on=None),
+                (e.value or "").strip())
+    if e.role in ("combobox", "listbox"):
+        opts = [o.label for o in e.options if o.label] or None
+        cur = (e.current or e.value or "").strip()
+        return (Question(id=f"s_{e.ref}", question=name, kind="choice", ref=e.ref, option_ref=None,
+                         options=opts, required=req, answer=None, source=None, quote=None, relies_on=None),
+                "" if not cur or _is_placeholder(cur) else cur)
+    if e.role == "file":
+        return (Question(id=f"f_{e.ref}", question=name, kind="file", ref=e.ref, option_ref=None,
+                         options=None, required=req, answer=None, source=None, quote=None, relies_on=None), "")
+    if e.role in ("checkbox", "switch"):
+        label = name or "Yes"
+        return (Question(id=f"c_{e.ref}", question=label, kind="choice", ref=e.ref, option_ref=None,
+                         options=[label, "No"], required=req, answer=None, source=None, quote=None, relies_on=None),
+                label if e.checked else "")
+    return None, ""
+
+
+def extract_questions(p: Page) -> Extraction:
+    """Code extracts questions from page elements (P3 T4). Model only answers them."""
+    app_refs = pages.code_app_fields(p)
+    questions: list[Question] = []
+    option_maps: dict[str, dict[str, str]] = {}
+    current_values: dict[str, str] = {}
+    consumed: set[str] = set()
+
+    radios = [e for e in p.elements if e.role == "radio" and e.ref in app_refs]
+    for _key, members in _group_radios(radios).items():
+        qid = f"r_{members[0].ref}"
+        q_text, opts, omap, cur = _radio_q(_key, members, p)
+        req = _is_required(q_text, any(m.required for m in members), p)
+        questions.append(Question(
+            id=qid, question=q_text, kind="choice", ref=None, option_ref=None,
+            options=opts, required=req, answer=None, source=None, quote=None, relies_on=None))
+        option_maps[qid] = omap
+        if cur:
+            current_values[qid] = cur
+        consumed.update(m.ref for m in members)
+
+    for e in p.elements:
+        if e.ref not in app_refs or e.ref in consumed:
+            continue
+        q, cur = _single_question(e, p)
+        if q:
+            questions.append(q)
+            if cur:
+                current_values[q.id] = cur
+
+    return Extraction(questions, option_maps, current_values)
+
+
+def _questions_for_model(ext: Extraction, p: Page) -> list[dict]:
+    by_ref = {e.ref: e for e in p.elements}
+    out: list[dict] = []
+    for q in ext.questions:
+        d: dict = {"id": q.id, "question": q.question, "kind": q.kind, "required": q.required}
+        if q.options:
+            d["options"] = q.options
+        cur = ext.current_values.get(q.id, "")
+        if cur:
+            d["current_value"] = cur
+        el = by_ref.get(q.ref or "")
+        if el and el.maxlength:
+            d["maxlength"] = el.maxlength
+        out.append(d)
+    return out
+
+
+def _merge_answers(questions: list[Question], response: ModelResponse) -> PageAnswers:
+    by_id = {a.id: a for a in response.answers}
+    for q in questions:
+        a = by_id.get(q.id)
+        if a:
+            q.answer, q.source, q.quote, q.relies_on = a.answer, a.source, a.quote, a.relies_on
+    return PageAnswers(questions=questions, model=response.model)
+
+
+def _set_option_refs(pa: PageAnswers, option_maps: dict[str, dict[str, str]], p: Page) -> None:
+    """Set option_ref after check_answers: radios from option_maps, toggles from ref, selects from options."""
+    by_ref = {e.ref: e for e in p.elements}
+    for q in pa.questions:
+        if q.answer is None:
+            continue
+        omap = option_maps.get(q.id)
+        if omap:
+            q.option_ref = next((r for label, r in omap.items()
+                                 if norm(label).lower() == norm(q.answer).lower()), None)
+            continue
+        el = by_ref.get(q.ref or "")
+        if el is None:
+            continue
+        if el.role in ("checkbox", "switch"):
+            if norm(q.answer).lower() == "no":
+                q.answer = None
+            else:
+                q.option_ref = q.ref
+        elif el.options:
+            for opt in el.options:
+                if opt.label and norm(opt.label).lower() == norm(q.answer).lower() and opt.ref:
+                    q.option_ref = opt.ref
+                    break
+
+
 # ------------------------------------------------------------------ the call
 
 def page_payload(p: Page) -> dict:
@@ -149,10 +382,13 @@ LLM_INFERENCE_TIMEOUT = 45.0
 
 def call_engine(*, key: str, models: Rotation | str | list[str], system: str, user: dict,
                 url: str = OPENROUTER_CHAT, post: Callable | None = None, timeout: float = LLM_INFERENCE_TIMEOUT,
-                sleep: Callable[[float], None] = time.sleep) -> PageAnswers:
+                sleep: Callable[[float], None] = time.sleep,
+                schema: dict | None = None, response_cls: type | None = None) -> PageAnswers | ModelResponse:
     """Ask the models in turn (rotation.py) until one gives a valid answer; LLMInferenceError when none does.
     `url` is the route's chat/completions (config.chat_url): OpenRouter and Vercel AI Gateway take the same request.
     `post(url, json, headers, timeout) -> (status, body)` is injectable for tests."""
+    schema = schema or SCHEMA
+    response_cls = response_cls or PageAnswers
     rotation = models if isinstance(models, Rotation) else Rotation(models)
     # `post` is for a caller that sends with its own client (the tests and the preflight probe). It does not bypass
     # the Gateway: it gets a Gateway of its own, so the retry rule and the log still apply (A2).
@@ -165,7 +401,8 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
     try:
         pa = rotation.call(lambda m: _ask_model(m, key=key, system=system, user=user, url=url,
                                                 post=post, timeout=timeout, sleep=sleep,
-                                                attempts=None if m == last else 1),
+                                                attempts=None if m == last else 1,
+                                                schema=schema, response_cls=response_cls),
                            ModelUnavailable)
     except NoModelAvailable as exc:
         # Every model in the rotation failed: that is one failed request for the breaker, not one per model. A model
@@ -185,14 +422,17 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
 
 
 def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post: Callable, timeout: float,
-               sleep: Callable[[float], None], attempts: int | None = None) -> PageAnswers:
+               sleep: Callable[[float], None], attempts: int | None = None,
+               schema: dict | None = None, response_cls: type | None = None) -> PageAnswers | ModelResponse:
     """One model: POST chat/completions through the Gateway, json_schema strict with a json_object fallback on
     HTTP 400. Anything that fails is ModelUnavailable, so the rotation tries the next model; a rejected key or an
     account out of credit is not — the Gateway raises CreditOrKey and stops the run, because no other model on that
     key would do better. The Gateway holds the one retry layer, the queue and the log (P1 T2); `post`, `timeout` and
     `sleep` are honoured only when a test passes its own gateway-less sender. `attempts` is 1 while the rotation
     still has an untried model: handing over is cheaper than waiting to ask a rate-limited model again."""
-    fmt: dict = {"type": "json_schema", "json_schema": {"name": "page_answers", "strict": True, "schema": SCHEMA}}
+    schema = schema or SCHEMA
+    response_cls = response_cls or PageAnswers
+    fmt: dict = {"type": "json_schema", "json_schema": {"name": "page_answers", "strict": True, "schema": schema}}
     body = {"model": model, "temperature": 0, "max_tokens": MAX_TOKENS, "reasoning": REASONING,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]}
@@ -218,9 +458,15 @@ def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post:
             raise ModelUnavailable(f"HTTP {_code(out.status, err)} {_message(err)}".rstrip())
         try:
             content = data["choices"][0]["message"]["content"]
-            return PageAnswers.model_validate_json(_strip_fences(content))
+            return response_cls.model_validate_json(_strip_fences(content))
         except (KeyError, IndexError, TypeError, ValidationError, ValueError):
-            raise ModelUnavailable("output invalid") from None
+            # Tests and the preflight probe may hand back either the old {"questions": [...]} shape or the
+            # T4 {"answers": [...]} shape; accept whichever the model returned by trying the other schema.
+            try:
+                other = PageAnswers if response_cls is ModelResponse else ModelResponse
+                return other.model_validate_json(_strip_fences(content))
+            except Exception:
+                raise ModelUnavailable("output invalid") from None
 
 
 def _code(status: int, err) -> int:
@@ -323,7 +569,7 @@ YEARS_KINDS = {
 
 @dataclass
 class Verdicts:
-    """Jev's verdicts for check_answers, keyed by the normalised question text or shown value."""
+    """Verdicts for check_answers: Jev for gen/years, code regex for placeholders."""
     must_not_generate: set[str] = field(default_factory=set)
     total_years: set[str] = field(default_factory=set)
     placeholders: set[str] = field(default_factory=set)
@@ -333,9 +579,16 @@ def _shown(e) -> str:
     return "" if e is None else ((e.current or "") if e.options else (e.current or e.value or "")).strip()
 
 
-def judge_answers(pa: "PageAnswers", p: Page) -> Verdicts:
-    """One Jev call for the page's answers: which generated answers ask for a fact that must not be written, which
-    computed answers ask for total years of experience, and which shown values are placeholder prompts."""
+_PLACEHOLDER_RE = re.compile(
+    r"^\s*(select( an? option)?|choose(\.{3}|…)?|please select|--|—|select\.{3})\s*$", re.I)
+
+
+def _is_placeholder(value: str) -> bool:
+    return bool(_PLACEHOLDER_RE.match(value))
+
+
+def judge_answers(pa: "PageAnswers", p: Page, current_values: dict[str, str] | None = None) -> Verdicts:
+    """Jev call for generated/computed questions only; placeholder detection is a code regex."""
     by_ref = {e.ref: e for e in p.elements}
     qs: dict[str, dict] = {}
     for i, q in enumerate(pa.questions):
@@ -346,35 +599,29 @@ def judge_answers(pa: "PageAnswers", p: Page) -> Verdicts:
         elif q.source == "computed":
             qs[f"years_{i}"] = decide.choice({"form_question": q.question,
                                               "question": "What does `form_question` ask for?"}, YEARS_KINDS)
-    values = sorted({v for q in pa.questions if (v := _shown(by_ref.get(q.ref or "")))})
-    for j, v in enumerate(values):
-        qs[f"shown_{j}"] = decide.noul({"value": v, "question": "Is `value` a placeholder prompt, such as 'Select "
-                                        "an option', 'Choose…' or '--', rather than a real answer?"})
-    a = decide.current().ask("answers", {"page": p.title, "url": p.url}, qs)
     v = Verdicts()
-    for i, q in enumerate(pa.questions):
-        if f"gen_{i}" in a and a[f"gen_{i}"].yes(T["must_not_generate"]):
-            v.must_not_generate.add(norm(q.question))
-        if f"years_{i}" in a and a[f"years_{i}"].choice == "total":
-            v.total_years.add(norm(q.question))
-    v.placeholders = {norm(val) for j, val in enumerate(values) if a[f"shown_{j}"].yes(T["placeholder"])}
+    if qs:
+        a = decide.current().ask("answers", {"page": p.title, "url": p.url}, qs)
+        for i, q in enumerate(pa.questions):
+            if f"gen_{i}" in a and a[f"gen_{i}"].yes(T["must_not_generate"]):
+                v.must_not_generate.add(norm(q.question))
+            if f"years_{i}" in a and a[f"years_{i}"].choice == "total":
+                v.total_years.add(norm(q.question))
+    values = sorted({val for q in pa.questions if (val := _shown(by_ref.get(q.ref or "")))})
+    v.placeholders = {norm(val) for val in values if _is_placeholder(val)}
     return v
 
 
+_COVER_LETTER_RE = re.compile(r"cover\s*letter", re.I)
+
+
 def judge_questions(pa: "PageAnswers", p: Page) -> None:
-    """One Jev call: flag the questions the resume upload answers, and the uploads that ask for a cover letter."""
-    qs: dict[str, dict] = {}
-    for i, q in enumerate(pa.questions):
-        qs[f"resume_{i}"] = decide.noul(
-            {"form_question": q.question, "options": q.options or [],
-             "question": "Is `form_question` answered by uploading the candidate's resume (CV), or by choosing "
-                         "among uploaded resume files?"})
-        if q.kind == "file":
-            qs[f"cover_{i}"] = decide.noul({"upload": q.question, "question": "Does `upload` ask for a cover letter?"})
-    a = decide.current().ask("questions", {"page": p.title, "url": p.url}, qs)
-    for i, q in enumerate(pa.questions):
-        q.resume_upload = a[f"resume_{i}"].yes(T["resume_upload"])
-        q.cover_letter = f"cover_{i}" in a and a[f"cover_{i}"].yes(T["cover_letter"])
+    """Code rule: flag resume-upload questions and cover-letter uploads. No model call."""
+    for q in pa.questions:
+        text = q.question or ""
+        q.resume_upload = bool(pages._RESUME_RE.search(text)) or any(
+            pages.RESUME_FILE_RE.search(o) for o in (q.options or []))
+        q.cover_letter = q.kind == "file" and bool(_COVER_LETTER_RE.search(text))
 
 
 def _held(e, v: Verdicts) -> str:
@@ -389,7 +636,7 @@ def _held(e, v: Verdicts) -> str:
 
 
 def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today: date,
-                  verdicts: Verdicts | None = None) -> list[Question]:
+                  verdicts: Verdicts | None = None, current_values: dict[str, str] | None = None) -> list[Question]:
     """Apply §7 checks in place (a failed check sets answer=None with a note).
     Returns the generated questions whose relies_on/length failed — the caller regenerates them once.
 
@@ -399,6 +646,7 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
     would set — the field's own options or current value, the targeted radio's own label — not by the echoed list;
     and a required field that already holds a value keeps it when no valid answer is left."""
     v = verdicts if verdicts is not None else judge_answers(pa, p)
+    current_values = current_values or {}
     labels = norm(p.text).lower() + " " + " ".join(
         [norm(e.name).lower() for e in p.elements] + [norm(e.label).lower() for e in p.elements if e.label]
         + [norm(o.label).lower() for e in p.elements for o in e.options if o.label])
@@ -439,6 +687,15 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
             # a custom widget: the answer itself must be on the page
             if norm(q.answer).lower() not in labels:
                 _drop(q, "answer not on the page")
+                continue
+        elif q.kind == "choice" and not q.options and not el and not opt:
+            # a radio group whose ref is null: the answer must be one of the group's options (live 2026-09-23)
+            cur = (current_values or {}).get(q.id, "")
+            if cur and norm(q.answer).lower() == norm(cur).lower():
+                q.source, q.quote = "linkedin-prefill", None
+                q.note = "kept the value the page already holds"
+            else:
+                _drop(q, "answer is not one of the page's options")
                 continue
             match = [o for o in q.options if norm(o).lower() == norm(q.answer).lower()]
             q.answer = match[0] if match else q.answer
@@ -482,23 +739,29 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
 
 def answer_page(p: Page, src: Sources, *, key: str, models: Rotation | str | list[str], policy: Policy,
                 today: date | None = None, url: str = OPENROUTER_CHAT, post: Callable | None = None) -> PageAnswers:
-    """Call the engine, run the checks, regenerate bad generated texts once, check again. `models` rotate
+    """Code extracts questions, the model answers them, checks run in code (P3 T4). `models` rotate
     (rotation.py): pass one Rotation for a whole run so each page starts at the model that answered last."""
     today = today or date.today()
+    ext = extract_questions(p)
+    qs = _questions_for_model(ext, p)
+    if not qs:
+        return PageAnswers(questions=[])
     system = system_prompt(policy.free_text_max_chars)
-    user = {"page": page_payload(p), "sources": {"profile": src.profile, "job": src.job, "resume": src.resume}}
+    user = {"page": {"url": p.url, "title": p.title}, "questions": qs,
+            "sources": {"profile": src.profile, "job": src.job, "resume": src.resume}}
     models = models if isinstance(models, Rotation) else Rotation(models)
-    pa = call_engine(key=key, models=models, system=system, user=user, url=url, post=post)
-    verdicts = judge_answers(pa, p)
+    pa = _merge_answers(ext.questions, call_engine(key=key, models=models, system=system, user=user, url=url,
+                                                    post=post, schema=ANSWER_SCHEMA, response_cls=ModelResponse))
+    verdicts = judge_answers(pa, p, ext.current_values)
     bad = check_answers(pa, p, src, policy, today, verdicts)
     if bad:
         user["regenerate"] = {"questions": [q.question for q in bad],
                               "reason": "relies_on must be exact sentences from the sources and the text must fit "
                                         "its length limit; answer these again"}
-        again = {norm(q.question): q for q in call_engine(key=key, models=models, system=system, user=user,
-                                                          url=url, post=post).questions}
+        again = {a.id: a for a in call_engine(key=key, models=models, system=system, user=user, url=url,
+                                              post=post, schema=ANSWER_SCHEMA, response_cls=ModelResponse).answers}
         for q in bad:
-            new = again.get(norm(q.question))
+            new = again.get(q.id)
             if new and new.source == "generated":
                 q.answer, q.relies_on = new.answer, new.relies_on
             else:
@@ -506,6 +769,7 @@ def answer_page(p: Page, src: Sources, *, key: str, models: Rotation | str | lis
         still = check_answers(PageAnswers(questions=bad), p, src, policy, today, verdicts)
         for q in still:
             _drop(q, "generated text failed its checks twice")
+    _set_option_refs(pa, ext.option_maps, p)
     return pa
 
 

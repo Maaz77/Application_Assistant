@@ -1,0 +1,93 @@
+[
+  {
+    "page": 1,
+    "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+    "model": "mistral/mistral-small",
+    "question": "Email address*",
+    "answer": "abbaszadehmohammadamin@yahoo.com",
+    "ref": "e43",
+    "option_ref": "e43:1",
+    "source": "linkedin-prefill",
+    "quote": null,
+    "relies_on": null,
+    "note": null
+  },
+  {
+    "page": 1,
+    "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+    "model": "mistral/mistral-small",
+    "question": "Phone country code*",
+    "answer": "Italy (+39)",
+    "ref": "e44",
+    "option_ref": "e44:20",
+    "source": "linkedin-prefill",
+    "quote": null,
+    "relies_on": null,
+    "note": "pre-fill not kept; kept the value the page already holds"
+  },
+  {
+    "page": 1,
+    "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+    "model": "mistral/mistral-small",
+    "question": "Mobile phone number*",
+    "answer": "+39 351 935 8813",
+    "ref": "e45",
+    "option_ref": null,
+    "source": "profile",
+    "quote": "Phone: +39 351 935 8813",
+    "relies_on": null,
+    "note": null
+  },
+  {
+    "page": 2,
+    "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+    "model": "mistral/mistral-small",
+    "question": "Resume*",
+    "answer": null,
+    "ref": null,
+    "option_ref": null,
+    "source": null,
+    "quote": null,
+    "relies_on": null,
+    "note": null
+  },
+  {
+    "page": 3,
+    "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+    "model": "mistral/mistral-small",
+    "question": "Have you completed the following level of education: Bachelor's Degree?",
+    "answer": "Yes",
+    "ref": null,
+    "option_ref": "e149",
+    "source": "profile",
+    "quote": "**B.Sc. in Computer Engineering (majoring Software Engineering)** · Sep 2016 – Jun 2021",
+    "relies_on": null,
+    "note": "quote is from profile, not resume"
+  },
+  {
+    "page": 3,
+    "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+    "model": "mistral/mistral-small",
+    "question": "Are you comfortable working in an onsite setting?",
+    "answer": "Yes",
+    "ref": null,
+    "option_ref": "e151",
+    "source": "job",
+    "quote": "We're hiring one of our founding software engineers. You'd be working in person with the founders in our Dublin office, helping set the technical direction and the way we build.",
+    "relies_on": null,
+    "note": null
+  },
+  {
+    "page": 3,
+    "url": "https://www.linkedin.com/jobs/view/4470454940/?companyName=Linda+AI&trackingId=FPJuZgRQTKKEe2SzVJvo5w%3D%3D&applicantTrackingSystemName=LinkedIn",
+    "model": "mistral/mistral-small",
+    "question": "Are you legally authorized to work in Ireland?",
+    "answer": null,
+    "ref": null,
+    "option_ref": "e153",
+    "source": "profile",
+    "quote": "I only have work permit in Italy. For the rest of the countries, I will need visa sponsorship.",
+    "relies_on": null,
+    "note": "answer 'No' does not match the option it targets"
+  }
+]

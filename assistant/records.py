@@ -217,6 +217,10 @@ def needs_attention_note(na: NeedsAttention, when: datetime) -> str:
 def parked_note(parked, when: datetime) -> str:
     lines = [f"## {when:%Y-%m-%d %H:%M} — Pending Review",
              f"- Parked at: {parked.url} · \"{parked.title}\" · page {parked.pages}"]
+    if parked.parked_at:
+        lines.append("- Answer before you submit:")
+        for q in parked.parked_at:
+            lines.append(f"  - \"{q.question}\" — {q.kind}" + (f"; options: {' | '.join(q.options)}" if q.options else ""))
     for q, t in parked.generated:
         lines.append(f"- Generated for \"{q}\": {t[:200]}{'…' if len(t) > 200 else ''}")
     for q, v in parked.prefills:
