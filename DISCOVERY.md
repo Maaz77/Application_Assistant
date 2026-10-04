@@ -947,3 +947,42 @@ code `e44 "Italy (+39)"`. It does not cause this failure, but LinkedIn may rejec
 **P2 gate status: met** — driver, guard v2 and deterministic navigation work live; nothing is submitted;
 Genesys/Mastercard `external_ats`; Linda AI reaches and fills the Easy Apply form. Whether it now *parks* end-to-end
 (P3's bar) depends on LinkedIn accepting the phone at `Next`.
+
+---
+
+### 2026-10-04 — P4 T1a: React re-render invalidates radio option_ref (root cause of P3 broken_form)
+
+**Evidence:** `runs/20261001-214422/4470454940_Linda-AI_Founding-Software-Engineer/browser_actions.jsonl`
+line 112: `toggle e150,e152,e154 → 0/3 ops ok (target_changed)`.
+Line 116 (mismatch retry): same toggles → `3/3 ops ok` ✓.
+Yet `broken_form` still fires. `answers.json` shows `opt_ref: e150` (Yes, education), `opt_ref: e152` (Yes,
+onsite), `opt_ref: e154` (Yes, Ireland).
+
+**Root cause:** LinkedIn's radio groups re-render after each toggle, assigning new DOM refs.
+`mismatches.holds()` looked up the old `option_ref` (e.g. `e150`) in the post-re-render page, found it gone, and
+returned `False` — a false mismatch that triggered `broken_form` even though all three toggles succeeded.
+
+**Fix:** `mismatches.holds()` now has a label-scan fallback: when `q.option_ref` is set but the ref is gone from
+the page, scan for any checked toggle whose `name` matches `q.answer`. Correct because LinkedIn re-renders radio
+groups in place; the labels stay identical, only the refs change.
+Unit test: `test_mismatches_holds_after_radio_rerender`.
+
+---
+
+### 2026-10-04 — P4 T1b: typeahead combobox (no listed options) filled via type→poll→click
+
+LinkedIn Easy Apply uses comboboxes that type-filter their options dynamically (no static options in the DOM until
+the user types). `_code_how` returns "select", `_carry_out` returns None (no options), the item becomes a
+widget_item. `widgets._typeahead` types the answer, polls for `role=option` elements to appear, then clicks the
+best label match. `widget_poll_secs=3.0` is injectable (set to 0 in unit tests).
+Unit test: `test_typeahead_widget_fills_combobox`.
+
+---
+
+### 2026-10-04 — P4 T4: "Save this application?" dialog detected without clicking
+
+LinkedIn shows a "Save this application?" overlay when the Easy Apply dialog closes mid-fill (e.g. accidental close
+or session timeout). The correct action is to surface it as `NeedsAttention("dialog_closed", ...)` without clicking
+either button; the user decides whether to save or discard. Check added in `navigate.wait_for_dialog` (entry-time
+detection) and in `fill.run_pages` (mid-loop detection).
+Unit test: `test_save_application_dialog_raises_dialog_closed`.
