@@ -141,6 +141,7 @@ def _entry_choice(ctx, p: pages.Page) -> str:
 # control is present (the reminder renders "Dismiss" a beat before "Continue applying"), we wait for the proceed
 # control rather than click the wrong thing.
 PROCEED_RE = re.compile(r"^\s*(continue applying|continue to next step|continue)\b", re.I)
+_SAVE_APP_RE = re.compile(r"save this application", re.I)
 
 
 def _interstitial_control(p: pages.Page):
@@ -154,6 +155,11 @@ def _interstitial_control(p: pages.Page):
     return None
 
 
+def save_application_dialog(p: pages.Page) -> bool:
+    """The 'Save this application?' interstitial LinkedIn shows when the dialog is closed mid-fill."""
+    return bool(_SAVE_APP_RE.search(p.text))
+
+
 def wait_for_dialog(ctx, seconds: int = DIALOG_WAIT) -> pages.Page | None:
     """Read (no settle) until the Easy Apply dialog's fields appear. Click through an interstitial dialog (e.g.
     the "Job search safety reminder") that sits over the form by its Continue-applying control, once per control;
@@ -164,6 +170,8 @@ def wait_for_dialog(ctx, seconds: int = DIALOG_WAIT) -> pages.Page | None:
         p = _read(ctx)
         if dialog_is_open(p):
             return p
+        if save_application_dialog(p):
+            raise NeedsAttention("dialog_closed", "LinkedIn asked to save the application; did not dismiss")
         control = _interstitial_control(p)
         if control is not None and control.ref not in clicked:
             clicked.add(control.ref)

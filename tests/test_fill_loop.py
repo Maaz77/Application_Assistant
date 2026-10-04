@@ -214,17 +214,66 @@ def test_uncovered_required_question_goes_to_needs_attention(tmp_path):
 
 
 def test_required_widget_is_a_broken_form(tmp_path):
-    """P2: no page-goal fallback. A required answer that no op can set (a custom widget) is a blocker."""
+    """P4: a required widget the handlers don't support is a broken_form blocker."""
     answers = {"Data Engineer | Acme | LinkedIn": [
         Q("City", "Milan", ref="auto"),
-        Q("Work model", "Hybrid", kind="choice", ref="auto"),       # a combobox with no listed options
+        Q("Work model", "Hybrid", kind="choice", ref="auto"),       # combobox with no options → widget
         Q("Resume", None, kind="file", ref="auto", source=None)]}
     site = single_dialog()
-    site["s1"].els.insert(1, El("combobox", "Work model", required=True, dialog="d"))   # no options => a widget
+    site["s1"].els.insert(1, El("combobox", "Work model", required=True, dialog="d"))   # no options => widget
     browser, fake = fake_browser(site, "job")
     with pytest.raises(NeedsAttention) as exc:
-        run_pages(ctx_for(browser, answers, tmp_path))
+        run_pages(ctx_for(browser, answers, tmp_path, widget_poll_secs=0))
     assert exc.value.cls == "broken_form" and "widget" in exc.value.what and fake.sent == []
+
+
+def test_typeahead_widget_fills_combobox(tmp_path):
+    """P4 T1b: typeahead combobox is filled via type → poll for role=option → click match."""
+    answers = {"Data Engineer | Acme | LinkedIn": [
+        Q("City", "Milan", ref="auto"),
+        Q("Work model", "Hybrid", kind="choice", ref="auto"),
+        Q("Resume", None, kind="file", ref="auto", source=None)]}
+    site = single_dialog()
+    site["s1"].els.insert(1, El("combobox", "Work model", required=True, dialog="d"))
+    site["s1"].els.insert(2, El("option", "Hybrid", dialog="d"))   # typeahead suggestion
+    site["s1"].els.insert(3, El("option", "Remote", dialog="d"))
+    browser, fake = fake_browser(site, "job")
+    parked = run_pages(ctx_for(browser, answers, tmp_path, widget_poll_secs=0))
+    assert isinstance(parked, Parked) and fake.sent == []
+
+
+def test_mismatches_holds_after_radio_rerender(tmp_path):
+    """P4 T1a: React re-render invalidates option_ref; label-scan fallback reports holds correctly."""
+    from assistant.fill import mismatches
+    from assistant.llm_inference import PageAnswers
+    from assistant.browser import Element, Table
+    from assistant import pages
+
+    q = PageAnswers.model_validate({"questions": [
+        Q("Do you need a visa?", "No", kind="choice", ref=None, option_ref="e2")]}).questions[0]
+    # e2 gone after re-render; e5/e6 are the new refs, "No" is checked
+    p = pages.Page(url="x", title="t", text="",
+                   table=Table(url="x", elements=[
+                       Element(ref="e5", role="radio", name="Yes"),
+                       Element(ref="e6", role="radio", name="No", checked=True),
+                   ]))
+    assert mismatches([q], p) == []           # "No" is checked → holds via label scan
+    p.table.elements[1].checked = False
+    assert mismatches([q], p) == [q]          # nothing checked → mismatch
+
+
+def test_save_application_dialog_raises_dialog_closed(tmp_path):
+    """P4 T4: 'Save this application?' triggers dialog_closed NeedsAttention without any click."""
+    site = {
+        "job": posting(),
+        "s1": FakePage(LI, "Data Engineer | Acme | LinkedIn",
+                       "Save this application? You can continue later.",
+                       [El("button", "Save", dialog="d"),
+                        El("button", "Discard", dialog="d")])}
+    browser, fake = fake_browser(site, "job")
+    with pytest.raises(NeedsAttention) as exc:
+        run_pages(ctx_for(browser, {}, tmp_path))
+    assert exc.value.cls == "dialog_closed" and fake.sent == []
 
 
 def test_required_cover_letter_file_is_a_blocker(tmp_path):

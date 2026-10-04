@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from typing import Callable
 
-from assistant import decide, navigate, pages, tabs, guard
+from assistant import decide, navigate, pages, tabs, guard, widgets
 from assistant.llm_inference import (LONG_TEXT, LLMInferenceError, PageAnswers, Question, judge_questions,
                                uncovered_optional, uncovered_required)
 from assistant.decide import DecisionError
@@ -60,6 +60,7 @@ class JobCtx:
     last: Page | None = None
     sleep: Callable[[float], None] = time.sleep
     jev_budget: int = 40
+    widget_poll_secs: float = 3.0
     _jev_start: int = 0
 
     def read(self) -> Page:
@@ -359,6 +360,10 @@ def mismatches(items: list[Question], p: Page) -> list[Question]:
         opt = by_ref.get(q.option_ref or "")
         if opt is not None:
             return bool(opt.checked)
+        if q.option_ref:  # ref gone after React re-render — scan for checked toggle with matching label
+            label = pages.norm_label(q.answer or "")
+            return any(e.role in TOGGLES and bool(e.checked) and pages.norm_label(e.name) == label
+                       for e in p.elements)
         e = by_ref.get(q.ref or "")
         if e is None:
             return False
@@ -397,12 +402,12 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
     widget_items = [q for q, op in zip(items, plan) if op is None]               # not click/type/select/toggle/upload
     if direct:                                                                   # 3a: the code acts
         ctx.browser.act(direct, ctx.session, p.table, stop_on_error=False)
-    # P2: the page-goal fallback is gone. A widget answer (a custom date picker, autocomplete, …) stays empty
-    # and is listed in the note; a REQUIRED widget is a blocker (P4 adds the widget handlers).
     for q in widget_items:
         if q.required and not _wrapper_types(q):
-            raise NeedsAttention("broken_form", f"widget not supported yet: {q.question!r}")
-        ctx.optional_empty.append(_open_q(q))
+            if not widgets.handle(ctx, p, q):
+                raise NeedsAttention("broken_form", f"widget not supported: {q.question!r}")
+        else:
+            ctx.optional_empty.append(_open_q(q))
     ctx.filled_count += len(direct)
     ctx.optional_empty += [_open_q(q) for q in uncovered_optional(pa)]
     missing = [q for q in uncovered_required(pa) if not (resume_in_place and is_resume_question(q))]
@@ -523,6 +528,8 @@ def run_pages(ctx: JobCtx) -> Parked:
             p = ctx.read()
             if entered and pages.ALARM_RE.search(p.text):        # §4.6 safety floor, only after we have acted
                 raise StopRun(f"ALARM: confirmation text on {p.url}")
+            if entered and navigate.save_application_dialog(p):
+                raise NeedsAttention("dialog_closed", "LinkedIn asked to save the application")
             if not entered:
                 if navigate.enter(ctx, p) == "form":             # raises closed/applied/external_ats/navigation
                     entered, filled = True, False
