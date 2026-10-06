@@ -15,7 +15,7 @@ from assistant import config as config_mod
 from assistant import decide
 from assistant import inference_log
 from assistant import pages, records, tabs
-from assistant.llm_inference import (LLMInferenceError, Policy, Sources, answer_page, call_engine, resume_text,
+from assistant.llm_inference import (LLMInferenceError, Policy, Sources, answer_page, call_engine,
                                      system_prompt)
 from assistant.rotation import Rotation
 from assistant import gateway as gateway_mod
@@ -23,12 +23,12 @@ from assistant.blockers import NeedsAttention, Parked, RestartFromEntry, StopRun
 from assistant.fill import JobCtx, run_pages
 from assistant.browser import Browser, DriverError, split_json
 from assistant.report import EXIT_PREFLIGHT, EXIT_STOPPED, JobResult, Report
-from assistant.tracker import NEEDS_ATTENTION, PENDING_REVIEW, Tracker, TrackerError
+from assistant.tracker import NEEDS_ATTENTION, PENDING_REVIEW, RESUME_BUILT, Tracker, TrackerError, job_id
 
 RUNS = config_mod.TOOL_DIR / "runs"
 CAPTURED = config_mod.TOOL_DIR / "tests" / "captured"
 LINKEDIN_FEED = "https://www.linkedin.com/feed/"
-CONNECT_TIMEOUT = 180.0     # s: the first connection may wait for a person to allow remote debugging in Chrome
+CONNECT_TIMEOUT = 20.0     # s: the first connection may wait for a person to allow remote debugging in Chrome
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -185,7 +185,11 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
     pdf = job.resume_pdf()                                              # before any browser work
     S = f"job-{job.key}"
     baseline = book.handles()
-    src = Sources(profile=profile, job=job.job_md.read_text(), resume=resume_text(pdf))
+    # The resume is uploaded to the form but its extracted text is NOT a source (user decision 2026-10-06):
+    # Profile.md is the one document the user maintains for this, and a PDF's extracted text was giving the
+    # model a second, differently-worded copy of the same facts to splice quotes across. `pdf` is still read
+    # above, because the file itself is what gets uploaded.
+    src = Sources(profile=profile, job=job.job_md.read_text(), resume="")
     policy = Policy(cfg.policy.prefill, cfg.policy.free_text_max_chars)
     engines = engines or Rotation(cfg.models.llm_inference)
 
@@ -241,11 +245,54 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
 def _queue(cfg: config_mod.Config, tracker: Tracker, job_url: str | None, limit: int | None) -> records.Queue:
     q = records.build_queue(cfg.path("applications"), tracker)
     if job_url:
-        from assistant.tracker import job_id
         q.jobs = [j for j in q.jobs if j.key == job_id(job_url)]
     if limit is not None:
         q.jobs = q.jobs[:limit]
     return q
+
+
+def _folder_in(cfg: config_mod.Config, which: str, key: str) -> bool:
+    d = cfg.path(which)
+    if not d.exists():
+        return False
+    return any((j := records.Job.from_dir(p)) is not None and j.key == key
+               for p in d.iterdir() if p.is_dir())
+
+
+def _why_not_queued(cfg: config_mod.Config, tracker: Tracker, key: str) -> str:
+    """Why `--job` matched no queued job. One line, naming the way out where there is one.
+
+    `--job` filters the queue, it does not bypass it: a job is only queueable while its folder is in
+    Applications/ and its tracker row is 'Resume Built' (or absent). Finding none used to be silent."""
+    if _folder_in(cfg, "needs_attention", key):
+        return ("its folder is in Needs-Attention/ — put it back in the queue first: "
+                f"python -m assistant requeue --job {key}")
+    if _folder_in(cfg, "pending_review", key):
+        return "its folder is in Pending-Review/ — it is already parked, waiting for you to submit it"
+    hit = tracker.find(key)
+    if hit is None:
+        return "no folder in Applications/ and no tracker row has that job id — check the URL"
+    status = hit[1].get("Status")
+    if status != RESUME_BUILT:
+        return f"its tracker row says Status {status!r}, and only {RESUME_BUILT!r} is queued"
+    return f"its tracker row is {RESUME_BUILT!r} but it has no folder in Applications/"
+
+
+def _report_queue(cfg: config_mod.Config, tracker: Tracker, q: records.Queue, job_url: str | None) -> str | None:
+    """Print what the queue came to, and return the reason when `--job` matched nothing.
+
+    Anomalies used to reach the terminal on `--dry-run` only, so a real run that skipped every job looked
+    like a run that had nothing to do (live 2026-10-06)."""
+    for a in q.anomalies:
+        print(f"⚠ queue anomaly: {a}")
+    if q.jobs:
+        return None
+    if job_url:
+        why = _why_not_queued(cfg, tracker, job_id(job_url))
+        print(f"✗ --job {job_url}: no queued job has that id — {why}")
+        return why
+    print("• nothing to do: no folder in Applications/ is at 'Resume Built'")
+    return None
 
 
 def dry_run(cfg: config_mod.Config, args) -> int:
@@ -258,11 +305,9 @@ def dry_run(cfg: config_mod.Config, args) -> int:
     print(f"Queue ({len(q.jobs)} job{'s' if len(q.jobs) != 1 else ''}):")
     for j in q.jobs:
         print(f"  • {j.label}  {j.linkedin_url}  [{j.folder}]" + ("  (new tracker row)" if j.key in q.new_rows else ""))
-    if q.anomalies:
-        print("Anomalies:")
-        for a in q.anomalies:
-            print(f"  - {a}")
-    return 0
+    # Same reporting as a real run, so `--dry-run --job …` is the free way to find this out (it costs no
+    # preflight: a real run only discovers an empty queue after it has probed every model).
+    return EXIT_PREFLIGHT if _report_queue(cfg, tracker, q, args.job) else 0
 
 
 def connect_once(browser: Browser) -> None:
@@ -314,6 +359,7 @@ def run(cfg: config_mod.Config, args) -> int:
             report.recovered = records.recover(RUNS, tracker)
         q = _queue(cfg, tracker, args.job, args.limit)
         report.anomalies = q.anomalies
+        report.nothing_matched = _report_queue(cfg, tracker, q, args.job)
         recorder = records.Recorder(tracker, records.Journal(run_dir / "journal.jsonl"), cfg.base_dir(),
                                     cfg.path("pending_review"), cfg.path("needs_attention"), set(q.new_rows))
         profile = cfg.path("profile").read_text()

@@ -139,6 +139,12 @@ class FakeSession:
             for x in self._page.els:
                 if x.group == e.group:
                     x.checked = x is e
+        if e.role == "option":          # a typeahead writes the picked suggestion into its own combobox,
+            els = self._page.els        # so the read-back sees the expanded label, not what was typed
+            combo = next((x for x in reversed(els[:els.index(e)])
+                          if x.role == "combobox" and x.dialog == e.dialog), None)
+            if combo is not None:
+                combo.value = e.name
         if e.goto:
             self.mgr.cur = e.goto
         return None

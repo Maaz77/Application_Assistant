@@ -237,7 +237,7 @@ def replay_job(path, *, mode: str = "strict", cfg=None) -> int:
     from datetime import date
     from assistant import config as config_mod, decide, gateway as gw_mod, guard, inference_log, pages
     from assistant.fill import JobCtx, run_pages
-    from assistant.llm_inference import Policy, Sources, answer_page, resume_text
+    from assistant.llm_inference import Policy, Sources, answer_page
     from assistant.rotation import Rotation
     from assistant.blockers import NeedsAttention, Parked
     from assistant.records import Job
@@ -268,7 +268,7 @@ def replay_job(path, *, mode: str = "strict", cfg=None) -> int:
     job = Job(dir=job_dir, linkedin_url=url, company="replay", title="replay")
     pdf = job.resume_pdf()
     profile = cfg.path("profile").read_text()
-    src = Sources(profile=profile, job=job.job_md.read_text(), resume=resume_text(pdf))
+    src = Sources(profile=profile, job=job.job_md.read_text(), resume="")   # as cli.process builds it
     policy = Policy(cfg.policy.prefill, cfg.policy.free_text_max_chars)
     engines = Rotation(cfg.models.llm_inference)
     key = config_mod.chat_key(cfg)

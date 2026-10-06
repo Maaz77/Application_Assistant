@@ -355,6 +355,56 @@ def test_a_quote_that_differs_only_in_formatting_still_counts():
     assert email.answer == "amin@example.com" and email.note is None
 
 
+def test_an_option_answer_survives_a_citation_that_is_not_verbatim():
+    """Linda AI, live 2026-10-06. "Have you completed the following level of education: Bachelor's Degree?" was
+    answered "Yes" twice and dropped twice as "quote not found in the sources", so the required radio stayed empty
+    and the job ended as broken_form. Neither failure was about formatting (`quoted_in` already ignores case,
+    spacing and punctuation): attempt 1 cited the resume and spliced "Jun" into its date range, attempt 2 cited
+    Profile.md and elided "(Final Grade: 100/110)" from the middle of the line. An insertion or an omission inside
+    a quote is not a contiguous substring at all.
+
+    A `choice` answer no longer needs the quote, because it has to be one of the page's own options instead — but
+    the record keeps the citation and says it was not confirmed.
+    """
+    profile = "**M.Sc. in Computer Science and Engineering (majoring Artificial Intelligence)** " \
+              "(Final Grade: 100/110) · Sep 2022 – Dec 2025"
+    src = Sources(profile, "", "")
+    elided = "M.Sc. in Computer Science and Engineering (majoring Artificial Intelligence) " \
+             "· Sep 2022 – Dec 2025"
+    assert not A.quoted_in(elided, profile)        # the normalisation cannot save an elision; that is the bug
+
+    page = Page(url="https://linda.ai/apply", title="Apply",
+                text="Have you completed the following level of education: Bachelor's Degree? Yes No",
+                table=Table(url="https://linda.ai/apply", elements=[
+                    Element(ref="e147", role="radio", name="Have you completed the following level of "
+                            "education: Bachelor's Degree?", label="Yes"),
+                    Element(ref="e148", role="radio", name="Have you completed the following level of "
+                            "education: Bachelor's Degree?", label="No"),
+                ]))
+    pa = PageAnswers.model_validate({"questions": [
+        q(id="r_e147", question="Have you completed the following level of education: Bachelor's Degree?",
+          kind="choice", options=["Yes", "No"], answer="Yes", source="profile", quote=elided)]})
+    check_answers(pa, page, src, Policy(), TODAY)
+    kept = pa.questions[0]
+    assert kept.answer == "Yes"                                    # the fix: no longer dropped
+    assert kept.quote == elided and "not verbatim" in kept.note    # but the record still says so
+
+
+def test_free_text_still_needs_a_verbatim_quote():
+    """The relaxation is scoped to `choice`. Free text has no second kind of evidence, so an unverifiable
+    citation still drops it — otherwise the model could type any fact into the form."""
+    (invented,), _ = run(q(question="Notice period", ref="e2", answer="6 weeks", source="profile",
+                           quote="My notice period is six weeks."))
+    assert invented.answer is None and "quote not found" in invented.note
+
+
+def test_an_option_answer_off_the_page_is_still_dropped():
+    """Skipping the quote must not make a `choice` answer evidence-free: the option check is what replaces it."""
+    (bad,), _ = run(q(question="Work model", kind="choice", ref="e4", options=["Remote", "Hybrid"],
+                      answer="Anywhere", source="profile", quote="not in any source"))
+    assert bad.answer is None and "not one of the field's options" in bad.note
+
+
 # ------------------------------------------------------------------ extraction tests (T6)
 
 def test_extract_questions_ids_are_stable():
