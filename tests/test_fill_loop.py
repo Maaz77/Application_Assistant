@@ -4,7 +4,7 @@ replaced by tests/test_navigate.py (which drives the real driver against the Eas
 import pytest
 
 from assistant.llm_inference import PageAnswers
-from assistant.blockers import NeedsAttention, Parked
+from assistant.blockers import GoExternal, NeedsAttention, Parked
 from assistant.fill import JobCtx, run_pages
 from tests.fake_browser import El, FakeBook, FakePage, fake_browser
 
@@ -182,13 +182,16 @@ def test_refill_reenters_and_easy_apply_stays_clickable(tmp_path):
                    for _, op in fake.log)
 
 
-def test_external_apply_is_external_ats(tmp_path):
+def test_external_apply_signals_go_external(tmp_path):
+    """P5 (was test_external_apply_is_external_ats): a bare external Apply makes run_pages raise GoExternal,
+    so process() hands the job to external.run_external instead of dead-ending as external_ats. The posting
+    is not submitted and nothing is sent to the model from the Easy-Apply loop."""
     site = {"job": FakePage(LI, "Data Engineer | Acme | LinkedIn", "Data Engineer | Acme.",
                             [El("link", "Apply"), El("button", "Save")])}
     browser, fake = fake_browser(site, "job")
-    with pytest.raises(NeedsAttention) as exc:
+    with pytest.raises(GoExternal):
         run_pages(ctx_for(browser, {}, tmp_path))
-    assert exc.value.cls == "external_ats" and fake.sent == []
+    assert fake.sent == []
 
 
 def test_closed_posting_is_needs_attention(tmp_path):

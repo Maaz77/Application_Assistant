@@ -541,6 +541,18 @@ def classify(p: Page) -> Verdict:
 
 # ------------------------------------------------------------------ §6.4 gate
 
+def forward_submit(p: Page) -> bool:
+    """A control that would submit the application: a submit-like control (guard._submit_like), or an
+    apply-labelled forward control such as Greenhouse's 'Apply now!'. The guard still never clicks it
+    (never_click_element refuses it); this only lets an external final page pass the gate so it parks,
+    instead of failing 'no submit button'. Kept out of _submit_like so a LinkedIn posting's top-card
+    'Apply' does not turn every posting into final_step."""
+    if judge(p).submit_button:
+        return True
+    return any(e.role in CONTROL_ROLES and guard.APPLY_RE.search(f"{e.name or ''} {e.value or ''}")
+               for e in p.elements)
+
+
 def gate(p: Page, resume_name: str, typed: dict[str, str]) -> str | None:
     """None if the final page may be parked, else the first failed check. `typed` = ref → generated text."""
     if p.required_empty.get("n"):
@@ -551,7 +563,7 @@ def gate(p: Page, resume_name: str, typed: dict[str, str]) -> str | None:
     stem = resume_name[:30]
     if stem not in p.text and not any(stem in (e.value or "") for e in p.elements):
         return f"resume file name {stem!r} not on the page"
-    if not judge(p).submit_button:
+    if not forward_submit(p):
         return "no submit button on the final page"
     if is_alarm(p):
         return "confirmation text on page"

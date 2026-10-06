@@ -14,7 +14,7 @@ import re
 import time
 
 from assistant import decide, guard, pages
-from assistant.blockers import NeedsAttention
+from assistant.blockers import GoExternal, NeedsAttention
 
 # Entry signals (top-card controls + page text). Matched on the observer's name (aria-label wins).
 EASY_APPLY_RE = re.compile(r"^\s*easy apply\b", re.I)
@@ -105,9 +105,11 @@ def enter(ctx, p: pages.Page) -> str:
         raise NeedsAttention("closed", "LinkedIn says this job is no longer accepting applications")
     if APPLIED_RE.search(p.text):
         raise NeedsAttention("applied", "LinkedIn says you have already applied to this job")
-    # 4. external ATS (an Apply that is not Easy Apply): never click it (D12).
+    # 4. external ATS (an Apply that is not Easy Apply). From P5 we follow it: hand the job off to the
+    # external tab and drive it with external.run_external (the caller catches this signal). Pre-P5 (D12)
+    # this was a dead-end NeedsAttention("external_ats").
     if external_apply(p) is not None:
-        raise NeedsAttention("external_ats", "external ATS, not yet supported")
+        raise GoExternal()
     # 5. a cookie banner: decline it, then look again.
     c = cookie_reject(p)
     if c is not None:

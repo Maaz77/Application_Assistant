@@ -593,17 +593,21 @@ def run_pages(ctx: JobCtx) -> Parked:
             raise _where(na, ctx) from exc
         raise RestartFromEntry(str(exc)) from exc
     except ParkedAtQuestion as exc:
-        # T5: unanswered required question — park the job with the question noted
-        p = ctx.last
-        shot = ""
-        if ctx.shots_dir:
-            ctx.shots_dir.mkdir(parents=True, exist_ok=True)
-            shot = str(ctx.shots_dir / "screenshot.jpg")
-            ctx.browser.act([{"op": "screenshot", "path": shot, "full": True}], ctx.session, p.table,
-                            observe_after=False, stop_on_error=False)
-        return Parked(url=p.url, title=p.title, pages=ctx.pages + 1, generated=ctx.generated, prefills=ctx.prefills,
-                      optional_empty=ctx.optional_empty, parked_at=exc.missing, screenshot=shot)
+        return park_at_question(ctx, exc)
     return _park(ctx)
+
+
+def park_at_question(ctx: JobCtx, exc: ParkedAtQuestion) -> Parked:
+    """T5: a required question had no answer — park the (otherwise filled) page with the questions noted."""
+    p = ctx.last
+    shot = ""
+    if ctx.shots_dir:
+        ctx.shots_dir.mkdir(parents=True, exist_ok=True)
+        shot = str(ctx.shots_dir / "screenshot.jpg")
+        ctx.browser.act([{"op": "screenshot", "path": shot, "full": True}], ctx.session, p.table,
+                        observe_after=False, stop_on_error=False)
+    return Parked(url=p.url, title=p.title, pages=ctx.pages + 1, generated=ctx.generated, prefills=ctx.prefills,
+                  optional_empty=ctx.optional_empty, parked_at=exc.missing, screenshot=shot)
 
 
 def _attempt2(ctx: JobCtx, p: Page, cls: str, detail: str) -> None:

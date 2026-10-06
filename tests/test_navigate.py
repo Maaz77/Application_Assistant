@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from assistant import guard, navigate, pages
-from assistant.blockers import NeedsAttention
+from assistant.blockers import GoExternal, NeedsAttention
 from assistant.browser import Browser
 from tests.support import CDP_URL, FixtureServer
 
@@ -43,12 +43,14 @@ def test_entry_helpers_classify_the_posting(nav_browser, fixture_server):
     assert navigate.easy_apply_button(p603) is None and navigate.APPLIED_RE.search(p603.text)
 
 
-def test_external_apply_is_needs_attention(nav_browser, fixture_server):
+def test_external_apply_raises_go_external(nav_browser, fixture_server):
+    """P5 (was test_external_apply_is_needs_attention): an external, non-Easy-Apply Apply is no longer a
+    dead-end — enter() signals GoExternal, and the caller hands the job off to the external tab
+    (external.run_external). The posting itself is never submitted."""
     ctx = ctx_for(nav_browser)
     p = read(nav_browser, fixture_server, "4012345604-external")
-    with pytest.raises(NeedsAttention) as exc:
+    with pytest.raises(GoExternal):
         navigate.enter(ctx, p)
-    assert exc.value.cls == "external_ats"
     assert fixture_server.posts() == []
 
 

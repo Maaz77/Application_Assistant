@@ -152,12 +152,22 @@ class Session:
         self._known_targets = {tab["target_id"] for tab in self.tabs}
 
     def adopt(self, target_id: str) -> None:
-        """Attach this session to an existing page target (used to drive a tab the page opened)."""
+        """Attach this session to an existing page target (used to drive a tab the page opened).
+
+        Mirrors _attach_page's capability setup: without the focus emulation and the device-metrics override a
+        background adopted tab is treated as unfocused/zero-size, and React inputs there silently drop typed
+        values (read-back mismatch → broken_form on every external ATS form). addScriptToEvaluateOnNewDocument
+        keeps the observer present across the tab's own later navigations (P5)."""
         self.target_id = target_id
         self.page_session = self.cdp.call(
             "Target.attachToTarget", targetId=target_id, flatten=True)["sessionId"]
         self.cdp.call("Page.enable", session_id=self.page_session)
         self.cdp.call("Runtime.enable", session_id=self.page_session)
+        width, height = self.cfg.window
+        self.cdp.call("Emulation.setDeviceMetricsOverride", session_id=self.page_session,
+                      width=width, height=height, deviceScaleFactor=1, mobile=False)
+        self.cdp.call("Emulation.setFocusEmulationEnabled", session_id=self.page_session, enabled=True)
+        self.cdp.call("Page.addScriptToEvaluateOnNewDocument", session_id=self.page_session, source=HELPER_SRC)
         self._ensure_helper()
         self.last = None
         self._refresh_tabs()

@@ -43,6 +43,11 @@ class RestartFromEntry(Exception):
     """Load failure, attempt 2: reopen the job from its LinkedIn URL."""
 
 
+class GoExternal(Exception):
+    """The LinkedIn posting's apply control leads off LinkedIn (P5). Signal (not a blocker): the caller hands
+    the job off to the external tab and drives it with external.run_external instead of the Easy Apply loop."""
+
+
 @dataclass
 class Parked:
     url: str

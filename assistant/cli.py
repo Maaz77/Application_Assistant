@@ -19,8 +19,9 @@ from assistant.llm_inference import (LLMInferenceError, Policy, Sources, answer_
                                      system_prompt)
 from assistant.rotation import Rotation
 from assistant import gateway as gateway_mod
-from assistant.blockers import NeedsAttention, Parked, RestartFromEntry, StopRun
+from assistant.blockers import GoExternal, NeedsAttention, Parked, RestartFromEntry, StopRun
 from assistant.fill import JobCtx, run_pages
+from assistant import external
 from assistant.browser import Browser, DriverError, split_json
 from assistant.report import EXIT_PREFLIGHT, EXIT_STOPPED, JobResult, Report
 from assistant.tracker import NEEDS_ATTENTION, PENDING_REVIEW, RESUME_BUILT, Tracker, TrackerError, job_id
@@ -218,6 +219,8 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
                 raise StopRun("LinkedIn is signed out (C19); the job was left untouched")
             try:
                 return run_pages(ctx)                          # navigate.py decides entry, then fills
+            except GoExternal:
+                return external.run_external(ctx)              # P5: the apply control leads off LinkedIn
             except RestartFromEntry as exc:
                 if attempt == 2:
                     raise NeedsAttention("load_failure", f"{exc} (after 2 attempts)") from exc
