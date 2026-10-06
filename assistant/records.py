@@ -151,13 +151,26 @@ def recover(runs_dir: Path, tracker: Tracker) -> list[str]:
 # ------------------------------------------------------------------ requeue
 
 NA_NOTE_RE = re.compile(r"^Needs Attention: .*$\n?", re.M)
+NA_CLASS_RE = re.compile(r"^Needs Attention:\s*(\S+)", re.M)                 # the class in the tracker Notes line
+NA_HEADING_CLASS_RE = re.compile(r"— Needs Attention:\s*(\S+)")              # ...or the job.md heading (fallback)
+
+
+def recorded_class(notes: str | None, job: Job) -> str | None:
+    """The Needs-Attention class a run recorded for this job: from the tracker Notes line (authoritative), else
+    the last `## … — Needs Attention: <cls>` heading in job.md (for a row whose Notes were edited by hand)."""
+    m = NA_CLASS_RE.search(notes or "")
+    if m:
+        return m.group(1)
+    heads = NA_HEADING_CLASS_RE.findall(job.job_md.read_text() if job.job_md.exists() else "")
+    return heads[-1] if heads else None
 
 
 def requeue(tracker: Tracker, journal: Journal, needs_dir: Path, applications: Path,
-            key: str | None = None) -> list[str]:
-    """Put Needs-Attention jobs back in the queue (all, or only `key`): Status back to Resume Built, the
-    "Needs Attention: …" line a run added to Notes removed, the folder moved back to Applications/. Journaled like
-    a record, so recover() completes an interrupted requeue. job.md keeps its notes: they are the job's history."""
+            key: str | None = None, klass: str | None = None) -> list[str]:
+    """Put Needs-Attention jobs back in the queue (all, or only `key`, or only those a run recorded under the
+    class `klass` — e.g. external_ats, T6): Status back to Resume Built, the "Needs Attention: …" line a run
+    added to Notes removed, the folder moved back to Applications/. Journaled like a record, so recover()
+    completes an interrupted requeue. job.md keeps its notes: they are the job's history."""
     done = []
     for d in sorted(p for p in needs_dir.iterdir() if p.is_dir()) if needs_dir.exists() else []:
         job = Job.from_dir(d)
@@ -166,6 +179,8 @@ def requeue(tracker: Tracker, journal: Journal, needs_dir: Path, applications: P
         hit = tracker.find(job.key)
         if hit is None:
             done.append(f"skipped {d.name}: no tracker row")
+            continue
+        if klass and recorded_class(hit[1].get("Notes"), job) != klass:
             continue
         dst = applications / d.name
         if dst.exists():

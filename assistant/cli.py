@@ -52,6 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--live", action="store_true", help="call real APIs on cache miss and save to fixture")
     req = sub.add_parser("requeue", help="put Needs-Attention jobs back in the queue (status Resume Built)")
     req.add_argument("--job", metavar="URL", help="only the job with this LinkedIn URL")
+    req.add_argument("--class", dest="klass", metavar="CLASS",
+                     help="only jobs a run recorded under this Needs-Attention class (e.g. external_ats)")
     return p
 
 
@@ -464,15 +466,16 @@ def capture(cfg: config_mod.Config, url: str) -> int:
     return 0
 
 
-def requeue(cfg: config_mod.Config, job_url: str | None) -> int:
-    """Needs-Attention/ → Applications/ with Status back to Resume Built; the tracker is backed up first."""
+def requeue(cfg: config_mod.Config, job_url: str | None, klass: str | None = None) -> int:
+    """Needs-Attention/ → Applications/ with Status back to Resume Built; the tracker is backed up first.
+    `klass` limits it to the jobs a run recorded under that class (T6: `--class external_ats`)."""
     from assistant.tracker import job_id
     run_dir = RUNS / f"{datetime.now():%Y%m%d-%H%M%S}-requeue"
     try:
         tracker = Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
         tracker.backup(run_dir / "tracker-backup.numbers")
         lines = records.requeue(tracker, records.Journal(run_dir / "journal.jsonl"), cfg.path("needs_attention"),
-                                cfg.path("applications"), job_id(job_url) if job_url else None)
+                                cfg.path("applications"), job_id(job_url) if job_url else None, klass)
     except (TrackerError, StopRun) as exc:
         print(f"✗ {exc}")
         return EXIT_STOPPED
@@ -499,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "capture":
         return capture(cfg, args.url)
     if args.cmd == "requeue":
-        return requeue(cfg, args.job)
+        return requeue(cfg, args.job, args.klass)
     if args.cmd == "replay":
         from tests.replay.harness import replay_job
         return replay_job(args.path, mode="live" if args.live else "strict", cfg=cfg)

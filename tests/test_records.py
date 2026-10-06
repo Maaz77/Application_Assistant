@@ -219,3 +219,31 @@ def test_requeue_moves_needs_attention_jobs_back_and_resets_their_row(ws):
         == ["4100000001"]
     events = [json.loads(l)["event"] for l in (ws / "runs/2/journal.jsonl").read_text().splitlines()]
     assert events == ["record_start", "tracker_saved", "folder_moved", "record_done"]
+
+
+def test_requeue_class_moves_only_that_class(ws):
+    """T6: `requeue --class external_ats` moves back only the jobs a run recorded under that class."""
+    t = Tracker(ws / "Job_Tracker.numbers").load()
+    q = build_queue(ws / "Applications", t)
+    rec = Recorder(t, Journal(ws / "runs/1/journal.jsonl"), ws, ws / "Pending-Review", ws / "Needs-Attention",
+                   new_rows=set(q.new_rows))
+    ext, other = q.jobs                                              # 4100000001, 4100000009
+    rec.record(ext, NEEDS_ATTENTION, "## n", "Needs Attention: external_ats — external ATS, not yet supported")
+    rec.record(other, NEEDS_ATTENTION, "## n", "Needs Attention: navigation — no form")
+    lines = records.requeue(Tracker(ws / "Job_Tracker.numbers").load(), Journal(ws / "runs/2/journal.jsonl"),
+                            ws / "Needs-Attention", ws / "Applications", klass="external_ats")
+    assert lines == [f"requeued {ext.folder}"]
+    assert (ws / "Applications" / ext.folder).exists()
+    assert (ws / "Needs-Attention" / other.folder).exists()         # the navigation job stays put
+    reloaded = Tracker(ws / "Job_Tracker.numbers").load()
+    assert reloaded.find(ext.key)[1]["Status"] == RESUME_BUILT
+    assert reloaded.find(other.key)[1]["Status"] == NEEDS_ATTENTION
+
+
+def test_recorded_class_falls_back_to_job_md_heading(ws):
+    """When the tracker Notes line was edited away, the class is read from the job.md heading."""
+    job = make_job(ws / "Needs-Attention", "4100000055", "Zeta", "SRE")
+    records.append_note(job / "job.md", "## 2026-10-07 09:00 — Needs Attention: external_ats\n- What: x")
+    j = Job.from_dir(job)
+    assert records.recorded_class(None, j) == "external_ats"
+    assert records.recorded_class("Needs Attention: captcha — robots", j) == "captcha"   # Notes wins
