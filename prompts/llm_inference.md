@@ -10,7 +10,7 @@ You receive JSON with:
   - `required`: true when the page marks it required (asterisk, "required", or listed in `required_empty`).
   - `current_value`: the value the field already holds (absent when empty).
   - `maxlength`: the field's character limit, when the page sets one (absent otherwise).
-- `sources`: `profile` (Profile.md: background, fit preferences, and a Scratch Pad of answers to recurring questions), `job` (job.md: the job description), `resume` (the tailored resume text).
+- `sources`: `profile` (Profile.md: background, fit preferences, and a Scratch Pad of answers to recurring questions), `job` (job.md: the job description), `resume` (the tailored resume text; **normally empty** — the resume is uploaded as a file, not given to you as text, so answer from `profile` and `job`).
 
 Return JSON matching the `page_answers` schema: `{"answers": [Answer, …]}`, one entry per question id.
 

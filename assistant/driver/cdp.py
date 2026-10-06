@@ -146,13 +146,24 @@ def attach_chrome(
 ) -> Cdp:
     """Connect to an already-running browser and turn on target discovery.
 
-    Three shapes are accepted:
-      * `ws://…/devtools/browser/<id>` — used as-is.
-      * `http://127.0.0.1:9222` — the classic `--remote-debugging-port` case, resolved through
-        `/json/version`.
-      * `http://127.0.0.1:9222` where `/json/version` answers 404 — what Chrome 144+ looks like. The
-        `chrome://inspect/#remote-debugging` server is WebSocket-only, so the port and browser WebSocket
-        path are read from `DevToolsActivePort` in the browser's data directory instead.
+    A `ws://…` / `wss://…` endpoint is used as it is. An `http://host:port` endpoint is resolved by
+    trying three things in order, because a debugging server can be reached in three different shapes:
+
+      1. **`/json/version`** — the classic `--remote-debugging-port` case, which answers with
+         `webSocketDebuggerUrl`.
+      2. **`DevToolsActivePort`** in the browser's data directory — for Chrome 144+, whose
+         `chrome://inspect/#remote-debugging` server is WebSocket-only and answers 404 to every HTTP
+         path. The file's two lines are the port and the browser WebSocket path.
+      3. **`ws://host:port/devtools/browser`** — the browser endpoint with no target id, used when
+         something *is* serving on the port but neither of the first two could name the endpoint.
+         This is the path that keeps the toggle working on macOS 26+, where Chrome's data directory is
+         protected: `stat` on `DevToolsActivePort` succeeds but `open` raises `EPERM` unless the caller
+         has Full Disk Access, so step 2 cannot read a file that is plainly there (live, Chrome 154 on
+         Darwin 27, 2026-10-06 — see DISCOVERY.md). Confirmed to upgrade and serve `Browser.getVersion`
+         and `Target.*` on that Chrome.
+
+    Step 3 only runs when step 1 proved something is listening, so a port with nothing behind it still
+    fails fast with `ChromeLaunchError` instead of hanging on a websocket handshake.
 
     Chrome asks the user to approve each new debugging client, so the socket is opened with a generous
     `open_timeout`: the handshake sits there until the approval dialog is answered.
@@ -161,16 +172,16 @@ def attach_chrome(
     if endpoint.startswith(("ws://", "wss://")) or not endpoint.startswith("http"):
         cdp = Cdp(endpoint, timeout=timeout, open_timeout=open_timeout)
     else:
-        ws_url = _from_json_version(endpoint, timeout)
+        ws_url, serving = _from_json_version(endpoint, timeout)
         if ws_url is None:
             ws_url = _from_active_port(endpoint, data_dirs or [])
+        if ws_url is None and serving:
+            ws_url = browser_ws(endpoint)
         if ws_url is None:
             raise ChromeLaunchError(
-                f"Cannot reach a CDP endpoint at {url}. Nothing answered /json/version, and no "
-                "DevToolsActivePort file was found in the usual browser data directories — so the "
-                "browser either is not running with debugging enabled, or keeps its data directory "
-                "somewhere else. If you enabled debugging with the chrome://inspect toggle, check that "
-                "it still says 'Server running at'."
+                f"Nothing is listening on {url}, so no browser there has debugging enabled. Either "
+                "start Chrome with --remote-debugging-port=9222, or turn the toggle on in "
+                "chrome://inspect/#remote-debugging and check that it still says 'Server running at'."
             )
         cdp = Cdp(ws_url, timeout=timeout, open_timeout=open_timeout)
     # Needed so Target.targetCreated events arrive (a tab opened by the page, P2 tab handling).
@@ -178,13 +189,31 @@ def attach_chrome(
     return cdp
 
 
-def _from_json_version(endpoint: str, timeout: float) -> str | None:
-    """The classic discovery path. Returns None when the server has no HTTP API."""
+BROWSER_WS_PATH = "/devtools/browser"   # the browser endpoint, with no target id (step 3 above)
+
+
+def browser_ws(endpoint: str) -> str:
+    """`ws://host:port/devtools/browser` for an `http://host:port` endpoint. No I/O."""
+    return "ws://" + (urllib.parse.urlparse(endpoint).netloc or "127.0.0.1:9222") + BROWSER_WS_PATH
+
+
+def _from_json_version(endpoint: str, timeout: float) -> tuple[str | None, bool]:
+    """The classic discovery path. Returns (ws_url, serving).
+
+    `serving` says whether anything answered on the port at all — including the 404 that Chrome's
+    WebSocket-only `chrome://inspect` server returns to every HTTP path. That is what tells a browser
+    with no HTTP API apart from a port with nothing behind it, and it is the only thing that lets
+    `attach_chrome` fall back to the browser endpoint (step 3) without risking a hang.
+    """
     try:
         with urllib.request.urlopen(f"{endpoint}/json/version", timeout=timeout) as response:
-            return json.load(response)["webSocketDebuggerUrl"]
-    except (urllib.error.URLError, KeyError, OSError, ValueError):
-        return None
+            return json.load(response)["webSocketDebuggerUrl"], True
+    except urllib.error.HTTPError:
+        return None, True                              # answered, but serves no HTTP API
+    except (urllib.error.URLError, OSError):
+        return None, False                             # nothing is listening
+    except (KeyError, ValueError):
+        return None, True                              # answered with something else than we expect
 
 
 def _from_active_port(endpoint: str, data_dirs: list[Path]) -> str | None:
@@ -192,6 +221,11 @@ def _from_active_port(endpoint: str, data_dirs: list[Path]) -> str | None:
 
     The file is two lines: the port, then the browser endpoint path. Its port has to be the one we were
     pointed at; otherwise it belongs to some other browser that happens to have run on this machine.
+
+    An `OSError` here is not necessarily a missing file: on macOS 26+ Chrome's data directory is
+    protected, so `read_text` raises `PermissionError` (EPERM) on a file that `stat` reports perfectly
+    well, unless the caller has Full Disk Access. Either way the directory is skipped and
+    `attach_chrome` goes on to step 3, which needs no file at all.
     """
     wanted = urllib.parse.urlparse(endpoint).port or 9222
     for directory in data_dirs:

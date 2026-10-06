@@ -59,6 +59,70 @@ def test_dry_run_limit_and_job(workspace, capsys):
     assert "Queue (1 job)" in out and "Gamma" in out
 
 
+def test_a_job_that_is_not_queued_says_why_and_is_exit_1(workspace, capsys):
+    """Live 2026-10-06: `run --job <a job in Needs-Attention/>` printed seven green preflight ticks, opened no
+    tab, wrote an empty report and exited 0 — nothing said the queue was empty. `--job` filters the queue, it
+    does not bypass it, so a job outside Applications/ matches nothing."""
+    base, cfg = workspace
+    make_job(base / "Needs-Attention", "4100000077", "Delta", "Backend Engineer")
+    assert cli.main(["--config", str(cfg), "run", "--dry-run", "--job", "4100000077"]) == 1
+    out = capsys.readouterr().out
+    assert "Queue (0 jobs)" in out
+    assert "no queued job has that id" in out
+    assert "Needs-Attention/" in out and "requeue --job 4100000077" in out      # names the way out
+
+
+def test_an_unknown_job_id_says_to_check_the_url(workspace, capsys):
+    base, cfg = workspace
+    assert cli.main(["--config", str(cfg), "run", "--dry-run", "--job", "4109999999"]) == 1
+    assert "check the URL" in capsys.readouterr().out
+
+
+def test_a_job_parked_for_review_is_named_as_already_parked(workspace, capsys):
+    base, cfg = workspace
+    make_job(base / "Pending-Review", "4100000088", "Epsilon", "SRE")
+    assert cli.main(["--config", str(cfg), "run", "--dry-run", "--job", "4100000088"]) == 1
+    assert "Pending-Review/" in capsys.readouterr().out
+
+
+def test_a_job_whose_row_is_not_resume_built_names_the_status(workspace, capsys):
+    base, cfg = workspace
+    t = Tracker(base / "Job_Tracker.numbers").load()
+    t.set("4100000001", "Interviewing")
+    t.save()
+    assert cli.main(["--config", str(cfg), "run", "--dry-run", "--job", "4100000001"]) == 1
+    assert "'Interviewing'" in capsys.readouterr().out
+
+
+def test_a_queued_job_still_matches_and_is_exit_0(workspace, capsys):
+    """The guard must not fire on the happy path."""
+    base, cfg = workspace
+    assert cli.main(["--config", str(cfg), "run", "--dry-run", "--job", "4100000009"]) == 0
+    out = capsys.readouterr().out
+    assert "Queue (1 job)" in out and "no queued job has that id" not in out
+
+
+def test_a_queue_that_skipped_every_job_is_not_silent(workspace, capsys):
+    """Anomalies used to reach the terminal on --dry-run only, under an "Anomalies:" heading a real run never
+    printed. Now both runs print one line each, so a run that skipped everything says so."""
+    base, cfg = workspace
+    assert cli.main(["--config", str(cfg), "run", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "⚠ queue anomaly:" in out and "4100000005" in out
+
+
+def test_nothing_matched_makes_the_report_exit_1(workspace):
+    """The code path a real run takes: the queue check sets Report.nothing_matched, and the report's own
+    exit_code turns it into 1 instead of "all parked"."""
+    from assistant.report import Report
+    from datetime import datetime
+    r = Report(datetime.now())
+    assert r.exit_code() == 0
+    r.nothing_matched = "its folder is in Needs-Attention/"
+    assert r.exit_code() == 1
+    assert "No job matched `--job`" in r.markdown()
+
+
 def test_run_without_key_fails_preflight_with_exit_1(workspace, monkeypatch, capsys):
     base, cfg = workspace
     cfg.write_text(re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "openrouter"', cfg.read_text()))

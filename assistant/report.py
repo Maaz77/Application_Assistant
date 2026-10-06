@@ -45,6 +45,7 @@ class Report:
     decision_model: str = ""                        # jev_inference_logs.json); a model on this machine costs nothing
     gateway: Counters | None = None                 # the run's model requests (P1 T6); a Gateway is also accepted
     by_fallback: int = 0                            # decisions the chat fallback answered (D19, T4)
+    nothing_matched: str | None = None              # --job named a job that is not in the queue: exit 1, not 0
 
     @property
     def totals(self) -> Counters | None:
@@ -55,6 +56,11 @@ class Report:
     def exit_code(self) -> int:
         if self.stopped:
             return EXIT_STOPPED
+        if self.nothing_matched:
+            # A run asked for one job by name and found none is a usage error, not "all parked" (live
+            # 2026-10-06: `run --job <a job sitting in Needs-Attention/>` printed seven green preflight
+            # ticks, worked on nothing, wrote an empty report and exited 0).
+            return EXIT_PREFLIGHT
         return EXIT_ATTENTION if any(r.attention for r in self.results) else EXIT_OK
 
     def scratch_questions(self) -> list[str]:
@@ -79,6 +85,8 @@ class Report:
              f"- Queue anomalies: {len(self.anomalies)}"]
         if self.stopped:
             L.append(f"- **Run stopped:** {self.stopped}")
+        if self.nothing_matched:
+            L.append(f"- **No job matched `--job`:** {self.nothing_matched}")
         if self.recovered:
             L += ["- Journal recovery: " + "; ".join(self.recovered)]
         if self.decisions:

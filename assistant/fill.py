@@ -17,8 +17,8 @@ from urllib.parse import urlparse
 from typing import Callable
 
 from assistant import decide, navigate, pages, tabs, guard, widgets
-from assistant.llm_inference import (LONG_TEXT, LLMInferenceError, PageAnswers, Question, judge_questions,
-                               uncovered_optional, uncovered_required)
+from assistant.llm_inference import (LONG_TEXT, LLMInferenceError, PageAnswers, Question, checked_option,
+                               judge_questions, uncovered_optional, uncovered_required)
 from assistant.decide import DecisionError
 from assistant.blockers import Attempts, NeedsAttention, OpenQuestion, Parked, RestartFromEntry, StopRun, ParkedAtQuestion
 from assistant.guard import label_of
@@ -344,6 +344,10 @@ def _fuzzy_holds(answer: str, held: str) -> bool:
     da, dh = _NON_DIGIT.sub("", answer), _NON_DIGIT.sub("", held)
     if da and dh and min(len(da), len(dh)) >= 7 and (dh.endswith(da) or da.endswith(dh)):
         return True
+    # A typeahead/combobox expands the label it accepts: "Milan" is held as "Milan, Lombardy, Italy". Only at a
+    # token boundary, so "Milan" does not match "Milano" and "1" does not match "10".
+    if na and nh.startswith(na) and not nh[len(na):len(na) + 1].isalnum():
+        return True
     sa, sh = _NON_ALNUM.sub("", na), _NON_ALNUM.sub("", nh)
     return sa == sh and sa != ""
 
@@ -360,10 +364,9 @@ def mismatches(items: list[Question], p: Page) -> list[Question]:
         opt = by_ref.get(q.option_ref or "")
         if opt is not None:
             return bool(opt.checked)
-        if q.option_ref:  # ref gone after React re-render — scan for checked toggle with matching label
-            label = pages.norm_label(q.answer or "")
-            return any(e.role in TOGGLES and bool(e.checked) and pages.norm_label(e.name) == label
-                       for e in p.elements)
+        if q.option_ref:            # ref gone after a re-render: ask this question's own group what is checked
+            cur = checked_option(q.question, p)
+            return cur is not None and pages.norm_label(cur) == pages.norm_label(q.answer or "")
         e = by_ref.get(q.ref or "")
         if e is None:
             return False
@@ -402,9 +405,10 @@ def fill_page(ctx: JobCtx, p: Page) -> None:
     widget_items = [q for q, op in zip(items, plan) if op is None]               # not click/type/select/toggle/upload
     if direct:                                                                   # 3a: the code acts
         ctx.browser.act(direct, ctx.session, p.table, stop_on_error=False)
+    wp = ctx.read() if (widget_items and direct) else p      # the direct ops re-render: widgets need fresh refs
     for q in widget_items:
         if q.required and not _wrapper_types(q):
-            if not widgets.handle(ctx, p, q):
+            if not widgets.handle(ctx, wp, q):
                 raise NeedsAttention("broken_form", f"widget not supported: {q.question!r}")
         else:
             ctx.optional_empty.append(_open_q(q))

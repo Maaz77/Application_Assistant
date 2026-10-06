@@ -206,6 +206,29 @@ def _group_radios(radios: list) -> dict[str, list]:
     return grouped
 
 
+def checked_option(question: str, p: Page) -> str | None:
+    """The checked option's label in the radio group whose question is `question`, or None.
+
+    Re-derives the grouping exactly as extract_questions did, so the read-back after a re-render looks only
+    inside the one group: a LinkedIn page carries several Yes/No groups whose option labels are identical, and a
+    page-wide scan would let one checked "Yes" vouch for all of them. The question text is a sound join key
+    because _merge_answers merges the model's reply by `id` and never rewrites `question`.
+
+    None means no answer can be claimed for this question — the group has nothing checked, no group matched, or
+    **two groups carry the same text** (_group_label falls back to `context` or "Select one", so that is not
+    hypothetical). The caller treats every one of those as not held, which is the safe direction.
+    """
+    want = pages.norm_label(question)
+    app_refs = pages.code_app_fields(p)
+    radios = [e for e in p.elements if e.role == "radio" and e.ref in app_refs]
+    hits = []
+    for key, members in _group_radios(radios).items():
+        q_text, _opts, _omap, cur = _radio_q(key, members, p)
+        if pages.norm_label(q_text) == want:
+            hits.append(cur)
+    return hits[0] or None if len(hits) == 1 else None
+
+
 def _group_label(group_key: str, members: list) -> str:
     """Human-readable question text from a radio group key."""
     if not group_key or group_key.startswith("_"):
@@ -544,6 +567,10 @@ def _drop(q: Question, why: str) -> None:
     q.answer, q.note = None, why
 
 
+def _note(note: str | None, add: str) -> str:
+    return (note + "; " if note else "") + add
+
+
 def _limit(q: Question, p: Page, policy: Policy) -> int:
     for label, n in p.maxlengths.get("items", []):
         if label and norm(q.question).lower().startswith(norm(label).lower()[:20]):
@@ -659,14 +686,25 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
         if q.answer is None:
             continue
         if q.source in ("profile", "job", "resume"):
-            if not q.quote:
-                _drop(q, "no quote")
-                continue
-            if not quoted_in(q.quote, src.by_name(q.source)):
-                found = next((n for n in ("profile", "job", "resume") if quoted_in(q.quote, src.by_name(n))), None)
-                if found is None:
-                    _drop(q, "quote not found in the sources")
+            # A verbatim quote is the evidence for free text, and the only evidence it has. A `choice` answer has
+            # stronger evidence available: the branches below require it to be one of the page's OWN options, so
+            # it is not dropped for a citation that does not match character for character — the citation is kept
+            # in the record, with a note, so an unverified one is still visible in answers.json and the report.
+            #
+            # Live, Linda AI 2026-10-06: "Have you completed the following level of education: Bachelor's Degree?"
+            # was answered "Yes" twice and dropped twice. Attempt 1 cited the resume and spliced "Jun" into its
+            # date range; attempt 2 cited Profile.md and elided "(Final Grade: 100/110)" from the middle of the
+            # line. `quoted_in` already ignores case, spacing and punctuation, so neither failure was about
+            # formatting — an insertion or an omission inside a quote is not a contiguous substring at all. The
+            # degree was in both files; only the citation was not verbatim, and the required radio stayed empty.
+            found = next((n for n in ("profile", "job", "resume")
+                          if q.quote and quoted_in(q.quote, src.by_name(n))), None)
+            if found is None:
+                if q.kind != "choice":
+                    _drop(q, "quote not found in the sources" if q.quote else "no quote")
                     continue
+                q.note = _note(q.note, f"quote not verbatim in {q.source}" if q.quote else "no quote")
+            elif found != q.source:
                 q.note, q.source = f"quote is from {found}, not {q.source}", found
         el = by_ref.get(q.ref or "")
         opt = by_ref.get(q.option_ref or "")

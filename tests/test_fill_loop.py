@@ -242,24 +242,180 @@ def test_typeahead_widget_fills_combobox(tmp_path):
     assert isinstance(parked, Parked) and fake.sent == []
 
 
-def test_mismatches_holds_after_radio_rerender(tmp_path):
-    """P4 T1a: React re-render invalidates option_ref; label-scan fallback reports holds correctly."""
-    from assistant.fill import mismatches
-    from assistant.llm_inference import PageAnswers
+# P4 T1a: LinkedIn renders a Yes/No group as `div role=radio` whose accessible *name* is the question and whose
+# *label* is the option ("the same_name branch" in llm_inference._radio_q). Several groups on one page therefore
+# carry identical option labels, which is why the read-back after a re-render has to be scoped to one group.
+_RERENDER_QS = ["Have you completed the following level of education: Bachelor's Degree?",
+                "Are you comfortable working in an onsite setting?",
+                "Are you legally authorized to work in Ireland?"]
+
+
+def _rerender_page(checked: dict[str, str]):
+    """A LinkedIn form page with the three Yes/No groups; `checked` maps group → the checked option label."""
     from assistant.browser import Element, Table
     from assistant import pages
+    url = "https://www.linkedin.com/jobs/view/4470454940/"
+    els = [Element(ref=f"n{i}{j}", role="radio", name=q, label=opt, tag="DIV", scope="form",
+                   group=f"g{i}", checked=checked.get(f"g{i}") == opt)
+           for i, q in enumerate(_RERENDER_QS) for j, opt in enumerate(("Yes", "No"))]
+    return pages.Page(url=url, title="t", text="", table=Table(url=url, elements=els))
 
+
+def _rerender_items():
+    """The three questions as answered, with the pre-re-render option_refs that no longer exist on the page."""
+    return PageAnswers.model_validate({"questions": [
+        Q(q, "Yes", kind="choice", option_ref=ref)
+        for q, ref in zip(_RERENDER_QS, ("e150", "e152", "e154"))]}).questions
+
+
+def _typeahead_site(*suggestions):
+    """A one-step dialog whose "Work model" is a combobox with no listed options: a typeahead."""
+    site = single_dialog()
+    site["s1"].els.insert(1, El("combobox", "Work model", required=True, dialog="d"))
+    for i, label in enumerate(suggestions):
+        site["s1"].els.insert(2 + i, El("option", label, dialog="d"))
+    return site
+
+
+_TYPEAHEAD_ANSWERS = {"Data Engineer | Acme | LinkedIn": [
+    Q("City", "Milan", ref="auto"),
+    Q("Work model", "Hybrid", kind="choice", ref="auto"),
+    Q("Resume", None, kind="file", ref="auto", source=None)]}
+
+
+def test_typeahead_picks_the_suggestion_that_starts_with_the_answer(tmp_path):
+    """P4 T1b: no suggestion equals "Hybrid", so the one that starts with it wins — never just the first one.
+    "Remote" is listed first on purpose: picking it would fill the application with the wrong answer."""
+    site = _typeahead_site("Remote", "Hybrid (3 days onsite)")
+    browser, fake = fake_browser(site, "job")
+    parked = run_pages(ctx_for(browser, _TYPEAHEAD_ANSWERS, tmp_path, widget_poll_secs=0))
+    combo = next(e for e in site["s1"].els if e.role == "combobox")
+    assert isinstance(parked, Parked) and fake.sent == []
+    assert combo.value == "Hybrid (3 days onsite)"        # not "Remote"
+
+
+def test_typeahead_without_a_matching_suggestion_is_a_broken_form(tmp_path):
+    """A required typeahead nothing matches must not click a stray suggestion."""
+    site = _typeahead_site("Remote")                       # nothing starts with "Hybrid"
+    browser, fake = fake_browser(site, "job")
+    with pytest.raises(NeedsAttention) as exc:
+        run_pages(ctx_for(browser, _TYPEAHEAD_ANSWERS, tmp_path, widget_poll_secs=0))
+    combo = next(e for e in site["s1"].els if e.role == "combobox")
+    assert exc.value.cls == "broken_form" and fake.sent == [] and combo.value != "Remote"
+
+
+def test_mismatches_holds_after_radio_rerender():
+    """P4 T1a: the option_ref is gone, so the read-back asks the question's own group what is checked."""
+    from assistant.fill import mismatches
+    items = _rerender_items()
+    assert mismatches(items, _rerender_page({"g0": "Yes", "g1": "Yes", "g2": "Yes"})) == []
+    assert len(mismatches(items, _rerender_page({}))) == 3            # nothing checked => all three report
+
+
+def test_mismatches_are_scoped_to_one_radio_group():
+    """P4 T1a regression: one checked "Yes" must not vouch for the other groups answered "Yes" (DISCOVERY).
+    A page-wide label scan reported 0 mismatches here, so three empty required groups looked filled."""
+    from assistant.fill import mismatches
+    items = _rerender_items()
+    bad = mismatches(items, _rerender_page({"g2": "Yes"}))            # only the third group got its toggle
+    assert [q.question for q in bad] == _RERENDER_QS[:2]
+
+
+def test_mismatches_catch_the_wrong_option_in_the_right_group():
+    """The group holds an answer, but not the one we asked for."""
+    from assistant.fill import mismatches
+    items = _rerender_items()
+    bad = mismatches(items, _rerender_page({"g0": "No", "g1": "Yes", "g2": "Yes"}))
+    assert [q.question for q in bad] == _RERENDER_QS[:1]
+
+
+def test_mismatches_fail_closed_on_two_groups_with_the_same_text():
+    """P4 T1a: _group_label falls back to "Select one" when a group key is opaque, and HANDOVER records such a
+    question on Linda AI page 2. Two of them must not let the first group's answer vouch for the second."""
+    from assistant.fill import mismatches
+    from assistant.browser import Element, Table
+    from assistant import pages
+    opaque = "urn:li:fsd_formElement:" + "x" * 70            # >80 chars => _group_label uses context/"Select one"
+    url = "https://www.linkedin.com/jobs/view/4470454940/"
+    els = [Element(ref=f"m{i}{j}", role="radio", name=opt, tag="DIV", scope="form",
+                   group=f"{opaque}-{i}", checked=(i == 0 and opt == "Yes"))
+           for i in range(2) for j, opt in enumerate(("Yes", "No"))]
+    p = pages.Page(url=url, title="t", text="", table=Table(url=url, elements=els))
     q = PageAnswers.model_validate({"questions": [
-        Q("Do you need a visa?", "No", kind="choice", ref=None, option_ref="e2")]}).questions[0]
-    # e2 gone after re-render; e5/e6 are the new refs, "No" is checked
-    p = pages.Page(url="x", title="t", text="",
-                   table=Table(url="x", elements=[
-                       Element(ref="e5", role="radio", name="Yes"),
-                       Element(ref="e6", role="radio", name="No", checked=True),
-                   ]))
-    assert mismatches([q], p) == []           # "No" is checked → holds via label scan
-    p.table.elements[1].checked = False
-    assert mismatches([q], p) == [q]          # nothing checked → mismatch
+        Q("Select one", "Yes", kind="choice", option_ref="e200")]}).questions[0]
+    assert mismatches([q], p) == [q]      # ambiguous => not held, even though one group holds "Yes"
+
+
+class _PickDecider:
+    """Picks the suggestion labelled `want` in `_typeahead`'s "option" question; every other decision is "none".
+    It resolves the ref from the criteria it is handed, so the test never hard-codes an observation ref."""
+
+    def __init__(self, want):
+        self.want, self.asked, self.calls = want, [], 0      # `calls` is the Jev budget counter fill.py reads
+
+    def ask(self, kind, state, qs):
+        self.asked.append(sorted(qs))
+        self.calls += 1
+
+        class _A:
+            def __init__(self, choice):
+                self.choice = choice
+
+        def answer(key, question):
+            if key != "option":
+                return "none"
+            refs = [r for r, label in question["criteria"].items() if label == self.want]
+            return refs[0] if refs else "none"
+        return {k: _A(answer(k, v)) for k, v in qs.items()}
+
+
+def test_typeahead_asks_the_model_between_two_close_suggestions(tmp_path):
+    """P4 T1b: "Milan" against "Milan, Lombardy, Italy" and "Milan, MI, US" — both start with the answer, so the
+    code cannot tell them apart and asks (T1: "several close candidates → Jev choice")."""
+    from assistant import decide
+    site = _typeahead_site("Hybrid, 3 days onsite", "Hybrid, 2 days onsite")
+    browser, fake = fake_browser(site, "job")
+    d = _PickDecider("Hybrid, 2 days onsite")          # the second suggestion, so "first wins" cannot pass this
+    decide.use(d)
+    try:
+        parked = run_pages(ctx_for(browser, _TYPEAHEAD_ANSWERS, tmp_path, widget_poll_secs=0))
+    finally:
+        decide.use(None)
+    combo = next(e for e in site["s1"].els if e.role == "combobox")
+    assert isinstance(parked, Parked) and fake.sent == []
+    assert ["option"] in d.asked                      # it did ask
+    assert combo.value == "Hybrid, 2 days onsite"     # and clicked the model's pick, not the first suggestion
+
+
+def test_typeahead_does_not_ask_about_unrelated_suggestions(tmp_path):
+    """Two suggestions that do not start with the answer are not "close candidates": block, never guess."""
+    from assistant import decide
+    site = _typeahead_site("Remote", "On-site")
+    browser, fake = fake_browser(site, "job")
+    d = _PickDecider("nonsense")
+    decide.use(d)
+    try:
+        with pytest.raises(NeedsAttention) as exc:
+            run_pages(ctx_for(browser, _TYPEAHEAD_ANSWERS, tmp_path, widget_poll_secs=0))
+    finally:
+        decide.use(None)
+    assert exc.value.cls == "broken_form" and fake.sent == []
+    assert ["option"] not in d.asked                  # no model call for an unrelated list
+
+
+@pytest.mark.parametrize("answer, held, holds", [
+    ("Milan", "Milan, Lombardy, Italy", True),          # a typeahead expands the label it accepts
+    ("Dublin", "Dublin, County Dublin, Ireland", True),
+    ("Hybrid", "Hybrid (3 days onsite)", True),
+    ("Milan", "Milan", True),
+    ("Milan", "Milano", False),                         # only at a token boundary
+    ("1", "10", False),
+    ("Hybrid", "Remote", False),                        # a wrong suggestion is still a mismatch
+])
+def test_fuzzy_holds_accepts_an_expanded_typeahead_label(answer, held, holds):
+    """P4 T1b: without this the read-back turns every correct City pick into a false broken_form."""
+    from assistant.fill import _fuzzy_holds
+    assert _fuzzy_holds(answer, held) is holds
 
 
 def test_save_application_dialog_raises_dialog_closed(tmp_path):

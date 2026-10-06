@@ -986,3 +986,319 @@ or session timeout). The correct action is to surface it as `NeedsAttention("dia
 either button; the user decides whether to save or discard. Check added in `navigate.wait_for_dialog` (entry-time
 detection) and in `fill.run_pages` (mid-loop detection).
 Unit test: `test_save_application_dialog_raises_dialog_closed`.
+
+---
+
+### 2026-10-04 — P4 T1a correction: the re-render read-back must be scoped to one radio group
+
+**Supersedes the P4 T1a entry above.** That fix was right about the cause (a re-render invalidates `option_ref`)
+and wrong about the remedy. Its label scan ran over `p.elements`, the whole page:
+
+```python
+return any(e.role in TOGGLES and bool(e.checked) and pages.norm_label(e.name) == label
+           for e in p.elements)
+```
+
+LinkedIn renders a Yes/No question as a `div role=radio` group whose accessible **name** is the question and
+whose **label** is the option (`llm_inference._radio_q`, the `same_name` branch). A page therefore carries several
+groups whose option labels are identical, so one checked "Yes" made **every** question answered "Yes" report as
+held. Measured on the three-group shape of the Linda AI page: 2 of 3 groups empty, `mismatches()` returned 0.
+
+That is worse than the failure it replaced. A false `broken_form` writes a record and stops; a false *hold*
+removes the only check on the P4 fill path and lets the run advance with empty required fields. Nothing
+downstream catches it either: `probes.REQUIRED_EMPTY` queries `input,select,textarea`, so it never sees a
+`div role=radio` group at all, and the failure resurfaces later as `advance → "stuck"` and a blind refill.
+
+**Fix:** `llm_inference.checked_option(question, p)` re-derives the grouping with the same `_group_radios` /
+`_radio_q` the extraction used, finds the group whose question text matches, and returns **that group's** checked
+label. `fill.mismatches` compares it to the answer. The question text is a sound join key because `_merge_answers`
+merges the model's reply by `id` and overwrites only `answer`/`source`/`quote`/`relies_on` — it never rewrites
+`question`, so the extracted text survives the model round-trip.
+
+It **fails closed** on ambiguity: `_group_label` falls back to `context` or `"Select one"` when a group key is
+opaque, and HANDOVER records a "Select one" question on Linda AI page 2, so two groups can carry the same text.
+`checked_option` returns None unless exactly one group matched, and the caller treats None as not held.
+Tests: `test_mismatches_are_scoped_to_one_radio_group` (the decisive one — three groups, one checked),
+`test_mismatches_holds_after_radio_rerender`, `test_mismatches_catch_the_wrong_option_in_the_right_group`.
+
+**Still open:** `REQUIRED_EMPTY` remains blind to `[role=radio]` groups. Extending that probe needs live Chrome
+to verify and was left out while the CDP endpoint is unreachable (see the entry below).
+
+### 2026-10-04 — P4 T1b: the read-back rejected a *correct* typeahead pick
+
+A typeahead expands the label it accepts: pick "Milan" and the field holds "Milan, Lombardy, Italy". `_fuzzy_holds`
+compared exact, phone-digit-suffix and punctuation-stripped forms — no prefix test — so a correctly filled City
+became a mismatch, was re-planned, failed again and raised `_Refill` → `broken_form`:
+
+```
+'Milan'  vs 'Milan, Lombardy, Italy'          -> holds=False
+'Dublin' vs 'Dublin, County Dublin, Ireland'  -> holds=False
+```
+
+This is pre-existing code, but T1b's typeahead is what routes traffic into it, so every City-style field would
+have become a Needs Attention and the ≥ 7/10 gate could not have passed.
+
+**Fix:** accept a held value that starts with the answer **at a token boundary**
+(`nh.startswith(na) and not nh[len(na)].isalnum()`), so "Milan" holds "Milan, Lombardy, Italy" but not "Milano",
+and "1" does not hold "10". Test: `test_fuzzy_holds_accepts_an_expanded_typeahead_label` (7 cases).
+
+With that in place, `fill.mismatches` is also the read-back for the typeahead *selection*: a wrong suggestion
+leaves a value that does not prefix-match the answer, so no separate verification is needed in `widgets.py`.
+
+### 2026-10-04 — P4 T1b correction: the typeahead picked the first suggestion
+
+`_typeahead` fell back to `opts[0]` when no label equalled the answer, which fills the application with a wrong
+value. Measured: answer "Hybrid", suggestions `["Remote", "Hybrid (3 days onsite)"]` → it clicked **Remote**.
+It also collected every `role=option` on the page with no dialog scoping, discarded the result of its own `type`
+op (so a `target_changed` still went on to click), and returned True whether the click succeeded or not.
+
+**Fix (T1 as specified):** equal to the answer → the only suggestion that starts with it → `decide.choice` among
+the suggestions that start with it → otherwise False. "Close candidate" is read at face value as *starts with the
+answer*: a suggestion that does not is never offered to the model, so an unrelated list blocks rather than being
+guessed at. False means not filled, and `fill_page` decides the cost — an optional field is left empty and noted,
+a required one is a `broken_form`. Never a silent wrong value. Options are
+scoped by `Element.dialog`, the `type` and `click` results are both required to be `1/1 ops ok`, and
+`fill.fill_page` now re-reads the page before calling `widgets.handle`, because the `direct` ops it just ran are
+themselves a re-render. Tests: `test_typeahead_picks_the_suggestion_that_starts_with_the_answer`,
+`test_typeahead_without_a_matching_suggestion_is_a_broken_form`.
+
+`tests/fake_browser.py` now writes a clicked `role=option` back into its combobox, as a real one does. Without
+that the fake kept the typed text, and a test could not tell a correct pick from a wrong one.
+
+### 2026-10-04 — Preflight reports an unreadable `DevToolsActivePort` as missing
+
+The P4 live gate could not be run from the agent's process context. Port 9222 is listening (the user's own Chrome
+with the `chrome://inspect` toggle) but `/json/version` and `/json/list` answer `HTTP 404 len=0`, which is the
+Chrome 144+ WebSocket-only server already recorded above. `cdp._from_active_port` is then the only route, and
+
+```
+read FAILED: PermissionError [Errno 1] Operation not permitted:
+  '/Users/maaz/Library/Application Support/Google/Chrome/DevToolsActivePort'
+```
+
+The file exists (mode 644, 59 B) — macOS TCC protects `~/Library/Application Support`, and the user's own
+terminal holds that access, which is why earlier runs passed ("7 of 7 checks").
+
+`cdp.py:198-200` catches `OSError`, and `PermissionError` is an `OSError`, so preflight then asserts "no
+`DevToolsActivePort` file was found in the usual browser data directories" when the file is present and merely
+unreadable. That points at re-toggling `chrome://inspect`, which is already on. Distinguishing absent from
+`EPERM` in that message would make this blocker self-diagnosing. Not fixed here: it is a diagnostic, and the fix
+belongs with someone who can verify it against a reachable Chrome.
+
+**Unverified live.** Suggestions are matched with `e.dialog == el.dialog`, which assumes LinkedIn renders the
+option list inside the modal's subtree. If it renders in a portal outside the dialog, `opts` is always empty and
+every typeahead becomes a `broken_form`. The fixtures set `dialog="d"` on their options, so they cannot settle
+this — check it on the first live run. For the same reason `widgets.handle` looks the field up by `q.ref` on the
+re-read page; if a re-render replaces the combobox node outright, that lookup misses and the field is reported
+rather than filled (`type_long` re-maps by question text for this case; the typeahead does not yet).
+
+### 2026-10-06 — Fixed: the browser endpoint needs no `DevToolsActivePort` and no HTTP API
+
+The 2026-10-04 entry above assumed the EPERM on `DevToolsActivePort` was the agent's process context, and that
+"the user's own terminal holds that access". **That was wrong.** The user hit the same failure from their own
+terminal, so preflight could not reach a Chrome that was plainly serving:
+
+```
+$ lsof -nP -iTCP -sTCP:LISTEN | grep 9222
+Google  55661 maaz  96u  IPv4  TCP 127.0.0.1:9222 (LISTEN)
+
+$ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9222/json/version
+404
+
+$ .venv/bin/python -c "...attach_chrome('http://127.0.0.1:9222', data_dirs=chrome_data_dirs())"
+ChromeLaunchError: Cannot reach a CDP endpoint at http://127.0.0.1:9222. Nothing answered /json/version, and
+no DevToolsActivePort file was found …
+```
+
+macOS 27 / Chrome 154: `stat` on `~/Library/Application Support/Google/Chrome/DevToolsActivePort` succeeds
+(mode 644, 59 B, owner `maaz`, no flags) while `open` raises `PermissionError` errno 1 for any process without
+Full Disk Access — including the user's own shell. `xattr` fails the same way. So both of `attach_chrome`'s
+discovery paths were dead at once, and no amount of re-toggling `chrome://inspect` could help.
+
+**The endpoint was reachable the whole time.** `ws://127.0.0.1:9222/devtools/browser` — the browser endpoint with
+**no target id** — upgrades and serves the full protocol:
+
+```
+$ curl -i -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+       -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' http://127.0.0.1:9222/devtools/browser
+HTTP/1.1 101 WebSocket Protocol Handshake
+
+Browser.getVersion     → Chrome/154.0.8037.92, protocolVersion 1.3
+Target.setDiscoverTargets → {}
+Target.getTargets      → 24 targets
+```
+
+**Fix (`cdp.py`).** `attach_chrome` grew a third discovery step, after `/json/version` and
+`DevToolsActivePort`: `browser_ws(endpoint)` → `ws://host:port/devtools/browser`. No file is read and no HTTP API
+is needed, so it is immune to both causes. Two details keep it honest:
+
+- **It is gated on evidence, not on an exception.** `_from_json_version` now returns `(ws_url, serving)`, where
+  `serving` is True when *anything* answered on the port — including the 404 — and False only when the connection
+  itself failed. Step 3 runs only when `serving`, so a dead port still raises `ChromeLaunchError` at once instead
+  of hanging on a websocket handshake against nothing. `urllib.error.HTTPError` has to be caught before
+  `URLError`, which it subclasses, or a 404 reads as "nothing listening".
+- **It is last, not first.** `DevToolsActivePort` names the exact browser id and is the documented route, so a
+  readable file still wins; step 3 is the rescue. Discovery stays I/O-cheap: it opens no socket of its own, it
+  only *names* the URL that the one existing `Cdp(...)` call then connects to, so the run still costs exactly one
+  "Allow remote debugging?" click.
+
+Full Disk Access is therefore **not** required any more, and the swallowed `PermissionError` in
+`_from_active_port` is now harmless rather than fatal. The old error message also lied twice — `/json/version`
+*had* answered, and the file *was* found — so it was replaced with one that only fires when nothing is listening
+at all.
+
+Tests: `tests/test_attach.py` (9, `unit`) pins the ladder's order and its guard, including the live case —
+port serving, file present, `read_text` raising EPERM — and that a dead port never reaches step 3. The HTTP side
+is a local one-request server and `Cdp` is monkeypatched, so no browser and no network are touched. Verified
+against the user's real Chrome: `attach_chrome` now returns `ws://127.0.0.1:9222/devtools/browser`, 24 targets.
+
+### 2026-10-06 — A correct answer dropped by the quote check; the resume text leaves the sources (user decisions)
+
+**Symptom.** Linda AI, run `20261006-220620`, page 3: "Have you completed the following level of education:
+Bachelor's Degree?" was left empty, the required radio stayed unset, and the job ended
+`broken_form — the Easy Apply step did not advance (after 2 attempts)`. The question went to the Scratch Pad
+list in the report as if the sources did not answer it. They did.
+
+**The model answered it correctly, twice.** Both answers were discarded by the quote check, not by the model.
+`answers.json` for that question, both rows:
+
+```
+attempt 1   answer: null   source: resume    note: "quote not found in the sources"
+attempt 2   answer: null   source: profile   note: "quote not found in the sources"
+```
+
+`llm_inference_logs.json` entries 2 and 3 both carry `{"id": "r_e147", "answer": "Yes", ...}`.
+
+**Why both citations failed — and why it was not a formatting problem.** `quoted_in` already ignores case,
+spacing and punctuation through `_loose`, so `**`, `·` and `–` all normalise away. The failures were an
+insertion and an omission *inside* the quote, which no normalisation can repair, because the test is for a
+contiguous substring:
+
+| | the source says | the model wrote |
+|---|---|---|
+| attempt 1 (resume PDF) | `Shiraz University — B.Sc. in Computer Engineering (GPA: 3.74/4) 2016 - 2021` | `… (GPA: 3.74/4) · 2016 – Jun 2021` — **spliced `Jun`** in from Profile.md's range |
+| attempt 2 (Profile.md line 122) | `**M.Sc. … (majoring Artificial Intelligence)** (Final Grade: 100/110) · Sep 2022 – Dec 2025` | `M.Sc. … (majoring Artificial Intelligence) · Sep 2022 – Dec 2025` — **elided `(Final Grade: 100/110)`** |
+
+Measured:
+
+```
+quote loose in line loose?                            False
+drop "(Final Grade: 100/110) " from the line, then?   True
+```
+
+So "hand it Profile.md instead of the PDF" would **not** have fixed this question: attempt 2 was already pure
+Profile.md. Also worth noting that `Bachelor` appears 0 times in Profile.md and 0 times in the resume, so the
+model had to infer B.Sc. ⇒ Bachelor's Degree — which it did, both times.
+
+**Decision 1 (user, 2026-10-06): a `choice` answer is not asked for a quote.** A quote is the only evidence free
+text can carry, so it stays mandatory there. A choice answer already has to be one of the page's *own* options —
+the branches after the quote check require exactly that, and for this radio group it would have passed — which is
+stronger evidence than a self-reported citation. `check_answers` therefore only drops a missing or unverifiable
+quote when `q.kind != "choice"`. The citation is still recorded, with a `quote not verbatim in <source>` note, so
+an unverified one is visible in `answers.json` and the report rather than silently accepted. Rejected
+alternatives: segmenting the quote on `· — – ( ) , ;` and requiring every segment (fixes this, but lets a quote
+be assembled from two distant real lines); citing by line number (strongest, but moves the prompt, the JSON
+schema and the check at once).
+
+Tests: `test_an_option_answer_survives_a_citation_that_is_not_verbatim` pins the exact elided Profile.md line;
+`test_free_text_still_needs_a_verbatim_quote` and `test_an_option_answer_off_the_page_is_still_dropped` pin the
+two halves of the guarantee that must not move. Both of the new behaviour tests fail against the old code.
+
+**Decision 2 (user, 2026-10-06): the resume's extracted text is no longer a source.**
+`cli.process` now builds `Sources(profile=profile, job=job.job_md.read_text(), resume="")`. `job.resume_pdf()`
+still runs, because the file itself is what gets uploaded; only `resume_text(pdf)` is gone from the model's
+input, and with it the second differently-worded copy of the same facts that attempt 1 spliced from. The prompt
+now says `resume` is normally empty and to answer from `profile` and `job`. `tests/replay/harness.py` was changed
+the same way, or a replay would not reproduce a real run. Cost of this: a fact only the PDF holds (the B.Sc. GPA
+3.74/4, exact role dates) can no longer be cited at all, so it has to live in `Profile.md` to be answerable.
+
+**Decision 3 (user, 2026-10-06): Profile.md gets plain-language degree lines.** Four lines added to its
+`# Scratch Pad`, phrased the way LinkedIn asks, so one whole line is a quotable sentence and no inference from
+"B.Sc." is needed:
+
+```
+- Have you completed the following level of education: Bachelor's Degree? Yes — B.Sc. in Computer Engineering, Shiraz University, completed Jun 2021.
+- Have you completed the following level of education: Master's Degree? Yes — M.Sc. in Computer Science and Engineering, Politecnico di Milano, completed Dec 2025.
+- Have you completed the following level of education: Doctorate / PhD? No.
+- Highest level of education completed: Master's Degree (M.Sc.).
+```
+
+**Not verified live.** Replay cannot confirm this end to end: the fixture's prompts predate the P4 edits, so
+`python -m assistant replay runs/20261006-220620/4470454940_Linda-AI_Founding-Software-Engineer` misses on the
+first LLM request (`LLM request not in fixture`), and dropping the resume from the sources changes the prompt
+hash again. The next live run on this job is what settles it — re-queue it first
+(`python -m assistant requeue --job <url>`).
+
+### 2026-10-06 — `run --job` that matches nothing was silent and exited 0
+
+**Symptom.** `python -m assistant run --job 4470454940` printed all seven preflight ticks, opened no tab, wrote
+an empty report and exited 0:
+
+```
+✓ LLM inference answers: mistral/mistral-small, mistral/mistral-nemo (via vercel)
+✓ Kev server on http://127.0.0.1:8009: jaredpalmer/kev-0.8b on mps via mlx (bfloat16)
+… 5 more ✓ …
+Report: runs/20261006-231622/report.md        # Parked 0 · Needs Attention 0 · Queue anomalies 0
+```
+
+**Cause.** `--job` is applied by `cli._queue` *after* `records.build_queue`, so it filters the queue instead of
+bypassing it. Job 4470454940 was in `Needs-Attention/` from the previous run, which means no folder in
+`Applications/`, which means it was never in the queue to be filtered. `for job in q.jobs:` then iterated zero
+times. Nothing printed, because the terminal only ever reported per-job results, and `Report.exit_code()`
+returned `EXIT_OK` — "all parked" — for a run that parked nothing.
+
+Three separate defects in one symptom:
+
+1. **No message.** An empty queue, from any cause, said nothing on a real run.
+2. **Anomalies were invisible.** `build_queue`'s anomaly lines reached the terminal on `--dry-run` only. A run
+   that skipped every job for a status mismatch looked identical to a run with nothing to do.
+3. **Exit 0 was a lie.** A script or wrapper checking the exit code could not tell this from a clean run.
+
+**Fix.** `cli._report_queue(cfg, tracker, q, job_url)` is called by both `dry_run` and `run` right after the
+queue is built. It prints one `⚠ queue anomaly:` line per anomaly, and when `--job` matched nothing it prints
+why and returns the reason. `_why_not_queued` looks the job id up in the other two folders and then in the
+tracker, so the message names the way out rather than the symptom:
+
+| Where the job actually is | What it now says |
+|---|---|
+| `Needs-Attention/` | `its folder is in Needs-Attention/ — put it back in the queue first: python -m assistant requeue --job <id>` |
+| `Pending-Review/` | `its folder is in Pending-Review/ — it is already parked, waiting for you to submit it` |
+| row at another status | `its tracker row says Status 'Interviewing', and only 'Resume Built' is queued` |
+| row but no folder | `its tracker row is 'Resume Built' but it has no folder in Applications/` |
+| neither | `no folder in Applications/ and no tracker row has that job id — check the URL` |
+
+`run` stores that reason in the new `Report.nothing_matched`, which `exit_code()` turns into **exit 1** and
+`markdown()` prints as `- **No job matched `--job`:** …`. Setting a field rather than returning early was
+deliberate: the run's existing tail still writes the report and closes the tab book, so the report is no longer
+empty and nothing in the cleanup path is skipped.
+
+The check stays **after** `_queue`, which costs a preflight that the user has already paid for by then. It
+cannot move earlier: `records.recover` runs between preflight and the queue, and an interrupted `requeue` is
+recovered by moving a folder back *into* `Applications/`, so a queue built before recovery could reject a job
+that recovery is about to restore. `--dry-run` is the free way to check a `--job` first, and it now reports an
+unmatched one exactly as a real run does, exit code included.
+
+Tests (`tests/test_cli.py`, 7 new, `unit`): one per row of the table above, one that the happy path still exits
+0 and prints no warning, one that anomalies now reach the terminal on a plain run, and one on
+`Report.exit_code()` / `markdown()` directly. Six of the seven fail against the old code; the seventh is the
+happy-path regression guard, which passes against both on purpose.
+
+Verified live on the user's own workspace:
+
+```
+$ .venv/bin/python -m assistant run --dry-run --job 4470454940
+Queue (0 jobs):
+✗ --job 4470454940: no queued job has that id — its folder is in Needs-Attention/ — put it back in the
+  queue first: python -m assistant requeue --job 4470454940
+exit=1
+
+$ .venv/bin/python -m assistant run --dry-run --job 9999999999
+✗ --job 9999999999: no queued job has that id — no folder in Applications/ and no tracker row has that
+  job id — check the URL
+exit=1
+
+$ .venv/bin/python -m assistant run --dry-run --job 4470918779
+Queue (1 job):
+  • The Flex – Senior Software Engineer  https://www.linkedin.com/jobs/view/4470918779  [4470918779_…]
+exit=0
+```
