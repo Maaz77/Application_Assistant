@@ -38,6 +38,26 @@ def test_gate_checks_resume_submit_and_typed_text():
     assert "typed text" in gate(page(FINAL), "Amin_Acme_Data_Engineer_2026.pdf", {"e1": "Something else"})
 
 
+def test_resume_input_skips_an_autofill_parser_input():
+    """P5: Ashby lists an 'Autofill from resume' file input before the real 'Resume' one; _code_resume must
+    pick the real control, not the parser (DISCOVERY 2026-09-23)."""
+    p = page([Element(ref="e9", role="file", name="", label="Autofill from resume"),
+              Element(ref="e15", role="file", name="Resume", label="")], text="Upload your resume here")
+    assert pages.judge(p).resume_ref == "e15"
+
+
+def test_forward_submit_counts_an_apply_labelled_control():
+    """P5: Greenhouse's 'Apply now!' is not _submit_like, but pages.forward_submit counts it, so a filled
+    'Apply now!' final page passes the gate (parks) instead of failing 'no submit button'. The guard still
+    never clicks it."""
+    apply_final = [Element(ref="e1", role="textbox", name="Why us?", value="Because " * 20),
+                   Element(ref="e2", role="file", name="Resume", value="Amin_Acme_Data_Engineer_2026.pdf"),
+                   Element(ref="e3", role="button", name="Apply now!")]
+    p = page(apply_final)
+    assert pages.forward_submit(p) and not pages.judge(p).submit_button
+    assert gate(p, "Amin_Acme_Data_Engineer_2026.pdf", {"e1": "Because " * 20}) is None
+
+
 def test_final_step_and_submit_button_come_from_the_judgment():
     p = page([Element(ref="e1", role="textbox", name="City"), Element(ref="e2", role="button", name="Continue"),
               Element(ref="e3", role="button", name="Save and continue")])

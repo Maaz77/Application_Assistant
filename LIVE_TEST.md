@@ -1,5 +1,49 @@
 # Live test plan (you run these)
 
+## P5 re-core gate (2026-10-07)
+
+External ATS (Greenhouse, Ashby, Lever) by one general loop — no host adapters. An external "Apply" is followed
+off LinkedIn, the ATS tab is adopted, and the same pipeline fills it and parks one click before submit. Other
+hosts are classified: an account wall (Workday/iCIMS/Taleo/SuccessFactors) → `signup`/`credentials`, a captcha →
+`captcha`, a page with no readable application form → `unsupported_ats` (host named). T2 (cross-origin frame
+attach) is deferred — this gate is hosted forms.
+
+**Before you start**
+- Start the System One route (`./run_kev_server.command` if the route is `local`), Chrome signed in to LinkedIn.
+- Line up ~10 **Resume Built** jobs whose LinkedIn control is "Apply on company website" (external), with a mix
+  of Greenhouse / Ashby / Lever and at least one other host. The run reports each host, so this also measures the
+  real host mix.
+- There is **no Lever capture** in the repo. If you want the Ashby/Lever fixtures checked against a real page,
+  capture one each first (read-only, writes nothing):
+  ```bash
+  .venv/bin/python -m assistant capture "https://jobs.lever.co/<company>/<id>"
+  ```
+
+**1. Requeue the earlier external jobs, dry-run the queue**
+```bash
+.venv/bin/python -m assistant requeue --class external_ats
+.venv/bin/python -m assistant run --dry-run
+```
+
+**2. A not-recorded pass first (nothing written)**
+```bash
+.venv/bin/python -m assistant run --no-record --limit 5
+```
+Check: each external job hands off to the ATS tab and the LinkedIn tab closes; a Greenhouse/Ashby/Lever form is
+filled and parked (or parked-at-question with the questions noted); an unsupported host / account wall / captcha
+ends Needs Attention with the right class and its tab is left open; **nothing was submitted** (no POST in
+`browser_actions.jsonl`); **exactly one tab per job** is open after the run.
+
+**3. The recorded gate (10 external jobs)**
+```bash
+.venv/bin/python -m assistant run --limit 10
+```
+**Pass when:** ≥ 5 of 10 Greenhouse/Ashby/Lever jobs are **Pending Review**; unsupported hosts and account walls
+are Needs Attention with the right class (`unsupported_ats` names the host); there are **zero** submissions; there
+is **exactly one tab per job**, still open after the run.
+
+Send back: the run folder path (`runs/<ts>`), the terminal output, and what you saw in Chrome.
+
 ## P2 re-core gate (2026-09-29)
 
 Owned browser driver, absolute never-submit guard, deterministic Easy Apply navigation. **Before you start**,

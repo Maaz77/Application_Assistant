@@ -1,0 +1,38 @@
+{
+  "url": "ats/toast_like.html",
+  "title": "Careers at Toast — AI Engineer",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "First Name",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "textbox",
+      "name": "Email",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "file",
+      "name": "Resume/CV",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "button",
+      "name": "Apply now!",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

@@ -1,19 +1,32 @@
 """T9 end-to-end in the throwaway Chrome: process() from a LinkedIn-like job page to a parked, released tab.
 
-The browser agent (browser_goal's decision model on OpenRouter) finds the way from the posting to the form and from
-step to step, so these run with --live: a few decisions per job page, about $0.0001 in all."""
+P2+ navigation is deterministic (navigate.py / external.py) and P3 fills from code-extracted questions with the
+answers canned here, so these need no model and run in the offline browser suite: the external cases exercise
+external.run_external (the P5 hand-off + general ATS loop); the easy-li case exercises the Easy Apply loop."""
 from contextlib import nullcontext
 from datetime import date
 
 import pytest
 
 from assistant import cli, config as config_mod, tabs
+from assistant.blockers import NeedsAttention
 from assistant.llm_inference import PageAnswers
 from assistant.browser import Browser
 from assistant.records import Job
 from tests.support import CDP_URL
 
-pytestmark = [pytest.mark.browser, pytest.mark.live_model]
+
+def _job_dir(tmp_path, folder, url):
+    d = tmp_path / folder
+    d.mkdir()
+    (d / "job.md").write_text(f"- LinkedIn URL: {url}\n- Company: Acme\n- Job Title: Data Engineer\n")
+    from pypdf import PdfWriter
+    w = PdfWriter(); w.add_blank_page(100, 100)
+    with open(d / "Amin_Acme_Data-Engineer.pdf", "wb") as fh:
+        w.write(fh)
+    return d
+
+pytestmark = pytest.mark.browser
 
 
 def canned(p, src, **kw):
@@ -41,7 +54,8 @@ def canned(p, src, **kw):
     "4012345604-external",     # Apply opens the company form in a new tab at once
     "4012345607-late-tab",     # … 2.5 s after the click
     "4012345608-dialog",       # … only after "Continue" in a covering "You are leaving LinkedIn" dialog
-    "4012345609-easy-li",      # LinkedIn-like: display:contents card, Search + "Select language", Easy Apply dialog
+    # LinkedIn-like Easy Apply still asks the System One model one entry/advance question, so it stays live_model:
+    pytest.param("4012345609-easy-li", marks=pytest.mark.live_model),
 ])
 def test_process_parks_and_releases(fixture_server, chrome, tmp_path, monkeypatch, job_page):
     cfg = config_mod.load()
@@ -77,3 +91,27 @@ def test_process_parks_and_releases(fixture_server, chrome, tmp_path, monkeypatc
     assert not any(job_page in t["url"] for t in after)               # the LinkedIn tab was handed off and closed
     assert fixture_server.posts() == []
     chrome.close_tab(app[0]["id"])                                    # tidy the shared test Chrome
+
+
+def test_an_alert_box_page_is_unsupported_ats_and_nothing_is_clicked(fixture_server, chrome, tmp_path, monkeypatch):
+    """P5: an external page that only has a job-alert email box (the Mastercard case, DISCOVERY ~198) is not an
+    application. run_external reports unsupported_ats and clicks nothing on it — its 'Apply now' never fires (the
+    page's title would change to 'CLICKED-alert' if it did), and nothing is submitted."""
+    cfg = config_mod.load()
+    cfg = cfg.model_copy(update={"browser": cfg.browser.model_copy(update={"cdp_url": CDP_URL})})
+    monkeypatch.setattr(cli, "answer_page", canned)
+    d = _job_dir(tmp_path, "4012345610_Acme_Data-Engineer",
+                 fixture_server.url("jobs/view/4012345610-alertbox.html"))
+    with nullcontext(Browser(cfg, "", actions_log=tmp_path / "browser_actions.jsonl")) as browser:
+        browser.connect(5.0)
+        book = tabs.TabBook(browser)
+        with pytest.raises(NeedsAttention) as exc:
+            cli.process(Job.from_dir(d), browser=browser, book=book, cfg=cfg, key="", profile="",
+                        run_dir=tmp_path / "run", today=date(2026, 9, 23))
+        book.close()
+    assert exc.value.cls == "unsupported_ats"
+    after = chrome.tabs()
+    alert = [t for t in after if "alert_box.html" in t["url"]]
+    assert len(alert) == 1 and alert[0]["title"] == "Acme Careers"    # 'Apply now' was never clicked
+    assert fixture_server.posts() == []
+    chrome.close_tab(alert[0]["id"])

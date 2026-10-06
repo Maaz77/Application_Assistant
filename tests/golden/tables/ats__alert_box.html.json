@@ -1,0 +1,22 @@
+{
+  "url": "ats/alert_box.html",
+  "title": "Acme Careers",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Email address",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Apply now",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

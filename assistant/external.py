@@ -106,10 +106,27 @@ def _click_forward(ctx, p: pages.Page, *, allow_apply: bool) -> bool:
     return False
 
 
+_PROCEED_RE = re.compile(r"^\s*(continue|proceed|go to|apply on|visit)\b", re.I)
+
+
+def _leaving_control(p: pages.Page):
+    """A "You are leaving … / Continue to the company website" control that LinkedIn shows between the posting
+    and the external tab. Matches Continue/Proceed only (never Cancel, never a submit, never "Continue with
+    <provider>"), so clicking it proceeds rather than cancels or submits."""
+    for e in p.elements:
+        label = e.name or ""
+        if (e.role in {"button", "link"} and _PROCEED_RE.search(label)
+                and not _WITH_RE.search(label) and not guard.REFUSE_LABEL_RE.search(label)):
+            return e
+    return None
+
+
 def _hand_off(ctx) -> pages.Page:
     """From the LinkedIn posting, click its external Apply and adopt the ATS tab. The click is a pre-fill apply
-    (guard.FORM.started is False, so it is allowed). `follow_new_tab(before=None)` waits for a new tab unless a
-    form appears in this tab (a same-tab navigation off LinkedIn). Returns the landed external page."""
+    (guard.FORM.started is False, so it is allowed). The ATS tab may open at once, a couple of seconds later, or
+    only after a "You are leaving LinkedIn" interstitial's Continue — so poll: hand off as soon as a new tab
+    appears, click a leaving/Continue interstitial when one is up, or return when the form opens in this tab
+    (a same-tab navigation off LinkedIn). Returns the landed external page."""
     p = ctx.read()
     ctrl = navigate.external_apply(p)
     if ctrl is None:
@@ -117,12 +134,23 @@ def _hand_off(ctx) -> pages.Page:
     known = ctx.book.handles()
     before = ctx.book.current_handle(ctx.session)
     ctx.browser.act([{"op": "click", "ref": ctrl.ref}], ctx.session, p.table, stop_on_error=False)
-    fill.follow_new_tab(ctx, known, fill.ENTRY_TAB_WAIT, before=None)
-    p = ctx.read()
-    moved_tab = ctx.book.current_handle(ctx.session) != before
-    if "linkedin.com" in p.host and not moved_tab:
-        raise NeedsAttention("navigation", "the apply click did not open the external application")
-    return p
+    deadline = time.monotonic() + fill.ENTRY_TAB_WAIT * 2
+    clicked: set[str] = set()
+    while time.monotonic() < deadline:
+        if ctx.book.handles() - known - ctx.baseline:                   # a new tab opened (by this tab)
+            if ctx.book.hand_off(ctx.session, ctx.baseline, known):
+                return ctx.read()
+        p = ctx.read()
+        if ctx.book.current_handle(ctx.session) != before:              # a tab was already adopted
+            return p
+        if pages.form_is_here(p) and "linkedin" not in p.host:          # same-tab navigation to the form
+            return p
+        il = _leaving_control(p)
+        if il is not None and il.ref not in clicked:
+            clicked.add(il.ref)
+            ctx.browser.act([{"op": "click", "ref": il.ref}], ctx.session, p.table, stop_on_error=False)
+        ctx.sleep(0.5)
+    raise NeedsAttention("navigation", "the apply click did not open the external application")
 
 
 # ------------------------------------------------------------------ the external loop

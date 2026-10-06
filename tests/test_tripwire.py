@@ -7,6 +7,7 @@ click, a toggle, an upload and a type's focus click. Forms that send on "Confirm
 (f04) are outside the rule by the 2026-09-24 decision, so they are not walked here: a walk would send them —
 and the driver has no op that sends Enter anyway (test_guard.py documents both)."""
 import re
+import time
 
 import pytest
 
@@ -75,6 +76,38 @@ def test_f02_walks_to_the_final_step(new_browser, fixture_server):
         browser.close("trip")
     assert {"Next", "Review"} <= set(result["allowed"])
     assert "Submit application" in result["refused"]
+    assert fixture_server.posts() == []
+
+
+ATS_FINALS = ["ats/greenhouse_like.html",   # "Submit application" (structural submit)
+              "ats/lever_like.html",        # "Submit application" (structural submit)
+              "ats/toast_like.html",         # "Apply now!" (JS button, refused by the apply rule)
+              "ats/ashby_like_app.html"]     # "Submit Application" — rendered after a ~2.5 s delay
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("page", ATS_FINALS)
+def test_each_ats_final_button_is_refused_by_the_driver(new_browser, fixture_server, page):
+    """P5 A1: the final submit/apply control of each external ATS is refused by the driver's press path, and
+    nothing is sent. guard.FORM.started is set (the autouse fixture), as it is once the form is being filled, so
+    an apply-labelled control (Toast's 'Apply now!') is refused too."""
+    with new_browser() as browser:
+        browser.open(fixture_server.url(page), "trip")
+        target = None
+        for _ in range(40):                              # Ashby renders its form via setTimeout(~2.5 s)
+            _, table = browser.table("trip")
+            els = [e for e in table.elements if e.role in {"button", "link"}]
+            target = (next((e for e in els if guard._submit_like(e)), None)
+                      or next((e for e in els if guard.APPLY_RE.search(e.name or "")), None))
+            if target is not None:
+                break
+            time.sleep(0.2)
+        assert target is not None, f"{page}: no final submit/apply control found"
+        assert guard.never_click_element(target, guard.FORM), f"{page}: {target.name!r} is not refused"
+        s = browser._session("trip")                     # bypass guard.check: prove the driver's own lock
+        payload = s.act([{"op": "click", "ref": target.ref}], observe_after=False)
+        browser.close("trip")
+    assert payload["ops"][0]["error"] == "needs_confirmation", payload
     assert fixture_server.posts() == []
 
 

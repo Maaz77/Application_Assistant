@@ -1,0 +1,46 @@
+{
+  "url": "ats/lever_like.html",
+  "title": "Acme - Backend Engineer - Lever",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Full name",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "textbox",
+      "name": "Email",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "file",
+      "name": "Resume/CV",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e4",
+      "role": "textbox",
+      "name": "Additional information",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e5",
+      "role": "button",
+      "name": "Submit application",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

@@ -37,6 +37,7 @@ _CAPTCHA_TEXT_RE = re.compile(r"verify you('| a)re human|are you a robot", re.I)
 _LOAD_FAIL_RE = re.compile(r"^\s*(404|500|502|503)\b|page not found|this site can.t be reached|"
                            r"err_[a-z_]+|server error", re.I)
 _RESUME_RE = re.compile(r"resume|résumé|\bcv\b|curriculum", re.I)
+_AUTOFILL_RE = re.compile(r"autofill|auto-fill|\bparse\b|populate", re.I)
 _UPLOAD_TRIGGER_RE = re.compile(r"^\s*(upload|attach|add)\b.{0,20}\b(resume|résumé|cv|file|document)\b", re.I)
 _SITE_CHROME_RE = re.compile(r"^\s*(search\b|select language\s*$|set alert for similar jobs\b)", re.I)
 _FORM_IFRAME_RE = re.compile(r"greenhouse|lever\.co|workday|myworkdayjobs|ashbyhq|smartrecruiters|icims|jobvite|"
@@ -264,6 +265,12 @@ def _code_resume(p: Page) -> tuple[str | None, float, dict]:
         if resume_step and len(triggers) == 1:
             return triggers[0].ref, 0.9, {triggers[0].ref: 0.9}
         return None, 0.0, {}
+    # Ashby lists an "Autofill from resume" file input before the real "Resume" input (DISCOVERY 2026-09-23):
+    # drop the autofill/parser input when a non-autofill file input is also present, so the résumé goes to the
+    # real control, not the parser.
+    non_autofill = [e for e in file_inputs if not _AUTOFILL_RE.search(f"{e.name} {e.label}")]
+    if non_autofill and len(non_autofill) < len(file_inputs):
+        file_inputs = non_autofill
     named = [e for e in file_inputs if _RESUME_RE.search(f"{e.name} {e.label}")]
     if named:
         return named[0].ref, 0.9, {named[0].ref: 0.9}

@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Careers at Toast — AI Engineer</title></head>
+<body><h1>AI Engineer</h1><p>Greenhouse form embedded on the company careers page. It ends in "Apply now!", a
+non-structural button that submits by JS (DISCOVERY ~378) — refused by the never-submit apply rule once filling
+has started, and recognised by pages.forward_submit so the final page still parks.</p>
+<form action="/submit" method="post" onsubmit="return false">
+  <label>First Name <input type="text" required></label>
+  <label>Email <input type="text" required></label>
+  <label>Resume/CV <input type="file" required></label>
+  <button type="button" onclick="this.closest('form').requestSubmit()">Apply now!</button>
+</form></body></html>

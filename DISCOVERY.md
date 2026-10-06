@@ -1302,3 +1302,76 @@ Queue (1 job):
   • The Flex – Senior Software Engineer  https://www.linkedin.com/jobs/view/4470918779  [4470918779_…]
 exit=0
 ```
+
+## 2026-10-07 — P5: external ATS by one general loop, no host adapters (decision + findings)
+
+**Decision (user, 2026-10-07).** Follow LinkedIn's external "Apply" to the ATS form and fill it with the same
+pipeline, but **not** with three hardcoded host adapters (Greenhouse/Ashby/Lever) as the phase file's T3 drafted.
+The user asked for a smarter, more general approach — "the LLM/KEV decides what to do on the page, the driver
+acts". An Opus brainstorm (clean context) and a reviewer pass agreed: the generic pipeline already reads all
+three hosts (the P2 observer solved grouped file labels, react-select `current`, opacity:0 radios; P3's
+`extract_questions`→answer→`plan_fill`→read-back→`gate` is host-neutral), so the only LinkedIn-specific thing is
+the *navigation shell* of `run_pages` (modal-dialog scoping). P5 adds one thin shell for full-page / multi-step
+forms and keeps everything else. **Supersedes D12** (external Apply was Needs Attention `external_ats`).
+
+Also decided: gate ≥ 5 of 10; **skip T4** (the Greenhouse boards-API cross-check — DOM extraction already yields
+required markers); **defer T2** (cross-origin frame attach) — LinkedIn's external "Apply" opens the ATS's own
+**hosted** top-document form (`job-boards.greenhouse.io`, `jobs.ashbyhq.com`, `jobs.lever.co`), which the
+top-level observer reads in full; the captures show `iframe_srcs.long = 0` there. The one-line `browser_open(src)`
+hop stays for a genuinely embedded form (we park before submit, so the hop's usual submit-coupling downside does
+not apply). Frame-attach becomes justified only if a live run shows an embedded form whose token-bearing src is
+trimmed by the `IFRAME_SRCS` ~170-char cap.
+
+**How it works.** `navigate.enter` now raises the control-flow signal `GoExternal` (blockers.py) instead of
+`NeedsAttention("external_ats")`; `cli.process` catches it and runs `external.run_external`, which hands the job
+off to the ATS tab and loops: `pages.read_page` → `pages.classify` (the previously-unused `Verdict` dispatcher,
+now revived) → fill/advance/gate/park. `run_external` mirrors `run_pages`' full exception mapping, because it is
+caught through `process()`'s `except GoExternal:` (a sibling of its `except RestartFromEntry:`), so anything that
+escaped would crash the whole run rather than becoming a per-job outcome.
+
+**Two safety predicates external hosts need and LinkedIn does not.**
+1. `external.looks_like_application(p)` — fill only a real application form, not a page that merely has fields.
+   Signal: a résumé/CV upload control is present, OR both an identity name field and an email field are among the
+   real application fields. A lone email box (a job-alert sign-up) fails. This closes the Mastercard mis-fill
+   (2026-09-23 entry): previously "any non-chrome field ⇒ a form". A page with fields that fails this →
+   `unsupported_ats` with the host, and **nothing on it is clicked**.
+2. The pre-fill apply click (`external._safe_apply`) is allowed only on a page with no form yet, for a control
+   that is not a form's own control and that the guard already allows. On LinkedIn a pre-fill "Apply" is never a
+   submit; on an arbitrary ATS it can be (Toast's "Apply now!", 2026-09-23). The apply-click permission is kept
+   separate from `looks_like_application`, so that predicate is never load-bearing for never-submit.
+
+**Final-submit detection.** `looks_final`/`_submit_like` do not match the label "apply", so a Greenhouse/Toast
+page ending in "Apply now!" was never judged to have a submit and failed the gate with "no submit button". New
+`pages.forward_submit(p)` counts an apply-labelled forward control as the submit, so such a page parks. Kept out
+of `_submit_like` on purpose: adding "apply" there would make a LinkedIn posting's top-card "Apply" turn every
+posting into `final_step`. The guard still refuses the control — it is never clicked.
+
+**Driver: `Session.adopt()` parity.** Adopting a background tab (the external hand-off) skipped
+`Emulation.setDeviceMetricsOverride`, `setFocusEmulationEnabled` and `addScriptToEvaluateOnNewDocument`, so React
+inputs in the adopted tab were treated as unfocused/zero-size and silently dropped typed values (read-back
+mismatch → `broken_form` on every external form). `adopt()` now mirrors `_attach_page`'s capability setup.
+
+**Hand-off through a "You are leaving LinkedIn" interstitial.** LinkedIn can cover the posting with a "you are
+leaving to apply on the company website" dialog whose "Continue" opens the ATS tab; the fixture
+`4012345608-dialog` reproduces it. `external._hand_off` polls after the apply click: hand off as soon as a new
+tab appears, click a leaving/Continue control when one is up (never Cancel, never "Continue with <provider>"),
+or return when the form opens in this tab (a same-tab navigation). The immediate (`4012345604-external`) and
+delayed-tab (`4012345607-late-tab`) cases keep working.
+
+**Ashby autofill-input.** Ashby's application lists an "Autofill from resume" file input (`e9`, empty name)
+*before* the real "Resume" input (`e15`) — capture `jobs-ashbyhq-com-20260923-150513`. `_code_resume` returned
+`named[0]` in DOM order, so if the autofill input's group label carried "resume" the résumé went to the parser.
+Fixed generally: `pages._code_resume` drops any file input matching `autofill|parse|populate` when a non-autofill
+file input is also present.
+
+**T6 `requeue --class <cls>`** filters Needs-Attention by the class a run recorded, read from the tracker Notes
+line (`records.recorded_class`, authoritative) with the `job.md` heading as fallback.
+
+**Tests.** `test_external_apply_is_needs_attention` / `test_external_apply_is_external_ats` are rewritten to
+assert `GoExternal` (phase-mandated behaviour change, 00_common §4.5). New: `test_external.py`
+(`looks_like_application`), the external cases of `test_process_browser.py` moved into the offline browser suite
+(deterministic now — no `browser_goal`) plus an unsupported job-alert-box case, `test_tripwire.py`
+`test_each_ats_final_button_is_refused_by_the_driver` (A1: Greenhouse/Lever "Submit application", Toast "Apply
+now!", Ashby "Submit Application"), `test_pages_unit.py` `forward_submit` and the autofill-input pick, and
+`test_records.py` for `requeue --class`. No Lever capture exists in the repo (`lever_like.html` is authored from
+Lever's known form); a live Lever run still needs a user `capture`.

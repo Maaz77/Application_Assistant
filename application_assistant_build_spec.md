@@ -1,6 +1,12 @@
 # Application Assistant v2: Build Spec, as built
 
-Spec v4.0 · 2026-09-29 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the observer behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems.
+Spec v5.0 · 2026-10-07 · describes the code as it is. It replaces spec v2 (2026-09-22), which the code outgrew. The section numbers (§), the plan items (C…, D2) and the observer behaviours (B1–B9) keep their v2 meaning where the code still cites them. `DISCOVERY.md` records why each change was made, with dates and live measurements. §13 lists the open problems. The version banners below are cumulative and authoritative: where a later banner and an older section's prose conflict, the banner (and the dated `DISCOVERY.md` entry it points to) wins.
+
+**v5.0 (re-core P5, 2026-10-07):** external ATS applications (Greenhouse, Ashby, Lever, or any readable host) are now **followed and filled**, no longer a dead-end `external_ats` (supersedes D12). There are **no host adapters**: the generic pipeline already reads these forms, so the only new code is a thin navigation shell, `external.run_external` (`assistant/external.py`), for full-page / multi-step forms. `navigate.enter` raises the signal `GoExternal` on an external "Apply"; `cli.process` catches it and runs `external.run_external`, which hands the job off to the ATS tab (`_hand_off`, through any "You are leaving LinkedIn" interstitial), then loops `pages.read_page` → `pages.classify` (the revived `Verdict` dispatcher) → `fill.fill_page` / advance / `pages.gate` → `fill._park`, with the same never-submit guard and bounded, cached KEV/LLM use (D19). Two safety predicates external hosts need: `external.looks_like_application` (fill a real application form, not a lone job-alert box — closes the Mastercard mis-fill) and the pre-fill apply-click rule (`external._safe_apply`). `pages.forward_submit` lets an apply-labelled control satisfy the gate (still never clicked). Driver: `Session.adopt()` gained device-metrics + focus-emulation + the persistent observer script so an adopted tab does not drop typed values. `pages._code_resume` deprioritises an autofill/parser file input (Ashby). `requeue --class <cls>` (T6). **T2 (cross-origin frame attach) is deferred** — LinkedIn's external "Apply" opens the ATS's own hosted top-document form, which the top-level observer reads in full; a one-line `browser_open(src)` hop remains for a genuinely embedded form. See `DISCOVERY.md` (2026-10-07) and `recore/HANDOVER.md` (end of P5).
+
+**v4.2 (re-core P4, 2026-10-05):** Easy Apply reliability — custom-widget handlers (`assistant/widgets.py`: `div role=radio` Yes/No, custom selects, typeahead/combobox), answer and read-back robustness (re-render handling, fuzzy hold checks), driver attach/observe fixes, and the empty-queue guard (`cli._report_queue`, a run that matched no job says why and exits 1). See `recore/P4_REVIEW.md`, `DISCOVERY.md` (P4 entries) and the P4 commits.
+
+**v4.1 (re-core P3, 2026-10-01):** a **replay harness** (`tests/replay/`) re-runs recorded jobs offline from the captured logs; **facts moved to code** — `pages.judge` is fully deterministic (zero Jev calls for page classification); **lean Jev** — the System One model is asked only for residual ambiguity, cached by page state, ≤ `jev.max_requests_per_job` (40) per job, with a chat fallback (`decide.ChatDecider`); **new LLM inference** — `llm_inference.extract_questions` builds the question list in code and the chat model returns only per-question answers; **park at an unanswered required question** (D9/T5) — fill everything else, park the tab, Status Pending Review, Notes list the questions. See `recore/HANDOVER.md` (end of P3) and `DISCOVERY.md` (P3 entries).
 
 **v4.0 (re-core P2, 2026-09-29):** the vendored browser package is **removed** and its CDP code is owned in `assistant/driver/` (§3): the aa2–aa6 observer (now with `type`/`tag`/`required`/`maxlength`/`placeholder`/`form`/`dialog`/`consent`/`scope` fields and no 160-char cut), a guarded op executor with **one mouse-press path** that enforces the never-submit rule, and one CDP connection per run. `assistant/browser.py` (`Browser`) replaces `jev.py`; only it imports the driver. The **never-submit rule is absolute** (§4, `guard.never_click_element`): the full refused-label set, structural submits, an advance allowlist, the final-page judgment and one cookie-consent exemption; the driver has no op that sends Enter/Escape. **Navigation is deterministic** (§5.1, `assistant/navigate.py`) with no page-kind model call — the three `browser_goal` calls are gone, and `fill_page` drops its page-goal fallback. See `recore/HANDOVER.md` (end of P2) and `DISCOVERY.md` (P2 entries) for the full change list, and note that §3/§4/§5.1 below still carry some v3.2 prose about the package that the P2 entries supersede.
 
@@ -12,7 +18,7 @@ Spec v4.0 · 2026-09-29 · describes the code as it is. It replaces spec v2 (202
 
 Who does what:
 - **The browser driver** is owned in `assistant/driver/` (P2), ported from the vendored package (MIT).
-- **The System One decision model** (config `models.system_one_decision_provider`; TypeSafe's **Jev** instance, or a local **Kev** server) judges every page and plans every fill; the package's goal agent also uses it to pick each click.
+- **The System One decision model** (config `models.system_one_decision_provider`; TypeSafe's **Jev** instance, or a local **Kev** server) answers only residual ambiguity in a fill (v4.1): page classification is deterministic code (`pages.judge`), navigation is deterministic (`navigate.py` / `external.py`), and there is no goal agent (v4.0).
 - **The LLM inference**, a chat model, writes the answers, and only from the user's files.
 - **The code keeps:** the answer checks, the resume upload, the records, and one fixed never-submit rule (§4.2).
 
@@ -24,7 +30,7 @@ Who does what:
 4. Tracker I/O is imported from `Tools/Reconcile/reconcile.py`; its behaviour is not changed.
 5. The browser driver is owned in `assistant/driver/`; there is no external browser package. `.env` is never committed or printed.
 6. Only `assistant/browser.py` imports `assistant/driver/` (the interface boundary; a static test enforces it).
-7. Every judgment about a page, a question or a fill is Jev's (§6). A `DecisionError` sends the job to Needs Attention (class `decision`). There is no rule-based fallback in the program; the old rules live only in the offline test stand-in (§9).
+7. Page classification is deterministic code (`pages.judge`, v4.1); the System One model (§6) is asked only for the residual ambiguity in a fill, cached by page state and bounded per job (D19). A `DecisionError` sends the job to Needs Attention (class `decision`).
 
 ## 1. What the program does
 
@@ -701,6 +707,16 @@ T0–T10 of spec v2 were built and handed over on 2026-09-23. The main changes s
 C1 no tab groups · C4 tracker saved after every job · C7 the agent clicks the step's Next (one action per goal) · C8 a blocked job's tab stays open · C10 `policy.prefill` · C14 closed or already applied → Needs Attention, no retry · C15 cover letter: text → generated; optional file → empty; required file → blocker · C16 demographics only from the Scratch Pad · C19 LinkedIn signed out mid-run → exit 3, job untouched · C20 free text ≤ `free_text_max_chars` without a maxlength · C21 `JEVMCP_MAX_ACTIONS=2000` · C22 uncovered optional field → empty, listed in the note · C23 experience totals only as `computed` · C24 cookie banners: the agent declines optional cookies · C25 the resume input is Jev's pick, then narrowed, then the LLM inference's.
 
 ## 13. Main problems and challenges
+
+**P5 update (2026-10-07).** The `external_ats` dead-end below is **resolved**: external ATS applications are now
+followed and filled by `external.run_external` (no host adapters — see the v5.0 banner), and a host with no
+readable application form is reported `unsupported_ats` with its name. Remaining, deliberately deferred: **T2,
+cross-origin frame attach.** The top-level observer does not read a cross-origin child frame, so a Greenhouse form
+**embedded** in a company page (rather than opened as its own hosted tab) is reached only by the one-line
+`browser_open(src)` hop, which fails if the embed's token-bearing `src` is trimmed by the `IFRAME_SRCS` ~170-char
+cap. No repo evidence shows this case is hit by LinkedIn's external "Apply" (it opens the ATS's own hosted form),
+so frame-attach is left to a later phase. The P5 offline suite + tripwire (each ATS's final button) + replay pass;
+the live gate (≥ 5 of 10 external jobs parked) is the user's to run (`LIVE_TEST.md`, P5).
 
 **P1 update (2026-09-28).** P1 fixed the request volume and the failure handling below; it did **not** get a job
 parked, and could not, for a reason the user chose knowingly:
