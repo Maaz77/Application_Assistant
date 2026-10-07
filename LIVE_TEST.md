@@ -2,6 +2,12 @@
 
 ## P5 re-core gate (2026-10-07)
 
+> **Status (2026-10-07):** run over five live `--no-record` passes. Real Ashby forms parked (2/2 in the last full
+> run); the embedded-Greenhouse (Toast) and résumé-upload-re-render cases were fixed from the live evidence. The
+> user **accepted this as the gate** (no full 10-job recorded run). **Prerequisite for re-running on D14:**
+> `config.toml` now has `chat_route = "openrouter"`, so `OPENROUTER_API_KEY` needs purchased credit (a run
+> otherwise stops at preflight with HTTP 402); reverting to `chat_route = "vercel"` is the alternative.
+
 External ATS (Greenhouse, Ashby, Lever) by one general loop — no host adapters. An external "Apply" is followed
 off LinkedIn, the ATS tab is adopted, and the same pipeline fills it and parks one click before submit. Other
 hosts are classified: an account wall (Workday/iCIMS/Taleo/SuccessFactors) → `signup`/`credentials`, a captcha →
