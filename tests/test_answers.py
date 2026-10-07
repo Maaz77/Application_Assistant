@@ -35,6 +35,19 @@ PAGE = Page(url="https://acme.io/apply", title="Apply", text=(
     ]), maxlengths={"n": 1, "more": False, "items": [["Why Acme?", 120]], "min": 120})
 
 
+def test_radio_group_with_a_compound_uuid_key_falls_back_to_select_one():
+    """P5 (live 2026-10-07): Ashby groups radios under a compound UUID id (two UUIDs joined). _group_label must
+    treat it as having no question text and fall back to 'Select one', not emit space-separated hex as the
+    question — which also keeps demographic options from being sent to the model under a meaningless label."""
+    key = "5e8c23fc-a45b-4898-b611-85a74dcb9cf6_07d924f7-8d86-4961-9d0e-1a2b3c4d5e6f"
+    demog = [Element(ref="e20", role="radio", name="Male", tag="INPUT", context=""),
+             Element(ref="e21", role="radio", name="Female", tag="INPUT", context="")]
+    assert A._group_label(key, demog) == "Select one"
+    real = [Element(ref="e1", role="radio", name="Yes", tag="INPUT"),
+            Element(ref="e2", role="radio", name="No", tag="INPUT")]
+    assert A._group_label("work_authorization", real) == "Work authorization"   # real keys still read as words
+
+
 def q(**kw):
     base = dict(id="q1", question="Q", kind="text", ref=None, option_ref=None, options=None, required=True,
                 answer=None, source=None, quote=None, relies_on=None)

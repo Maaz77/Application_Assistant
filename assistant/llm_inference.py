@@ -170,6 +170,10 @@ def resume_text(pdf: Path) -> str:
 # ------------------------------------------------------------------ T4: code extracts questions
 
 _UUID_RE = re.compile(r"^[0-9a-f-]{20,}$", re.I)
+# A UUID anywhere in the key (any join char): Ashby's radio group id is two UUIDs joined by '_', which slips
+# past _UUID_RE's all-hex-and-hyphen anchor, so the cosmetic '-'/'_'→space transform turned it into a question
+# label of space-separated hex (live 2026-10-07). Such a key carries no question text.
+_OPAQUE_ID_RE = re.compile(r"[0-9a-f]{8}[-_][0-9a-f]{4}[-_][0-9a-f]{4}", re.I)
 
 
 def _is_required(name: str, attr_required: bool, p: Page) -> bool:
@@ -233,7 +237,7 @@ def _group_label(group_key: str, members: list) -> str:
     """Human-readable question text from a radio group key."""
     if not group_key or group_key.startswith("_"):
         return members[0].context or "Select one"
-    if _UUID_RE.match(group_key) or len(group_key) > 80:
+    if _UUID_RE.match(group_key) or _OPAQUE_ID_RE.search(group_key) or len(group_key) > 80:
         return members[0].context or "Select one"
     all_native = all(m.tag == "INPUT" for m in members)
     if not all_native:
