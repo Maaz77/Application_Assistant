@@ -1,119 +1,115 @@
-# Re-core HANDOVER — end of P3
+# Re-core HANDOVER — end of P5
 
-- **Phase:** P3 — Replay harness, facts in code, lean Jev, new LLM inference, park at unanswered question.
-- **Date:** 2026-10-01
-- **Branch:** `recore/p3-decisions-and-llm-inference` (off `main`; P2 is already in main).
-- **Build spec:** v4.0 (not yet bumped to v4.1 — A4 outstanding).
-- **PR:** https://github.com/Maaz77/Application_Assistant/pull/1
-- **State:** **code complete, live gate not yet passed.** The offline suite covers every T1–T6 change. The live run
-  (`runs/20261001-214422`, `--limit 3`) reached the Easy Apply fill stage on Linda AI (page 5, 9 LLM inference
-  calls, $0.006) but stopped at `broken_form` — the same `div role=radio` widget limitation from P2. No job was
-  parked end-to-end (A3 not met). The two other jobs (Genesys, Mastercard) were `external_ats` and never entered
-  Easy Apply.
+- **Phase:** P5 — External ATS (Greenhouse, Ashby, Lever) by one general loop; no host adapters.
+- **Date:** 2026-10-07
+- **Branch:** `recore/p5-external-ats` (off `main`; P0–P4 are already in `main`).
+- **Build spec:** v5.0 (bumped this phase; the P3→v4.1 and P4→v4.2 banners, deferred earlier, were also written now).
+- **State:** **code complete, offline suite green; the live gate is the user's to run and has not been run yet**
+  (invariant §4.4 — the agent never drives real sites). The offline suite, the tripwire (including each ATS's
+  final button) and replay all pass; the end-to-end external hand-off and park are validated on local fixtures.
+
+## Decisions taken this phase (by the user, 2026-10-07)
+
+- **Gate:** ≥ 5 of 10 external Greenhouse/Ashby/Lever jobs parked (the phase file's proposal, kept).
+- **No host adapters.** The user asked for a smarter, more general approach ("the LLM/KEV decides what to do on
+  the page, the driver acts"). An Opus brainstorm (clean context) + a reviewer pass confirmed the generic
+  pipeline already reads all three hosts, so P5 adds one thin loop, not three adapters. **Supersedes D12.**
+- **Skip T4** (Greenhouse boards-API cross-check): DOM extraction already yields required markers.
+- **Defer T2** (cross-origin frame attach): LinkedIn's external "Apply" opens the ATS's own hosted top-document
+  form, read in full by the top-level observer; the `browser_open(src)` hop stays for a genuinely embedded form.
 
 ## What changed
 
-**T1 — Replay harness** (`tests/replay/`, `061f19d`): offline re-run of recorded jobs from captured
-`browser_actions.jsonl` and inference logs. `ReplayBrowser` replays observe/act calls in order; `ReplayGateway`
-matches model requests by content (Jev: `State` + questions; LLM: `messages` + `parameters`). Modes: `strict`
-(missing = fail) and `live` (missing = real API, save response). The P2 gate run (`linda-ai-p2`) is the first
-fixture. `cli.py` gained `replay` subcommand.
+**T6 — `requeue --class <cls>`** (`assistant/records.py`, `assistant/cli.py`, `8693334`). `requeue` gained an
+optional class filter (CLI `--class external_ats`) so the live gate can move only the jobs an earlier run
+recorded as `external_ats` back to the queue. `records.recorded_class(notes, job)` reads the class from the
+tracker Notes line (authoritative, `NA_CLASS_RE`) or the `job.md` heading (fallback).
 
-**T2 — Facts in code** (`assistant/pages.py`, `af638bc`): `judge()` is fully deterministic — zero Jev calls for
-page classification. Moved to code: application fields (by `scope`), required (element field + `REQUIRED_EMPTY`
-probe), placeholder detection, read-back (value comparison, whitespace/case normalized), settle (two equal observe
-hashes 300 ms apart), signed-out (URL rules), closed/applied (LinkedIn texts), captcha (`CAPTCHA_PRESENT` probe),
-final step (refused submit + no advance button), resume/cover-letter input detection.
+**T1 + T3 — external hand-off and the general loop** (`f224a03`). New signal `blockers.GoExternal`:
+`navigate.enter` raises it on an external "Apply" (was `NeedsAttention("external_ats")`, D12); `cli.process`
+catches it and runs `external.run_external`. New module `assistant/external.py`:
+- `_hand_off` clicks the posting's external Apply and adopts the ATS tab — immediately, after a delayed
+  `window.open`, or after a "You are leaving LinkedIn" interstitial's Continue (polled; never Cancel / "Continue
+  with <provider>"), or a same-tab navigation to the form.
+- the loop: `pages.read_page` → `pages.classify` (the previously-unused `Verdict` dispatcher, revived) → per
+  verdict: `alarm`→`StopRun`; `google`/`google_wall`→`google_signin` (once/job); `blocker`→`fill._attempt2`
+  (captcha wait-reload / signup guest link) or reload for `load_failure`; `iframe`→`browser.open(src)` hop;
+  `form`/`final`→ `looks_like_application` then `fill.fill_page` (first pass) / page-advance (multi-step) /
+  `pages.gate`+`fill._park`; `navigate`→ a safe pre-fill apply/advance click, else `unsupported_ats`.
+- `run_external` mirrors `run_pages`' full exception mapping (`_Refill`, `DriverTimeout`→`StopRun`,
+  `DriverError`→`attempts`, `ParkedAtQuestion`→park), because it is caught through `process()`'s
+  `except GoExternal:` — anything escaping would crash the whole run.
+- **Two safety predicates:** `external.looks_like_application(p)` (fill a real application — résumé upload, or
+  name+email — not a lone job-alert box; closes the Mastercard mis-fill) gates fill-vs-`unsupported_ats`; the
+  pre-fill apply click (`_safe_apply`) is allowed only with no form present and the control not a form's own and
+  guard-permitted. They are separate, so the strict predicate is never load-bearing for never-submit.
+- `pages.forward_submit` lets an apply-labelled control satisfy the gate (still never clicked); kept out of
+  `_submit_like`/`looks_final` so a LinkedIn posting's top-card "Apply" is not read as `final_step`.
+- `fill.park_at_question` factored out of `run_pages` for reuse.
+- Driver: `Session.adopt()` now sets device metrics + focus emulation + `addScriptToEvaluateOnNewDocument`
+  (an adopted background tab otherwise dropped typed values → `broken_form`).
 
-**T3 — Lean Jev** (`assistant/fill.py`, `assistant/decide.py`, `1b5f862` + `f4153d1`): Jev reserved for residual
-ambiguity only — `must_not_generate`, total-vs-specific years, option mapping (when answer ≠ visible option),
-final-step confirmation (`noul ≥ 0.5`), `kind` on non-LinkedIn pages, and resume/cover-letter when code finds
-zero or several candidates. Cache by page-state hash (`sha256(URL + control signatures + page-text hash)`); same
-hash reuses judgment. Budget: `jev.max_requests_per_job = 40` (Jev + fallback together); above → Needs Attention
-`decision_budget`. Cache key uses full question body (fix: `f4153d1`); digit-suffix guard at 7+ digits prevents
-phone/zip collisions.
+**T7 + fixes + docs** (`513378c`, `1417912`).
+- `pages._code_resume` deprioritises an `autofill|parse|populate` file input when a real one is present (Ashby
+  lists "Autofill from resume" before "Resume").
+- Fixtures: `tests/fixtures/ats/{toast_like,lever_like,alert_box}.html`,
+  `tests/fixtures/jobs/view/4012345610-alertbox.html`, with golden tables in `tests/golden/tables/`.
+- Tests: `test_external.py` (`looks_like_application`); `test_tripwire.py`
+  `test_each_ats_final_button_is_refused_by_the_driver` (A1); `test_process_browser.py` external cases moved into
+  the offline browser suite (deterministic now — `browser_goal` is gone) + an `unsupported_ats` job-alert-box
+  case asserting zero clicks; `test_pages_unit.py` `forward_submit` and autofill-input picks; `test_records.py`
+  `requeue --class`. The two `external_ats` tests were rewritten to assert `GoExternal` (phase-mandated, §4.5).
+- A shared-Chrome test flake fixed (`1417912`): the external process test now excludes pre-existing `baseline`
+  tabs from its "LinkedIn tab closed" check (an earlier browser test leaves that fixture tab open, by D13).
+- Docs: `DISCOVERY.md` 2026-10-07 entry; `LIVE_TEST.md` P5 gate; build spec v5.0 (cumulative P3/P4/P5 banners,
+  §13 update).
 
-**T4 — New LLM inference** (`assistant/llm_inference.py`, `6db39c7`): `extract_questions(page)` (code) builds
-structured question list from the element table — `id`, `question`, `kind`, `options`, `required`,
-`current_value`, `maxlength`. The model receives pre-structured questions and returns only answers:
-`{"answers": [{"id", "answer", "source", "quote", "relies_on"}]}`. Prompt rewritten (`prompts/llm_inference.md`)
-keeping every rule of build spec §7.3. One call per dialog step, plus at most one regeneration for `generated`
-answers. All §7.4 checks retained (quotes, choices, generated, computed recompute, pre-fill, keep-if-silent).
+## Config / CLI
 
-**T5 — Park at unanswered required question** (`assistant/fill.py`, `assistant/records.py`, `4f5f18f`): if a
-required field has no valid answer and no kept value after checks, every other field is filled, the gate runs
-without `REQUIRED_EMPTY` for those fields, the screenshot is taken, and the job is recorded as Pending Review with
-Notes `Answer before you submit: <q1>; <q2>`. The report lists the questions under "Questions for your Scratch Pad".
+- CLI: `requeue --class <cls>`. No config schema change this phase.
 
-**T6 — Tests** (`tests/test_answers.py`, `tests/test_fill_loop.py`, `tests/test_records.py`, `dd9ae07`): extraction
-logic on fixtures (labels, groups, options, required), park-at-question end-to-end with temp records, request-count
-assertions.
+## Evidence (offline; live gate pending)
 
-**Answers.json schema header** (`assistant/fill.py`, `d1565cf`): `_ANSWERS_SCHEMA` dict inserted as first element
-when creating a new `answers.json`, documenting every field. Updated `prompts/llm_inference.md` to the P3 schema
-(code extracts questions, model answers). Removed stale duplicate at a bogus nested path.
-
-## Evidence
-
-- **Offline suite (A1):** unit and browser tests cover T1–T6 changes (user killed the run before completion in
-  this session; re-run needed for final count).
-- **Replay (T1):** `tests/test_replay.py` — the P2 gate fixture (`linda-ai-p2`) replays in `strict` mode with
-  zero network calls.
-- **Facts in code (T2):** `tests/test_pages_unit.py` — deterministic `judge()` on fixtures.
-- **Lean Jev (T3):** `tests/test_fill_loop.py` — cache reuse, budget stop, fallback.
-- **New LLM inference (T4):** `tests/test_answers.py` — extraction, schema compliance, check_answers.
-- **Park at question (T5):** `tests/test_records.py`, `tests/test_fill_loop.py` — end-to-end park-at-question.
-- **A2 (request counts):** not yet verified on live run (A3 blocks it).
-- **A3 — live gate NOT YET PASSED.** Run `runs/20261001-214422` (`--limit 3`): Genesys and Mastercard →
-  `external_ats` (never entered Easy Apply). Linda AI → Easy Apply → filled 5 pages (1 System One, 7 LLM
-  inference, 9 attempts, 0 failures, $0.0058) → `broken_form` on three radio-button questions: "Have you completed
-  the following level of education: Bachelor's Degree?", "Are you comfortable working in an onsite setting?",
-  "Are you legally authorized to work in Ireland?" — the same `div role=radio` widget limitation from P2. **The P3
-  code changes worked correctly:** questions were extracted by code, model answered them, the cache hit, the budget
-  held. The blocker is the P4 widget handler, not P3 logic.
-- **A4 (docs):** build spec not yet bumped to v4.1. HANDOVER.md written (this file).
+- **Offline suite (A1):** `pytest -m "unit or browser"` → unit 337 pass; full browser suite 105 pass / 0 fail
+  (`2026-10-07`, after the flake fix). Replay (`test_replay.py`) and the tripwire are included and pass.
+- **Tripwire (A1):** `test_each_ats_final_button_is_refused_by_the_driver` proves the driver refuses
+  Greenhouse/Lever "Submit application", Toast "Apply now!", and Ashby "Submit Application"; `fixture_server.posts()`
+  is empty.
+- **End-to-end external hand-off + park:** `test_process_browser.py` parks the three hand-off variants
+  (immediate / delayed tab / leaving-dialog) on the generic ATS form, LinkedIn tab closed, one tab per job, no
+  POST; the job-alert box ends `unsupported_ats` with zero clicks.
+- **A2 (live gate — ≥ 5 of 10 parked):** NOT YET RUN. The agent does not drive real sites (§4.4); this is the
+  user's step (`LIVE_TEST.md`, P5).
 
 ## Known issues / open questions
 
-- **P4 (widgets) still blocks the live gate.** Linda AI's `div role=radio` Yes/No questions cannot be set with
-  click/type/select/toggle/upload. P4 adds the widget handlers; that is the last thing between Linda AI and an
-  end-to-end park. This is the same blocker as P2.
-- **"Select one" question (Linda AI page 2):** the model returned `answer: null` with `note: "pre-fill not kept"`.
-  This is a question whose options are not known (the report lists it under "Questions for your Scratch Pad").
-  May need a Scratch Pad entry or investigation of the actual options.
-- **"Are you comfortable working in an onsite setting?":** also listed under questions for the Scratch Pad — the
-  profile does not state a preference. Needs a Scratch Pad entry.
-- **Build spec v4.1 not written.** §6 (page decisions) and §7 (LLM inference) need rewriting to match the P3
-  code (extract_questions, structured input, lean Jev). A4 outstanding.
-- **Stale `prompts/llm_inference.md` was fixed in `d1565cf`** — the correct P3 prompt is now at the project-level
-  path. The bogus nested-path duplicate (`Users/maaz/.../prompts/llm_inference.md`) was removed.
-- **`_run/` subfolder** in run directories holds run-level (non-job) inference logs and browser actions: preflight
-  Jev calls, queue navigation, tab cleanup. By design (`inference_log.py` scope fallback).
+- **No Lever capture in the repo.** `ats/lever_like.html` is authored from Lever's known form shape; the live
+  gate needs a real `python -m assistant capture <lever-url>` to confirm the extraction.
+- **Ashby autofill-input fix** is verified against the 2026-09-23 capture + a fixture; confirm on a live Ashby.
+- **T2 (embedded cross-origin Greenhouse)** is deferred — only the `browser_open(src)` hop handles it, and that
+  fails if the embed `src` is trimmed by the `IFRAME_SRCS` ~170-char cap. Revisit only if a live run hits it.
 
 ## Deviations from the phase file
 
-- **A3 not met:** the live gate requires "at least one Easy Apply job parked at the final step." Linda AI reached
-  page 5 but stopped at `broken_form` (radio widgets). The P3 logic (extraction, answering, caching, budget)
-  worked correctly; the failure is the P4 widget limitation, not a P3 regression.
-- **Build spec v4.1 not written** (A4 partial): HANDOVER written, spec bump deferred.
-- **Test counts not verified on live run** (A2 partial): the live run did not produce a parked job, so per-page
-  request counts cannot be validated against the A3 gate.
+- **No host adapters (T3)** and **T2 deferred** — both user-approved (above); both flagged by the brainstorm as
+  needing sign-off, and signed off via AskUserQuestion on 2026-10-07.
+- **T4 skipped** (optional in the phase file), user-approved.
 
 ## Merge
 
-The branch is **not yet ready to merge** — A3 (live gate) is not passed. The code changes are complete and the
-offline suite covers them, but the live gate needs Easy Apply jobs that don't hit the P4 radio-widget blocker.
-Options:
-1. Find an Easy Apply job without radio-button questions and re-run the live gate.
-2. Accept that P3 + P4 together will pass the gate, merge P3 now, and gate P4 instead.
+Not yet mergeable: A2 (the live gate) is not passed. Code + offline suite are complete. After the user runs the
+P5 gate and it passes (≥ 5 of 10 parked, zero submissions, one tab per job, correct classes for the rest), the
+branch is ready to merge.
 
 ## Commands the next session needs
 
 ```bash
 # from Tools/Application_Assistant/
-./run_kev_server.command                                    # System One route is "local": start it first
-.venv/bin/python -m assistant preflight                     # LLM inference + System One + one Chrome connection
-.venv/bin/python -m assistant run --no-record --limit 3     # the P3 live gate (pick Easy Apply jobs)
-.venv/bin/pytest -m "unit or browser" -q                    # the offline suite
-.venv/bin/pytest tests/test_replay.py -q                    # replay harness on P2 fixtures
+./run_kev_server.command                                      # if the System One route is "local"
+.venv/bin/python -m assistant preflight
+.venv/bin/python -m assistant requeue --class external_ats    # T6: external jobs back to the queue
+.venv/bin/python -m assistant run --no-record --limit 5       # dry pass over external jobs
+.venv/bin/python -m assistant run --limit 10                  # the recorded P5 gate
+.venv/bin/pytest -m "unit or browser" -q                      # the offline suite
+.venv/bin/pytest tests/test_replay.py -q                      # replay harness
 ```
