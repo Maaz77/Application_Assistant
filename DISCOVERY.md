@@ -1375,3 +1375,49 @@ assert `GoExternal` (phase-mandated behaviour change, 00_common §4.5). New: `te
 now!", Ashby "Submit Application"), `test_pages_unit.py` `forward_submit` and the autofill-input pick, and
 `test_records.py` for `requeue --class`. No Lever capture exists in the repo (`lever_like.html` is authored from
 Lever's known form); a live Lever run still needs a user `capture`.
+
+## 2026-10-07 — P5 live runs (the user authorized live testing) and the fixes they forced
+
+Two live `run --no-record` passes in the user's real Chrome (Kev local System One, Vercel/mistral chat). The
+never-submit rule held in both: across every `browser_actions.jsonl` the only `ok` clicks were start-of-apply
+controls ("Apply on company website", "Easy Apply", Ashby "Apply for this Job"), Next/Review, and résumé uploads
+— no Submit/Apply-submit click, no ALARM, and `--no-record` wrote nothing.
+
+**Run 1 (`runs/20261007-092704`) — crashed on Toast.** Observing the freshly-adopted Toast tab ran
+`__jevMcp.readState` while `document.body` was still null, and `textOf`'s `document.createTreeWalker(document.body)`
+threw `TypeError: ... parameter 1 is not of type 'Node'`. That `CdpError` was raised in `external._hand_off`,
+which runs in `run_external`'s outer `try` where there was no `except DriverError`, so it escaped `process()` and
+aborted the whole run with a traceback. Ashby ended `unsupported_ats` because the loop read `/application` while
+it still said "Fetching application form" and gave up before the form rendered. Linda AI (Easy Apply) parked.
+
+**Fixes:** (a) `observer.js` `textOf` returns `''` when `document.body` is null (helper version 13→14 so it
+re-injects); (b) `run_external` gained an outer `except DriverError` → NeedsAttention `load_failure`; (c)
+`external._wait_for_form` waits (bounded 12 s) for a form's fields before concluding `unsupported_ats`.
+
+**Run 2 (`runs/20261007-093653`) — no crash; 2 parked, 4 Needs Attention.**
+- **Parked:** Linda AI (Easy Apply); **The Flex – Senior Full-Stack (Ashby)** — the first external ATS parked
+  end to end, on the real `jobs.ashbyhq.com/.../application`.
+- **Toast (Greenhouse) → `unsupported_ats`, misclassified.** "Apply on company website" lands on
+  `careers.toasttab.com`, whose only field is a site-search box inside a `<form>` → the observer gives it
+  `scope="<form>"`. `pages.code_app_fields`/`_code_kind` short-circuited on `scope` (a LinkedIn Easy-Apply-dialog
+  concept) before the searchbox/site-chrome exclusion, so the careers page read as an `application_form` and the
+  loop gave up instead of clicking its "Apply now" link (clean, `scope`/`form` empty) to the Greenhouse form.
+  **Fix:** honour `scope` only on linkedin.com; off LinkedIn use the form-fields-minus-site-chrome rule. Also
+  `external._click_forward` now hands off when the forward click opens the form in a new tab.
+- **The Flex – Senior SE (Ashby) → `llm_inference`.** It reached the Ashby form (late-render fix worked) but the
+  chat model failed: `mistral-small` returned valid JSON that the answer checks rejected — it answered the
+  **demographic** radios ("Prefer not to say", source=profile, `quote:null`) — then the fallback `mistral-nemo`
+  ReadTimeout'd ×3 (151 s). Root: the demographic radio groups were labeled with Ashby's compound UUID group id
+  (`_group_label` ran its cosmetic `-`/`_`→space transform on a key that slipped past `_UUID_RE`), so
+  `MUST_NOT_GENERATE` (C16) did not recognise them and the model tried to answer. **Fix:** `_OPAQUE_ID_RE`
+  catches a UUID anywhere in the group key → the label falls back to the element context or "Select one".
+- **Genesys (Workday) → `unsupported_ats`** (a sign-in wall with no readable form — acceptable: a non-target host,
+  correctly not parked).
+- **Mastercard → `navigation` "no way to start".** The LinkedIn entry snapshot held only nav chrome — no
+  Apply/Easy-Apply control was present at observe time (a LinkedIn top-card render-timing edge, not external ATS).
+  Still open; affects one job.
+
+**Reliability note (user's config, not a code bug):** the run used `mistral-small` + `mistral-nemo` on Vercel,
+not D14's `deepseek`/`gpt` models; `mistral-small` under-quotes and `mistral-nemo` times out. The model choice is
+the user's. **Gate note:** the current queue has only 3 target-host jobs (Ashby×2, Greenhouse×1) and no Lever, so
+the ≥5/10 gate cannot be reached with it; it needs ~10 external Resume-Built jobs mixing Greenhouse/Ashby/Lever.
