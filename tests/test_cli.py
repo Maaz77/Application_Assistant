@@ -202,10 +202,11 @@ def test_a_rejected_key_fails_preflight_and_names_the_variable(monkeypatch):
     cfg = cli.config_mod.load()
 
     def fake(**kw):
-        raise G.CreditOrKey("ai-gateway.vercel.sh rejected the key (HTTP 401) — check the key / add credit on vercel")
+        raise G.CreditOrKey("the provider rejected the key (HTTP 401) — check the key / add credit")
     monkeypatch.setattr(cli, "call_engine", fake)
     browser = type("B", (), {"cfg": cfg})()
-    with pytest.raises(cli.PreflightError, match="AI_GATEWAY_API_KEY"):
+    keyname = cli.config_mod.KEY_NAMES[cfg.models.chat_route]      # the active chat route's key, whichever it is
+    with pytest.raises(cli.PreflightError, match=keyname):
         list(cli.preflight(browser))
 
 
