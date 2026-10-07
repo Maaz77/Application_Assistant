@@ -19,7 +19,7 @@
 (() => {
   const W = window;
   try { if (W !== W.top) return; } catch (_) { return; }
-  if (W.__jevMcp && W.__jevMcp.version === 13) return;
+  if (W.__jevMcp && W.__jevMcp.version === 14) return;
 
   // Refs survive a helper re-injection, so an agent can keep referring to e37
   // across observes. `next` is monotonic: a pruned ref is never recycled.
@@ -302,6 +302,7 @@
 
   const textOf = max => {
     const words = [];
+    if (!document.body) return '';   // a just-navigated / loading tab has no body yet: createTreeWalker(null) throws
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
     let node, length = 0;
@@ -618,7 +619,7 @@
   const stats = () => ({ refs: S.nodes.size, next: S.next, hasSnap: !!S.snap });
 
   W.__jevMcp = {
-    version: 13, readState, verify, reinspect, resolve, scrollTo, selectOption,
+    version: 14, readState, verify, reinspect, resolve, scrollTo, selectOption,
     settle, label, descriptor, stats, keyOf, guardOf,
   };
 })();

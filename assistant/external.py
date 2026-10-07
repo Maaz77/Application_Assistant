@@ -153,6 +153,25 @@ def _hand_off(ctx) -> pages.Page:
     raise NeedsAttention("navigation", "the apply click did not open the external application")
 
 
+FORM_WAIT = 12          # s: an external form can render after a "Fetching application form" placeholder (Ashby)
+
+
+def _wait_for_form(ctx, secs: int = FORM_WAIT) -> pages.Page:
+    """Re-read until an application form's fields appear (Ashby renders its form a beat after the page, behind
+    'Fetching application form'), or until a blocker / sign-in / confirmation shows. Returns the latest page so
+    the caller can re-classify it. Bounded; no model call."""
+    deadline = time.monotonic() + secs
+    p = ctx.read()
+    while time.monotonic() < deadline:
+        if pages.judge(p).app_fields or pages.is_alarm(p):
+            return p
+        if pages.classify(p).kind in ("blocker", "google", "google_wall"):
+            return p
+        ctx.sleep(0.8)
+        p = ctx.read()
+    return p
+
+
 # ------------------------------------------------------------------ the external loop
 
 def run_external(ctx) -> Parked:
@@ -218,8 +237,13 @@ def run_external(ctx) -> Parked:
                     if why is None:
                         break
                     raise NeedsAttention("gate", why)
-                # v.kind == "navigate": no application form yet — click a safe apply/advance, else unsupported.
+                # v.kind == "navigate": no application form yet — click a safe apply/advance; if there is nothing
+                # to click, wait for a late-rendering form (Ashby shows "Fetching application form" first) before
+                # giving up as unsupported.
                 if not _click_forward(ctx, p, allow_apply=True):
+                    if pages.judge(_wait_for_form(ctx)).app_fields:
+                        filled = False
+                        continue
                     raise NeedsAttention("unsupported_ats", f"no application form on {p.host} ({v.detail})")
                 filled = False
             except fill._Refill as rf:
@@ -238,6 +262,10 @@ def run_external(ctx) -> Parked:
         raise fill._where(NeedsAttention("decision", str(exc)), ctx) from exc
     except DriverTimeout as exc:
         raise StopRun(f"a browser call hung and was abandoned: {exc}")  # exit 3 (CLAUDE.md: hung browser call)
+    except DriverError as exc:
+        # A driver/CDP error outside the loop body (e.g. observing a freshly-adopted tab in _hand_off) must be a
+        # job outcome, not an uncaught traceback that aborts the whole run.
+        raise fill._where(NeedsAttention("load_failure", str(exc)[:160]), ctx) from exc
     except ParkedAtQuestion as exc:
         return fill.park_at_question(ctx, exc)
     return fill._park(ctx)

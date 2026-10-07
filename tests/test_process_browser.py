@@ -118,3 +118,31 @@ def test_an_alert_box_page_is_unsupported_ats_and_nothing_is_clicked(fixture_ser
     assert len(alert) == 1 and alert[0]["title"] == "Acme Careers"    # 'Apply now' was never clicked
     assert fixture_server.posts() == []
     chrome.close_tab(alert[0]["id"])
+
+
+def test_an_ashby_form_rendered_late_is_reached_not_given_up(fixture_server, chrome, tmp_path, monkeypatch):
+    """P5 regression for the live run: Ashby renders its form after 'Fetching application form'. The loop must
+    wait for it (not give up as unsupported_ats) and must not crash observing the freshly-adopted tab (the Toast
+    createTreeWalker-on-null-body crash). Asserts the job reached the Ashby application form and classified it as
+    a fillable form (park / gate / broken_form), never unsupported_ats / navigation / a traceback."""
+    cfg = config_mod.load()
+    cfg = cfg.model_copy(update={"browser": cfg.browser.model_copy(update={"cdp_url": CDP_URL})})
+    monkeypatch.setattr(cli, "answer_page", canned)
+    d = _job_dir(tmp_path, "4012345611_Acme_Data-Scientist",
+                 fixture_server.url("jobs/view/4012345611-ashby.html"))
+    with nullcontext(Browser(cfg, "", actions_log=tmp_path / "browser_actions.jsonl")) as browser:
+        browser.connect(5.0)
+        book = tabs.TabBook(browser)
+        try:
+            outcome = cli.process(Job.from_dir(d), browser=browser, book=book, cfg=cfg, key="", profile="",
+                                  run_dir=tmp_path / "run", today=date(2026, 9, 23))
+            url, cls = outcome.url, "parked"
+        except NeedsAttention as na:
+            url, cls = na.url, na.cls
+        book.close()
+    assert "ashby_like_app.html" in (url or ""), f"did not reach the Ashby form: {url!r} ({cls})"
+    assert cls in ("parked", "gate", "broken_form"), f"gave up on the Ashby form as {cls}"
+    assert fixture_server.posts() == []
+    for t in chrome.tabs():
+        if "ashby_like" in t["url"]:
+            chrome.close_tab(t["id"])
