@@ -88,7 +88,10 @@ def test_process_parks_and_releases(fixture_server, chrome, tmp_path, monkeypatc
     assert baseline <= {t["id"] for t in after}                       # the user's tabs are untouched
     app = [t for t in after if "f10_form.html" in t["url"] and t["id"] not in forms_before]
     assert len(app) == 1                                              # the application tab is parked, still open
-    assert not any(job_page in t["url"] for t in after)               # the LinkedIn tab was handed off and closed
+    # The LinkedIn tab THIS test opened was handed off and closed. Exclude baseline tabs: an earlier browser
+    # test (test_navigate) drives the same fixture URL and, by D13, its detach leaves that tab open in the
+    # shared Chrome — a pre-existing tab is not this run's.
+    assert not any(job_page in t["url"] and t["id"] not in baseline for t in after)
     assert fixture_server.posts() == []
     chrome.close_tab(app[0]["id"])                                    # tidy the shared test Chrome
 
