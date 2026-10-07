@@ -29,6 +29,9 @@ class JobResult:
 
     def terminal_line(self) -> str:
         if self.parked:
+            n = len(self.parked.parked_at)                       # park-at-question: required fields left for you
+            if n:
+                return f"⏸ parked — {n} answer{'s' if n != 1 else ''} needed  {self.label}"
             return f"✓ parked  {self.label}"
         return f"⚠ needs attention  {self.label}: {self.attention.what}"
 

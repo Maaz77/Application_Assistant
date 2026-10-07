@@ -180,6 +180,9 @@ def test_report_and_exit_codes(tmp_path):
             OpenQuestion("notice  period?", "text")]), date="2026-09-23")])
     assert r.exit_code() == 2 and r.results[0].terminal_line() == "✓ parked  Acme – DE"
     assert r.results[1].terminal_line() == "⚠ needs attention  Beta – ML: 1 required"
+    pq = JobResult("Zeta", "SRE", "u4", "f4", 1, date="2026-09-23",       # park-at-question: labelled distinctly
+                   parked=Parked("u", "t", 1, parked_at=[OpenQuestion("Mobile phone number", "text")]))
+    assert pq.terminal_line() == "⏸ parked — 1 answer needed  Zeta – SRE"
     md = r.write(tmp_path).read_text()
     assert md.count("**Q:** Notice period?") == 1 and "(asked by Beta – ML, 2026-09-23)" in md
     for h in ("## Summary", "## Parked", "## Needs Attention", "## Queue anomalies",

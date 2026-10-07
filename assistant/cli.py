@@ -423,8 +423,10 @@ def run(cfg: config_mod.Config, args) -> int:
                 result.models = dataclasses.replace(counters)
                 if not args.no_record:
                     if result.parked:
-                        dst = recorder.record(job, PENDING_REVIEW, records.parked_note(result.parked, datetime.now()),
-                                              None)
+                        pk = result.parked
+                        tnote = (("Pending Review — answer before you submit: "
+                                  + "; ".join(q.question for q in pk.parked_at))[:240] if pk.parked_at else None)
+                        dst = recorder.record(job, PENDING_REVIEW, records.parked_note(pk, datetime.now()), tnote)
                     else:
                         na = result.attention
                         dst = recorder.record(job, NEEDS_ATTENTION, records.needs_attention_note(na, datetime.now()),
