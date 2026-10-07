@@ -197,7 +197,11 @@ def run_external(ctx) -> Parked:
             if rounds > ctx.max_pages * 4 + 12:
                 raise NeedsAttention("broken_form", "the external page loop is not making progress")
             try:
-                p = ctx.read()
+                # settle, not a bare read: an external SPA (Toast's careers page) loads in stages — blank, then
+                # a transient blocker-looking state, then the real page — and classifying a transient thrashes
+                # the loop. settle re-reads until the page is no longer `unsettled` (an Apply control or real
+                # field is present), so classify runs on the stable page.
+                p = pages.settle(ctx.read, sleep=ctx.sleep)
                 v = pages.classify(p)
                 if v.kind == "alarm":
                     raise StopRun(f"ALARM: confirmation text on {p.url}")

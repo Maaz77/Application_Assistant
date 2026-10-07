@@ -123,12 +123,24 @@ def upload_resume(ctx: JobCtx, p: Page, pa: PageAnswers | None = None) -> bool:
     if stem in (el.value or "") or (el.role != "file" and stem in p.text):
         select_resume_card(ctx, p)
         return True
-    out = ctx.browser.act([{"op": "upload", "ref": ref, "path": str(ctx.resume_pdf)}], ctx.session, p.table)
-    if "1/1 ops ok" not in out:
-        raise NeedsAttention("broken_form", f"resume upload failed: {out.splitlines()[1:2]}")
-    ctx.filled_count += 1
-    select_resume_card(ctx, ctx.read())
-    return True
+    # Ashby re-renders the form around the upload, which can stale the ref ("page_changed", live 2026-10-07):
+    # re-observe, re-find the resume input, and retry once (as type_long does for text fields).
+    out = ""
+    for attempt in range(2):
+        out = ctx.browser.act([{"op": "upload", "ref": ref, "path": str(ctx.resume_pdf)}], ctx.session, p.table,
+                              stop_on_error=False)
+        if "1/1 ops ok" in out:
+            ctx.filled_count += 1
+            select_resume_card(ctx, ctx.read())
+            return True
+        if attempt == 0 and STALE.search(out):
+            p = ctx.read()
+            ref = resume_input(p, _engine_resume_pick(pa, p))
+            if ref is None:
+                break
+            continue
+        break
+    raise NeedsAttention("broken_form", f"resume upload failed: {out.splitlines()[1:2]}")
 
 
 def is_resume_question(q: Question) -> bool:
