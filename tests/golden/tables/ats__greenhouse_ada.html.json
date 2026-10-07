@@ -1,0 +1,30 @@
+{
+  "url": "ats/greenhouse_ada.html",
+  "title": "Application for Engineer at Acme",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Legal First Name (required)",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "textbox",
+      "name": "Email (required)",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "button",
+      "name": "Submit application",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

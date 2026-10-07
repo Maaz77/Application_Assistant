@@ -38,6 +38,16 @@ def test_classify_fixture(new_browser, fixture_server, name):
     assert fixture_server.posts() == []
 
 
+def test_observer_excludes_greenhouse_ada_unique_content_token(new_browser, fixture_server):
+    """P6/Toast (live 2026-10-07): a Greenhouse <label> carries an sr-only `.ada-unique-content` span with a
+    per-render random hex token. The observer must not fold it into the field name — it changes across a
+    re-render/reload, so including it made read-back never match the filled field (broken_form)."""
+    p = _page(new_browser, fixture_server.url("ats/greenhouse_ada.html"))
+    names = {e.name for e in p.elements if e.role == "textbox"}
+    assert any("Legal First Name" in n for n in names), names
+    assert not any("e56527e9" in n or "78c285e3" in n for n in names), names   # the tokens are gone
+
+
 @pytest.mark.parametrize("name", sorted(ENTRY))
 def test_classify_linkedin_entry(new_browser, fixture_server, name):
     p = _page(new_browser, fixture_server.url(name))

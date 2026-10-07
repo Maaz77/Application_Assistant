@@ -27,7 +27,7 @@ from .cdp import Cdp, CdpError, DriverError, DriverTimeout, ChromeLaunchError, a
 from .observe import Observation
 
 HELPER_SRC = (Path(__file__).with_name("observer.js")).read_text(encoding="utf-8")
-HELPER_VERSION = 14
+HELPER_VERSION = 15
 
 
 def chrome_data_dirs() -> list[Path]:

@@ -19,7 +19,7 @@
 (() => {
   const W = window;
   try { if (W !== W.top) return; } catch (_) { return; }
-  if (W.__jevMcp && W.__jevMcp.version === 14) return;
+  if (W.__jevMcp && W.__jevMcp.version === 15) return;
 
   // Refs survive a helper re-injection, so an agent can keep referring to e37
   // across observes. `next` is monotonic: a pruned ref is never recycled.
@@ -174,8 +174,13 @@
     if (FLAT.includes(typeOf(e)) && e.value) return e.value;
     if (e.getAttribute('alt')) return e.getAttribute('alt');
     if (e.tagName !== 'INPUT' && e.tagName !== 'TEXTAREA') {
+      // Skip Greenhouse's `.ada-unique-content` span: an sr-only, non-aria-hidden per-render random token
+      // (e.g. "e56527e9") inside the field's <label>. Folding it into the name made every Greenhouse field
+      // label change across a re-render/reload, so read-back could never match the filled field and the whole
+      // form failed as broken_form (live 2026-10-07, Toast). It is not part of the question.
       const fromText = [...e.childNodes].map(n => n.nodeType === 3 ? n.textContent
-        : n.nodeType === 1 && n.getAttribute('aria-hidden') !== 'true' ? nameOf(n, seen) : '').join(' ').trim();
+        : n.nodeType === 1 && n.getAttribute('aria-hidden') !== 'true'
+          && !(n.classList && n.classList.contains('ada-unique-content')) ? nameOf(n, seen) : '').join(' ').trim();
       if (fromText) return fromText;
     }
     return e.getAttribute('title') || e.getAttribute('placeholder') || '';
@@ -619,7 +624,7 @@
   const stats = () => ({ refs: S.nodes.size, next: S.next, hasSnap: !!S.snap });
 
   W.__jevMcp = {
-    version: 14, readState, verify, reinspect, resolve, scrollTo, selectOption,
+    version: 15, readState, verify, reinspect, resolve, scrollTo, selectOption,
     settle, label, descriptor, stats, keyOf, guardOf,
   };
 })();
