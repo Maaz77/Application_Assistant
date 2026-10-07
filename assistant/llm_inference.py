@@ -816,8 +816,43 @@ def answer_page(p: Page, src: Sources, *, key: str, models: Rotation | str | lis
         still = check_answers(PageAnswers(questions=bad), p, src, policy, today, verdicts)
         for q in still:
             _drop(q, "generated text failed its checks twice")
+    fill_contact_from_profile(pa, src)
     _set_option_refs(pa, ext.option_maps, p)
     return pa
+
+
+_EMAIL_Q = re.compile(r"e-?mail", re.I)
+_PHONE_Q = re.compile(r"\b(phone|mobile|cell|telephone)\b", re.I)
+_EMAIL_V = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
+_PHONE_V = re.compile(r"\+?\d[\d().\-\s]{6,}\d")
+_PHONE_HINT = re.compile(r"phone|mobile|cell|tel|contact|whatsapp", re.I)
+
+
+def fill_contact_from_profile(pa: PageAnswers, src: Sources) -> None:
+    """Deterministic fallback for the standard contact fields the model left blank (user decision 2026-10-08):
+    a required phone or email field with no answer is filled from Profile.md by regex, because the profile
+    plainly contains it — the free router occasionally misses a field it should answer (the DMI phone, live
+    2026-10-07, though email/phone were answered for other jobs). Runs after all checks, so it only touches a
+    field that is still unanswered; `source`/`quote` point at the profile. Name is left to the model: which line
+    is the candidate's own name is too ambiguous to extract safely."""
+    prof = src.profile or ""
+    if not prof:
+        return
+    email = _EMAIL_V.search(prof)
+    phone = None                                        # prefer a phone on a line that names one, else the first
+    for line in prof.splitlines():
+        if _PHONE_HINT.search(line) and (m := _PHONE_V.search(line)):
+            phone = (m.group(0).strip(), line.strip()); break
+    if phone is None and (m := _PHONE_V.search(prof)):
+        phone = (m.group(0).strip(), next((l.strip() for l in prof.splitlines() if m.group(0) in l), m.group(0)))
+    for q in pa.questions:
+        if q.answer is not None or not q.required or q.kind == "file":
+            continue
+        ql = q.question or ""
+        if _EMAIL_Q.search(ql) and email:
+            q.answer, q.source, q.quote = email.group(0), "profile", email.group(0)
+        elif _PHONE_Q.search(ql) and "country code" not in ql.lower() and phone:
+            q.answer, q.source, q.quote = phone[0], "profile", phone[1][:200]
 
 
 def uncovered_required(pa: PageAnswers) -> list[Question]:

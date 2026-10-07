@@ -48,6 +48,22 @@ def test_radio_group_with_a_compound_uuid_key_falls_back_to_select_one():
     assert A._group_label("work_authorization", real) == "Work authorization"   # real keys still read as words
 
 
+def test_contact_fallback_fills_phone_and_email_the_model_left_blank():
+    """User decision 2026-10-08: a required phone/email with no model answer is filled from Profile.md by regex
+    (the free router missed DMI's phone, 2026-10-07). A country-code field and an already-answered or file
+    field are left alone; name is not extracted."""
+    prof = "Amin Abbaszadeh\nEmail: abbaszadehmohammadamin@yahoo.com\nMobile: +39 351 935 8813\nMilan, Italy\n"
+    pa = PageAnswers.model_validate({"questions": [
+        q(id="a", question="Mobile phone number"), q(id="b", question="Email"),
+        q(id="c", question="Phone country code"), q(id="d", question="Mobile phone number", answer="already"),
+        q(id="e", question="Cover letter", kind="file")]})
+    A.fill_contact_from_profile(pa, Sources(profile=prof, job="", resume=""))
+    byid = {x.id: x for x in pa.questions}
+    assert byid["a"].answer == "+39 351 935 8813" and byid["a"].source == "profile"
+    assert byid["b"].answer == "abbaszadehmohammadamin@yahoo.com"
+    assert byid["c"].answer is None and byid["d"].answer == "already" and byid["e"].answer is None
+
+
 def q(**kw):
     base = dict(id="q1", question="Q", kind="text", ref=None, option_ref=None, options=None, required=True,
                 answer=None, source=None, quote=None, relies_on=None)
