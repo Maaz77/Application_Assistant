@@ -1456,3 +1456,171 @@ timeout. The Toast embedded-form fix is therefore proven offline (new fixture + 
 Greenhouse/Lever via fixtures; the embedded-careers-page Greenhouse (Toast) is fixed offline; Workday/Mastercard
 are correctly non-parked (account wall / no apply control at observe time). The user accepted this as the gate
 (no full 10-job live gate), recorded in `recore/HANDOVER.md`.
+
+## One local provider for the chat models: FreeLLMAPI (user decision, 2026-10-07)
+
+The user replaced the paid cloud chat routes with a **FreeLLMAPI** router
+([github.com/tashfeenahmed/freellmapi](https://github.com/tashfeenahmed/freellmapi)) running on this Mac at
+`http://127.0.0.1:31415/v1`, keyed by `FREELLMAPI_KEY` in `.env`. It aggregates the free tiers of ~34 providers
+behind one OpenAI-compatible `/v1`, and a router picks a live provider per request. OpenRouter and Vercel AI
+Gateway are removed from the code, not kept as a fallback: `models.chat_route`, `[models.openrouter]`,
+`[models.vercel]`, `models.system_one_decision_provider`, `OPENROUTER_API_KEY` and `AI_GATEWAY_API_KEY` are all
+gone, and a config still naming one is rejected with a message saying where its keys moved.
+
+The existing sender was kept. `llm_inference.call_engine` already speaks OpenAI `chat/completions` over `httpx`
+through the Gateway, which is the one retry layer, queue and log (P1 T2). Adding the `openai` SDK would have put a
+second retry layer inside one Gateway request (`max_retries` defaults to 2) and sent through its own client, which
+`tests/test_no_bypass.py` seals `httpx.post` against. "Via the OpenAI API" is therefore read as the wire format,
+which the code already spoke — only the base URL, the key and the model IDs changed.
+
+### Verified live, 2026-10-07
+
+- **Auth is required even locally.** `GET /v1/models` without a key is **HTTP 401**; with it, 200. So
+  `FREELLMAPI_KEY` is the one key a run needs, and 401 stays in `gateway.CREDIT_STATUS` (a clean stop — no other
+  model on a rejected key would do better).
+- **`auto` is unusable for this program.** The router's own `auto` model ignores `response_format`: asked for a
+  strict `json_schema`, it answered **HTTP 200 with prose** (routed to `zai-org/GLM-5.2`). The code only falls back
+  to `json_object` on HTTP 400, so a 200-with-prose fails every page as `ModelUnavailable("output invalid")`. Only
+  concrete model IDs whose catalogue entry lists `response_format` honour the strict schema —
+  `deepseek-v4-flash` returned `{ "n": 7 }` to the same request. `config.toml` and `test_model_access.py` both
+  now forbid `auto`.
+- **`reasoning: {"enabled": false}` is OpenRouter's spelling and is ignored here** — passed through, and GLM-5.2
+  still spent 645 of 696 completion tokens reasoning. The catalogue lists `reasoning_effort`, and `"none"` does
+  switch it off (kimi-k3: 0 reasoning tokens). `llm_inference.REASONING_EFFORT = "none"` replaces `REASONING`.
+- **No cost is reported.** `usage` has no `cost` field, and there is no `provider_metadata`. So `_reported_cost`
+  returns None, `_estimated_cost` returns 0.0 for a model with no `[prices]` entry — i.e. all of them — and
+  `[prices]` is now empty. Every request is costed at **$0**, which is right for a free provider but means
+  `[budget] max_usd_per_run` no longer guards anything. Kept, because a paid route may return.
+- **`POST /v1/systemone` is HTTP 404.** The router serves chat only, so the **Kev** server on this Mac
+  (`http://127.0.0.1:8009`) is now the *only* System One decision route. `decide.ENDPOINTS`, the `route=` argument
+  and `adapt_questions_for`/`respan_questions` (which existed for OpenRouter's `alpha/decisions` models) are gone,
+  and `keep_object_state` is always on.
+- **The quota that runs out belongs to a platform, not a model ID.** A 429 body reads `All models exhausted: 1
+  route checked (1 rate-limited or on cooldown) … Soonest reset ~22h. 3 models skipped: no key configured for
+  their platform.` Two IDs served by the same platform share one limit, so rotating between them buys nothing.
+  The configured rotation spreads over four platforms — groq, google, huggingface (two), nvidia.
+- **The router reports who actually served the request** at `_routed_via: {"platform", "model"}`, e.g.
+  `{"platform": "groq", "model": "qwen/qwen3.8-27b"}`. `inference_log._provider` now logs
+  `freellmapi/<platform>`; without it a chat entry could not say which free tier answered. `gateway_of` also had
+  to learn to tell the two loopback servers apart by path, or a chat failure and a Kev failure would both be
+  labelled `local` in the outage and rejected-key messages.
+
+### Models measured against the real strict `ANSWER_SCHEMA` and system prompt (a 6-question page)
+
+| Model | Platform | Time | Verdict |
+|---|---|---|---|
+| `qwen3.8-27b` | groq | 1.2 s | ✓ |
+| `gemini-3.5-flash` | google | 2.5 s | ✓ |
+| `kimi-k3` | huggingface | 9.1 s | ✓ |
+| `deepseek-v4-flash` | huggingface | 11.1 s | ✓ |
+| `deepseek-v4-pro-0813` | huggingface | 21.0 s | ✓ |
+| `glm-5.2` | huggingface | 32.2 s | ✓ (close to the 45 s chat timeout) |
+| `qwen3.8-2.4t-a95b` | huggingface | 34.0 s | ✓ (close to the 45 s chat timeout) |
+| `muse-glimmer-30b` | nvidia | 42.5 s | ✓ (at the timeout) |
+| `agnes-2.5-flash` | nara | 40.0 s | ✓ but returned an empty cover-letter answer |
+| `laguna-s-2.1` | nara | 11.8 s | ✗ answered, but not to the schema ("output invalid") |
+| `gemini-3.8-flash`, `minimax-m3` | — | — | ✗ 429, free tier exhausted |
+
+`models.freellmapi.llm_inference` is the five fastest on four platforms:
+`["qwen3.8-27b", "gemini-3.5-flash", "kimi-k3", "deepseek-v4-flash", "muse-glimmer-30b"]`.
+
+### Preflight now requires one model, not all of them
+
+A free tier goes in and out of quota minute by minute: `gemini-3.6-flash` answered a sweep and returned 429 a
+minute later, and the huggingface tier was exhausted (`~22h` to reset) by an afternoon of testing. The old
+`_probe_llm_inference` failed preflight if **any** configured model failed, which was right when every model was
+paid — a 429 then meant something was wrong. On rotating free tiers it would fail almost always, while a run only
+ever needs one model per page, which is what `rotation.Rotation` provides. The probe still asks every model and
+now returns `(answered, out)`; it raises only when none answers, and preflight prints the ones that are out:
+
+```
+LLM inference answers: qwen3.8-27b, gemini-3.5-flash, muse-glimmer-30b (via the FreeLLMAPI router); out of
+quota, the rotation will skip: kimi-k3 (HTTP 429 …), deepseek-v4-flash (HTTP 429 …)
+```
+
+Measured end-to-end the same day: 3 of 5 models answered, the Kev card read
+`jaredpalmer/kev-0.8b on mps via mlx (bfloat16)`, a trivial decision came back `noul 0.922`, and the gateway
+counters were `1 System One, 5 LLM, 10 attempts, 2 failures, $0`.
+
+### Corrections and two defects found in review, same day
+
+- **The relaxed preflight probe was still defeated by the D21 breaker.** `call_engine` reports one *failed request*
+  per model that cannot answer, so probing five models fed five verdicts into the run's Gateway. Three failures in
+  a row is a `ProviderOutage` — and three configured models being out of quota at once is ordinary here, with two
+  of the five sitting next to each other — which exited 3 instead of reporting them, *and* then skipped every
+  model after the third because the trip is sticky. Each model is now probed on a Gateway of its own
+  (`cli._probe_llm_inference`), which is also what the question means: "can this model answer?", independent of
+  the others. One request cannot trip a fresh breaker (D21 needs three in a row), so no outage can arise there at
+  all. The probe's Gateway inherits the run's `post` and `sleep` — building it with the default sender instead made
+  it ignore an injected one and reach the network for real, which the first attempt at this fix did.
+  `CreditOrKey` and `BudgetExceeded` are deliberately **not** caught: they name the key or the cap and must still
+  reach preflight. Covered by `test_models_out_of_quota_do_not_trip_the_runs_breaker` and
+  `test_a_rejected_key_during_the_probe_still_reaches_preflight`.
+- **`decide.ChatDecider._one` was still sending `reasoning: {"enabled": False}`.** The chat fallback was missed when
+  `llm_inference` moved to `reasoning_effort`. It now sends `decide.REASONING_EFFORT = "none"`, spelled out in
+  `decide` rather than imported from `llm_inference`, which imports `decide`.
+- **The chat fallback re-verified on the models that now lead the rotation** (it had only been checked on kimi-k3
+  and deepseek-v4-flash, both since out of quota): `qwen3.8-27b` 0.4 s and `gemini-3.5-flash` 5.1 s both returned a
+  correct `noul 1.0` / `choice "stop"` on a confirmation page.
+- **`muse-glimmer-30b` passes the strict json_schema path but fails the fallback's `json_object` path**: HTTP 502
+  `All 1 routed attempt(s) failed with upstream provider errors (format_ignored ×1)`. It is last in the rotation,
+  and the fallback rotates on, so this costs a handover rather than a decision. Worth remembering before promoting
+  it.
+- **Unverified, stated for honesty:** the "huggingface" platform for `kimi-k3` and `deepseek-v4-flash` is inferred
+  from an earlier `_routed_via` reading, not observed in the table above; and `deepseek-v4-flash` was never
+  confirmed to honour `reasoning_effort: "none"` (its probe returned no `usage` detail either way). Neither
+  changes the configuration, because the rotation covers both.
+
+### Quota exhaustion can arrive as HTTP 413, not only 429 (live, 2026-10-07)
+
+After a day of testing, `qwen3.8-27b` stopped answering with:
+
+```
+HTTP 413 "The request is too large for every available candidate's context/token window. Reduce the
+prompt/history size or enable a larger-context model. All models exhausted: 1 route checked (1 prompt too
+large for the model) … Soonest reset ~21h."
+```
+
+This is **not** about request size. A one-word prompt (`"say OK"`, `max_tokens` 2000) gets the identical 413. The
+groq route's daily *token budget* is spent, so the router reports the remaining window as too small for any prompt
+and dresses quota exhaustion as 413. The "Soonest reset ~21h" is the giveaway. Do not react to this by lowering
+`llm_inference.PAGE_TEXT_MAX` or `MAX_TOKENS` — nothing is wrong with the request.
+
+The handling is already right and needs no change: `gateway._retryable(413)` is False and 413 is not in
+`CREDIT_STATUS`, so the model fails once, is not retried, and the rotation hands over to the next platform. The
+same end-to-end probe confirmed it — `qwen3.8-27b` (413), `kimi-k3` and `deepseek-v4-flash` (429) all reported as
+out, `gemini-3.5-flash` and `muse-glimmer-30b` answering, the run's Gateway untripped with zero counters, and the
+Kev decision returning `noul 0.922`. So the entry in the table above stands as measured (1.2 s when it had
+budget); it simply has none today.
+
+## Cost accounting removed (user decision, 2026-10-07)
+
+With both model servers on this machine and neither reporting a price, every request was costed at $0 and the
+spend cap guarded nothing: `_reported_cost` returned None, `_estimated_cost` returned 0.0 for a model with no
+`[prices]` entry — and `[prices]` was empty — so `BudgetExceeded` could never be raised. The user asked for the
+whole layer to go rather than keep it inert.
+
+Removed:
+
+- `gateway.py`: `BudgetExceeded`, the budget check at the top of `send`, `_reported_cost`, `_estimated_cost`,
+  `CHARS_PER_TOKEN`, `_charge`, the `budget` and `prices` constructor arguments, and `Counters.cost` /
+  `Counters.estimated` (so `Counters.row()` no longer ends in a money figure).
+- `config.py` / `config.toml`: the `Budget` model, `Config.budget`, `Config.prices`, and the `[budget]` and
+  `[prices]` tables. The config is strict, so an old file naming either is now an error — which is the intended
+  signal, not a regression.
+- `decide.py`: `_cost` and `Decider.cost`.
+- `report.py`: the "Model spend" line and the `, $X` suffix on the decisions line; `Report.decisions` is now an
+  `int` (the call count) instead of a `(calls, cost)` tuple.
+
+**Two clean stops remain, not three** (`ProviderOutage`, `CreditOrKey`). Every "three clean stops" reference in
+`CLAUDE.md`, `README.md` and the build spec, including the exit-code-3 lists and the §4.3 table, was updated. The
+build spec's `[prices]` and `[budget]` blocks are gone and its TOML block was checked table-for-table against the
+real `config.toml` — they match exactly.
+
+A local variable in `Gateway._attempts` named `budget` held a *timeout*, not money; it is now `timeout_s`, since
+the name only made sense while a money budget existed next to it. `fill.jev_budget` / `_check_jev_budget` are a
+per-job **request count** cap (`jev.max_requests_per_job`), unrelated to money, and are untouched.
+
+Two tests now assert the absence rather than the behaviour: `test_counters_count_requests_attempts_and_failures`
+checks `not hasattr(gateway.run, "cost")` and that `row()` carries no `$`, and `test_the_report_names_no_money`
+checks that no `$`, "spend" or "cost" reaches `report.md`. Re-adding a paid route means re-adding this layer.

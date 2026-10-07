@@ -1,13 +1,14 @@
-"""Decisions by a System One decision model (config models.system_one_decision_model; e.g. TypeSafe's Jev instance),
-through a System One API (user decisions 2026-09-24: a System One model decides; it is reached through Vercel AI
-Gateway, OpenRouter, or a Kev server on this machine — config models.system_one_decision_provider).
+"""Decisions by a System One decision model (config models.local.system_one_decision_model), through a System One
+API served by a Kev server on this machine (user decisions 2026-09-24: a System One model decides). The Vercel AI
+Gateway and OpenRouter routes were removed on 2026-10-07; the FreeLLMAPI router that replaced them serves chat only
+(`POST /v1/systemone` there is HTTP 404), so a local Kev server is the one decision route.
 
 Code asks typed questions about a state and branches on the typed answers:
   noul    the probability that a yes/no question is true           → Answer.noul
   choice  one option from a named set, with probabilities, confidence → Answer.choice
 All questions of one call are answered in parallel and independently against the same state, so a caller asks
 everything it may need about one page in one call. The thresholds live in code (THRESHOLDS below), never in a
-prompt. Docs: https://docs.typesafe.ai · https://openrouter.ai/docs/guides/community/typesafe-sdk
+prompt. Docs: https://docs.typesafe.ai · Kev: https://github.com/jaredpalmer/kev
 
 One Decider per run (use()); every call is logged to jev_inference_logs.json (inference_log). A failed call raises
 DecisionError: a job that cannot get a decision goes to Needs-Attention, it is never decided by a guess.
@@ -27,18 +28,19 @@ import httpx
 from assistant import gateway as gateway_mod
 from assistant import inference_log
 
-# Jev's System One endpoint per route (TypeSafe's request and answer shapes on both). The model ID per route is
-# config models.<route>.system_one_decision_model: Vercel AI Gateway serves "typesafe-ai/jev"; OpenRouter's alpha/decisions API serves a
-# TypeSafe-compatible System One model, e.g. "respan/span-01-lite:free" (2026-09-28).
-ENDPOINTS = {"vercel": "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
-             "openrouter": "https://openrouter.ai/api/alpha/decisions"}
 SYSTEM_ONE_PATH = "/v1/systemone"   # TypeSafe's own path, which a Kev server on this machine serves (README, API)
-# Questions per request. TypeSafe fails a whole request when any one question fails, so a big request rarely gets
-# through: on Vercel, 2026-09-24, 44 questions per request failed 5 of 6 times, 11 per request 7 of 12, 4 per
-# request 4 of 33 (503 "Service temporarily unavailable" from the provider). Above MAX_QUESTIONS a judgment is
-# split and the parts go one after another — never side by side: P1 T2 allows one request in flight at a time.
+# Questions per request. A System One API fails a whole request when any one question fails, so a big request
+# rarely gets through: on the old Vercel route, 2026-09-24, 44 questions per request failed 5 of 6 times, 11 per
+# request 7 of 12, 4 per request 4 of 33 (503 from the provider). Above MAX_QUESTIONS a judgment is split and the
+# parts go one after another — never side by side: P1 T2 allows one request in flight at a time.
 MAX_QUESTIONS = 24
-STATE_CHARS = 60_000        # Jev's context is 32K tokens: the state is cut to fit, text first
+# The state limit, matching config.LocalKev.state_chars (the configured value is what a run actually uses). Kev was
+# trained on states of up to 384 tokens and loses accuracy on long ones; 12000 characters is about 3000 tokens.
+STATE_CHARS = 12_000
+# Switching reasoning off on the chat fallback. The FreeLLMAPI router ignores OpenRouter's
+# `reasoning: {"enabled": false}` and honours `reasoning_effort` (live 2026-10-07). Spelled out here rather than
+# imported from llm_inference, which imports this module.
+REASONING_EFFORT = "none"
 
 # What each yes/no answer must reach before the code acts on it. Set by the cost of being wrong, per question.
 THRESHOLDS = {
@@ -104,17 +106,13 @@ class Answer:
 
 
 def fit_state(state: Any, limit: int = STATE_CHARS, keep_object: bool = False) -> Any:
-    """The System One `state` as a string that fits `limit` characters (STATE_CHARS on a cloud route;
-    models.local.state_chars on a Kev server, which is small and was trained on short states). A dict's longest
-    string values are cut first (text before structure), then the whole state is JSON-serialised. A string state is
-    cut to the same limit.
+    """The System One `state` as a string that fits `limit` characters (models.local.state_chars: Kev is small and
+    was trained on short states). A dict's longest string values are cut first (text before structure), then the
+    whole state is JSON-serialised. A string state is cut to the same limit.
 
-    Sending a string, not an object, is required by OpenRouter decisions models such as respan/span-01-lite (which
-    reject a bare JSON object: HTTP 400 "state must be a string or an object with only input … and output …",
-    live 2026-09-28), and TypeSafe Jev accepts a string too (docs: state may be a string, object or array).
-    `keep_object` (the local route) hands a dict over as it is: Kev renders an object as labeled text, which is
-    what a JSON string turns into anyway, minus the escaped quotes it would spend tokens on (kev/api.py render()).
-    A state that is still over the limit is serialised and cut, so the limit holds either way."""
+    `keep_object` hands a dict over as it is: Kev renders an object as labeled text, which is what a JSON string
+    turns into anyway, minus the escaped quotes it would spend tokens on (kev/api.py render()). A state that is
+    still over the limit is serialised and cut, so the limit holds either way."""
     if isinstance(state, str):
         return state[:limit]
     if isinstance(state, dict):
@@ -130,68 +128,32 @@ def fit_state(state: Any, limit: int = STATE_CHARS, keep_object: bool = False) -
     return encoded[:limit]
 
 
-def adapt_questions_for(model: str) -> bool:
-    """Whether a decisions model needs the flattened question form. TypeSafe Jev (typesafe/*, jev-*) takes its
-    native structured instructions/criteria; other OpenRouter decisions models (respan/span-01-lite) need plain
-    strings, so they are flattened (respan_questions)."""
-    m = model.lower()
-    return "jev" not in m and not m.startswith("typesafe")
-
-
 def _plain(v: Any) -> str:
     return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
 
 
-def respan_questions(questions: dict) -> dict:
-    """OpenRouter's decisions models (respan/span-01-lite) accept only plain-string question `instructions` and
-    `criteria` values (HTTP 400 otherwise, live 2026-09-28). Flatten TypeSafe Jev's structured instructions and
-    nested choice criteria to JSON strings — same content, as text. Question ids and types are unchanged."""
-    out = {}
-    for qid, q in questions.items():
-        q = dict(q)
-        if "instructions" in q:
-            q["instructions"] = _plain(q["instructions"])
-        crit = q.get("criteria")
-        if isinstance(crit, dict):
-            q["criteria"] = {k: _plain(v) for k, v in crit.items()}
-        elif isinstance(crit, list):
-            q["criteria"] = [_plain(v) for v in crit]
-        out[qid] = q
-    return out
-
-
 def _error(data: Any) -> str:
-    """OpenRouter: {"error": {"message"}}; Vercel: {"error": {"message", "type"}} or {"message", "error_type"}."""
+    """A Kev server and the FreeLLMAPI router both answer {"error": {"message", …}}; a bare {"message"} too."""
     err = data.get("error", data) if isinstance(data, dict) else data
     msg = err.get("message", err) if isinstance(err, dict) else err
     return str(msg)[:200]
 
 
-def _cost(data: Any) -> float:
-    """OpenRouter: usage.cost; Vercel: provider_metadata.gateway.cost (a string)."""
-    data = data or {}
-    cost = (data.get("usage") or {}).get("cost") or ((data.get("provider_metadata") or {}).get("gateway") or {}).get("cost")
-    try:
-        return float(cost or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
 class Decider:
     """ask(topic, state, questions) → {question id: Answer}.
 
-    Every request leaves through the Gateway (P1 T2): the queue, the one retry layer, the timeout, the cost and the
-    log all live there, so this class only shapes the request and reads the answers. A judgment is one request;
+    Every request leaves through the Gateway (P1 T2): the queue, the one retry layer, the timeout and the log all
+    live there, so this class only shapes the request and reads the answers. A judgment is one request;
     above MAX_QUESTIONS questions it is split and the parts go one after another.
     """
 
-    def __init__(self, key: str, model: str, *, route: str = "openrouter", url: str | None = None,
-                 state_chars: int = STATE_CHARS, keep_object_state: bool = False,
+    def __init__(self, key: str, model: str, *, url: str,
+                 state_chars: int = STATE_CHARS, keep_object_state: bool = True,
                  max_questions: int = MAX_QUESTIONS, fallback: "ChatDecider | None" = None,
                  gateway: "gateway_mod.Gateway | None" = None, post: Callable | None = None,
                  timeout: float | None = None, sleep: Callable[[float], None] = time.sleep):
         self.key, self.model = key, model
-        self.url = url or ENDPOINTS[route]
+        self.url = url
         self.state_chars = state_chars
         self.keep_object_state = keep_object_state
         self.max_questions = max(1, max_questions)
@@ -204,7 +166,6 @@ class Decider:
         # a Gateway of its own, so the queue, the retry rule and the log apply to it as well (A2).
         self._gateway = gateway or (gateway_mod.private(post, sleep=sleep) if post else None)
         self.calls = 0
-        self.cost = 0.0
         self.by_fallback = 0
         self._cache: dict[str, dict[str, Answer]] = {}
         self._lock = threading.Lock()         # a goal runs on a worker thread: the counters are shared
@@ -236,9 +197,8 @@ class Decider:
         return out
 
     def _one(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
-        adapt = "alpha/decisions" in self.url and adapt_questions_for(self.model)
-        body = {"model": self.model, "state": state, "questions": respan_questions(questions) if adapt else questions}
-        # A Kev server started without KEV_API_KEY is open and ignores the header; the cloud routes need it.
+        body = {"model": self.model, "state": state, "questions": questions}
+        # A Kev server started without KEV_API_KEY is open and ignores the header.
         headers = {"Content-Type": "application/json",
                    **({"Authorization": f"Bearer {self.key}"} if self.key else {})}
         gateway = self.gateway
@@ -255,7 +215,6 @@ class Decider:
             gateway.note_failure(False)
             with self._lock:
                 self.calls += 1
-                self.cost += _cost(out.body)
             return answers
         if self.fallback is not None:
             try:
@@ -332,7 +291,7 @@ class ChatDecider:
                 "questions": {qid: {"type": _kind(q), **{k: _plain(v) for k, v in q.items() if k != "type"}}
                               for qid, q in questions.items()}}
         body = {"model": model, "temperature": 0, "max_tokens": self.max_tokens,
-                "response_format": {"type": "json_object"}, "reasoning": {"enabled": False},
+                "response_format": {"type": "json_object"}, "reasoning_effort": REASONING_EFFORT,
                 "messages": [{"role": "system", "content": self.SYSTEM},
                              {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]}
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
@@ -364,17 +323,12 @@ def _kind(question: dict) -> str:
 
 
 def endpoint(cfg) -> str:
-    """The System One URL of models.system_one_decision_provider. A Kev server on this machine is named by
-    models.local.base_url and serves TypeSafe's own path."""
-    if cfg.models.system_one_decision_provider == "local":
-        return cfg.models.local.base_url.rstrip("/") + SYSTEM_ONE_PATH
-    return ENDPOINTS[cfg.models.system_one_decision_provider]
+    """The System One URL: the Kev server at models.local.base_url, which serves TypeSafe's own path."""
+    return cfg.models.local.base_url.rstrip("/") + SYSTEM_ONE_PATH
 
 
 def start_hint(cfg) -> str:
-    """What to do about a local decision server that does not answer. Empty on a cloud route."""
-    if cfg.models.system_one_decision_provider != "local":
-        return ""
+    """What to do about the local decision server when it does not answer."""
     port = urlparse(cfg.models.local.base_url).port or 8009
     return (f"no Kev server answers on {cfg.models.local.base_url}. Start it first: ./run_kev_server.command "
             f"(or, in your kev clone: uv run --extra serve python -m kev.serve "
@@ -402,20 +356,19 @@ def server_card(cfg, timeout: float = 15.0) -> dict:
 
 
 def for_config(cfg, gateway: "gateway_mod.Gateway | None" = None) -> Decider:
-    """The run's Decider: config models.system_one_decision_model on models.system_one_decision_provider, with that
-    route's URL and its key from .env (a local Kev server usually has none). The chat fallback (D19) answers when a
-    System One request fails after all of the Gateway's attempts; decider.fallback = "none" turns it off."""
+    """The run's Decider: config models.local.system_one_decision_model on the Kev server at
+    models.local.base_url, with KEV_API_KEY from .env when that server was started with one (it is open by
+    default). The chat fallback (D19) answers when a System One request fails after all of the Gateway's attempts;
+    decider.fallback = "none" turns it off."""
     from assistant import config
-    local = cfg.models.system_one_decision_provider == "local"
     fallback = None
     if cfg.decider.fallback == "chat" and cfg.models.llm_inference:
-        fallback = ChatDecider(config.chat_key(cfg), list(cfg.models.llm_inference),
+        fallback = ChatDecider(config.chat_key(), list(cfg.models.llm_inference),
                                url=config.chat_url(cfg), gateway=gateway)
-    return Decider(config.system_one_decision_key(cfg), cfg.models.system_one_decision_model,
-                   route=cfg.models.system_one_decision_provider, url=endpoint(cfg),
-                   state_chars=cfg.models.local.state_chars if local else STATE_CHARS,
+    return Decider(config.local_key(), cfg.models.system_one_decision_model, url=endpoint(cfg),
+                   state_chars=cfg.models.local.state_chars,
                    max_questions=cfg.jev.max_questions_per_request,
-                   keep_object_state=local, fallback=fallback, gateway=gateway)
+                   keep_object_state=True, fallback=fallback, gateway=gateway)
 
 
 _current: Decider | None = None

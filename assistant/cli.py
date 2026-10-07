@@ -76,24 +76,51 @@ class PreflightError(RuntimeError):
 PROBE_TIMEOUT = 60.0   # a preflight LLM-inference probe: a trivial page should answer well within this
 
 
-def _probe_llm_inference(cfg: config_mod.Config) -> list[str]:
-    """Live check that **each** configured LLM inference model answers with a valid PageAnswers, over the strict
-    json_schema path the real run uses (P1 T1). One trivial empty page per model, so a model that is dead or out of
-    quota is found now and not mid-job. Raises LLMInferenceError naming the model that failed; returns the models
-    that answered, in configured order."""
+def _probe_llm_inference(cfg: config_mod.Config) -> tuple[list[str], list[str]]:
+    """Live check of every configured LLM inference model, over the strict json_schema path the real run uses
+    (P1 T1): one trivial empty page each, so a model that is dead or out of quota is known before the first job.
+    Returns (answered, out), both in configured order.
+
+    It raises only when **none** of them answers, which is the condition that actually stops a run. Before
+    2026-10-07 a single failing model failed preflight, because each cloud route was paid and a 429 there meant
+    something was wrong. The FreeLLMAPI router serves free tiers that go in and out of quota minute by minute (one
+    model answered a sweep and then 429'd a minute later, live 2026-10-07), so demanding all of them would fail
+    preflight almost always while the run itself only ever needs one model per page — which is exactly what
+    `Rotation` provides. The models that are out are reported, not fatal."""
     user = {"page": {"url": "about:blank", "title": "Preflight", "text": "", "fields": []},
             "sources": {"profile": "", "job": "", "resume": ""}}
-    answered = []
-    for model in cfg.models.llm_inference:
-        rotation = Rotation([model])           # one model at a time: a rotation would hide the one that is out
-        try:
-            call_engine(key=config_mod.chat_key(cfg), models=rotation,
-                        system=system_prompt(cfg.policy.free_text_max_chars), user=user,
-                        url=config_mod.chat_url(cfg), timeout=PROBE_TIMEOUT)
-        except LLMInferenceError as exc:
-            raise LLMInferenceError(f"{model}: {exc}") from None
-        answered.append(model)
-    return answered
+    answered, out = [], []
+    # Each model is asked on a Gateway of its own, and the run's is put back afterwards. `call_engine` reports one
+    # failed request per model that cannot answer (D21), so sharing one breaker across the probe makes one model's
+    # quota evidence about the next: three configured models out at once — ordinary on free tiers, and two of the
+    # five sit next to each other — trips a sticky ProviderOutage, which both exits 3 (the outcome this probe was
+    # relaxed to avoid) and then skips the models after it, including ones that would have answered. A breaker per
+    # model is also what the question means: "can this model answer?", independent of the others. One request
+    # cannot trip a fresh breaker, since D21 needs three in a row, so no outage can arise here at all.
+    # Still the one send path (T7 A2): same sender, same retry rule, same log — only the breaker and the counters
+    # are fresh. Taking the default sender instead would make the probe ignore an injected one and reach the
+    # network for real.
+    run_gateway = gateway_mod.current()
+    sender = {"post": run_gateway.post, "sleep": run_gateway.sleep} if run_gateway is not None else {}
+    try:
+        for model in cfg.models.llm_inference:
+            rotation = Rotation([model])       # one model at a time: a rotation would hide the one that is out
+            gateway_mod.use(gateway_mod.for_config(cfg, **sender))
+            try:
+                call_engine(key=config_mod.chat_key(), models=rotation,
+                            system=system_prompt(cfg.policy.free_text_max_chars), user=user,
+                            url=config_mod.chat_url(cfg), timeout=PROBE_TIMEOUT)
+            except LLMInferenceError as exc:
+                # Only this model is out. A CreditOrKey is not caught: it names the key and must still reach
+                # preflight.
+                out.append(f"{model} ({exc})")
+                continue
+            answered.append(model)
+    finally:
+        gateway_mod.use(run_gateway)
+    if not answered:
+        raise LLMInferenceError("; ".join(out))
+    return answered, out
 
 
 def preflight(browser: Browser) -> Iterator[str]:
@@ -101,36 +128,37 @@ def preflight(browser: Browser) -> Iterator[str]:
     later failure does not hide an earlier ✓), and raises PreflightError on the first that fails. Writes only the
     run's inference logs."""
     try:
-        models = _probe_llm_inference(browser.cfg)
+        models, out = _probe_llm_inference(browser.cfg)
     except gateway_mod.CreditOrKey as exc:
         # P1 T1: in preflight this is a preflight failure naming the key, not a stopped run — nothing was written.
-        raise PreflightError(f"{exc}. Check {config_mod.KEY_NAMES[browser.cfg.models.chat_route]} in "
-                             f"Tools/Application_Assistant/.env, or add credit") from exc
+        raise PreflightError(f"{exc}. Check {config_mod.CHAT_KEY_NAME} in "
+                             f"Tools/Application_Assistant/.env") from exc
     except LLMInferenceError as exc:
-        raise PreflightError(f"an LLM inference model does not answer: {exc}") from exc
-    yield f"LLM inference answers: {', '.join(models)} (via {browser.cfg.models.chat_route})"
+        raise PreflightError(f"no LLM inference model answers: {exc}") from exc
+    yield (f"LLM inference answers: {', '.join(models)} (via the FreeLLMAPI router)"
+           + (f"; out of quota, the rotation will skip: {', '.join(out)}" if out else ""))
     cfg = browser.cfg
     name = cfg.models.system_one_decision_model
-    if cfg.models.system_one_decision_provider == "local":
-        try:
-            card = decide.server_card(cfg)
-        except decide.DecisionError as exc:
-            raise PreflightError(str(exc)) from exc
-        yield (f"Kev server on {cfg.models.local.base_url}: {card.get('run')} on {card.get('device')} "
-               f"via {card.get('backend')} ({card.get('dtype')})")
+    try:
+        card = decide.server_card(cfg)
+    except decide.DecisionError as exc:
+        raise PreflightError(str(exc)) from exc
+    yield (f"Kev server on {cfg.models.local.base_url}: {card.get('run')} on {card.get('device')} "
+           f"via {card.get('backend')} ({card.get('dtype')})")
     try:
         a = decide.current().ask("preflight", "A job application form asks for the candidate's email address.",
                                  {"form": decide.noul("Is this about a job application?")})
     except gateway_mod.CreditOrKey as exc:
-        key = config_mod.KEY_NAMES.get(cfg.models.system_one_decision_provider, "the route's key")
-        raise PreflightError(f"{exc}. Check {key} in Tools/Application_Assistant/.env, or add credit") from exc
+        raise PreflightError(f"{exc}. Check {config_mod.LOCAL_KEY_NAME} in "
+                             f"Tools/Application_Assistant/.env (only needed when the Kev server was started "
+                             f"with one)") from exc
     except decide.DecisionError as exc:
         hint = decide.start_hint(cfg)
         raise PreflightError(f"the decision model ({name}) does not answer: {exc}"
                              f"{'. ' + hint if hint else ''}") from exc
     if not a["form"].yes(0.5):
         raise PreflightError(f"the decision model ({name}) answered a trivial question wrongly")
-    yield f"decision model {name} answers (via {cfg.models.system_one_decision_provider})"
+    yield f"decision model {name} answers (via the Kev server on this machine)"
     doc = browser.doctor()
     for cap in ("uploads", "js_eval"):
         if doc.get(cap) is not True:
@@ -165,16 +193,12 @@ def preflight(browser: Browser) -> Iterator[str]:
 
 
 def _static_checks(cfg: config_mod.Config, key: str) -> list[str]:
-    """`key` is the chat route's key (config.chat_key). A key both routes use is reported once."""
+    """`key` is the FreeLLMAPI router's key (config.chat_key). The Kev decision server needs no key unless it was
+    started with one, so only the chat key is required here."""
     problems = cfg.problems()
-    missing: dict[str, list[str]] = {}
     if not key:
-        missing.setdefault(config_mod.KEY_NAMES[cfg.models.chat_route], []).append("the LLM inference and text helper")
-    provider = cfg.models.system_one_decision_provider
-    if provider not in config_mod.KEYLESS_PROVIDERS and not config_mod.system_one_decision_key(cfg):
-        missing.setdefault(config_mod.KEY_NAMES[provider], []).append("the System One decision model")
-    for name, users in missing.items():
-        problems.append(f"{name} is missing ({' and '.join(users)} need it; put it in Tools/Application_Assistant/.env)")
+        problems.append(f"{config_mod.CHAT_KEY_NAME} is missing (the LLM inference and the chat fallback need it; "
+                        f"put it in Tools/Application_Assistant/.env)")
     return problems
 
 
@@ -328,7 +352,7 @@ def connect_once(browser: Browser) -> None:
 
 
 def run(cfg: config_mod.Config, args) -> int:
-    key = config_mod.chat_key(cfg)
+    key = config_mod.chat_key()
     if problems := _static_checks(cfg, key):
         for p in problems:
             print(f"✗ preflight: {p}")
@@ -405,7 +429,7 @@ def run(cfg: config_mod.Config, args) -> int:
         except (NameError, DriverError):
             pass
         d = decide.current()
-        report.decisions, report.decision_model = (d.calls, d.cost), d.model
+        report.decisions, report.decision_model = d.calls, d.model
         report.by_fallback = getattr(d, "by_fallback", 0)
     path = report.write(run_dir)
     print(f"Report: {path}")
@@ -413,15 +437,15 @@ def run(cfg: config_mod.Config, args) -> int:
 
 
 def run_preflight(cfg: config_mod.Config) -> int:
-    key = config_mod.chat_key(cfg)
+    key = config_mod.chat_key()
     if problems := _static_checks(cfg, key):
         for p in problems:
             print(f"✗ {p}")
         return EXIT_PREFLIGHT
     inference_log.start_run(RUNS / datetime.now().strftime("%Y%m%d-%H%M%S"))   # preflight's Jev call -> _run/ (§6.1)
-    provider = cfg.models.system_one_decision_provider
-    print(f"✓ config valid, keys present (chat models via {cfg.models.chat_route}, System One decision model via "
-          f"{provider}{' — no key needed' if provider in config_mod.KEYLESS_PROVIDERS else ''})")
+    print(f"✓ config valid, keys present (chat models via the FreeLLMAPI router on "
+          f"{cfg.models.freellmapi.base_url}, System One decision model via the Kev server on "
+          f"{cfg.models.local.base_url} — no key needed)")
     try:
         Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
         print("✓ tracker readable")
@@ -446,7 +470,7 @@ def capture(cfg: config_mod.Config, url: str) -> int:
     host = (urlparse(url).hostname or "page").replace(".", "-")
     out = CAPTURED / f"{host}-{datetime.now():%Y%m%d-%H%M%S}"
     out.mkdir(parents=True)
-    key = config_mod.chat_key(cfg)
+    key = config_mod.chat_key()
     gateway = gateway_mod.for_config(cfg)
     gateway_mod.use(gateway)
     decide.use(decide.for_config(cfg, gateway))

@@ -24,12 +24,15 @@ def test_decider_logs_every_jev_attempt_including_a_retry(tmp_path):
             return 503, {"error": "Service temporarily unavailable"}     # first attempt fails -> one retry
         return 200, {"answers": {"q1": {"type": "noul", "noul": 0.9}}}
 
-    d = decide.Decider("k", "jev", route="openrouter", post=post, sleep=lambda s: None)
+    d = decide.Decider("k", "kev-latest", url="http://127.0.0.1:8009/v1/systemone", post=post,
+                       sleep=lambda s: None)
     d.ask("topic", {"page": "x"}, {"q1": decide.noul({"instructions": "?"})})
     entries = _read(tmp_path, L._JEV_FILE)
     assert len(entries) == 2
     assert entries[0]["Response"] == {"error": "Service temporarily unavailable"}
-    assert entries[1]["Noul"][0]["id"] == "q1" and entries[1]["State"] == '{"page": "x"}'
+    # keep_object_state is the default now (Kev renders an object as labeled text), so the state is logged
+    # as the object that was sent, not as the JSON string a cloud route needed.
+    assert entries[1]["Noul"][0]["id"] == "q1" and entries[1]["State"] == {"page": "x"}
 
 
 def test_ask_model_logs_every_llm_attempt_including_the_json_object_fallback(tmp_path):

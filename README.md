@@ -13,7 +13,7 @@ Build spec: [application_assistant_build_spec.md](application_assistant_build_sp
 
 Three pictures: what happens to one job, what happens on one form page, and which file does what. The names on the right are the files in `assistant/` that do each step.
 
-**The System One decision model** (`models.system_one_decision_provider`: a **Kev** server on this Mac, or TypeSafe's **Jev** through Vercel AI Gateway or OpenRouter — one API, so only the address changes) answers the residual ambiguity that code cannot resolve. It is asked under exactly five topics — the `topic` argument of `decide.current().ask(...)` — and nothing else:
+**The System One decision model** (a **Kev** server on this Mac, `[models.local]`, serving TypeSafe's System One API) answers the residual ambiguity that code cannot resolve. It is asked under exactly five topics — the `topic` argument of `decide.current().ask(...)` — and nothing else:
 
 | Topic | Caller | What it decides |
 |---|---|---|
@@ -493,23 +493,30 @@ Three details explain how the file is written:
    The only runtime browser dependency is `websockets` (the CDP transport). `poetry install` does the same from
    `pyproject.toml` once Poetry works again.
 
-2. **Keys.** Create `.env` in this folder. It is git-ignored. The decision model on the `local` route needs none
-   of them; the LLM inference always needs its route's key.
-   - `OPENROUTER_API_KEY=<key>`: the LLM inference when `models.chat_route = "openrouter"`.
-   - `AI_GATEWAY_API_KEY=<key>`: Jev through Vercel AI Gateway (`models.system_one_decision_provider = "vercel"`), and the chat models when `models.chat_route = "vercel"`. Vercel serves requests only once a card is on file for the team, which also unlocks its free credits. With `system_one_decision_provider = "openrouter"` the OpenRouter key pays for Jev instead, and with `"local"` nothing pays for it.
+2. **Keys.** Create `.env` in this folder. It is git-ignored. Both model servers run on your own Mac, so there is
+   one key to set:
+   - `FREELLMAPI_KEY=<key>`: **required.** The unified key of your [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) router, from its Keys page or tray popover. Every chat request uses it (the LLM inference and the chat fallback), and the router answers HTTP 401 without it — which stops the run cleanly rather than failing a job.
    - `KEV_API_KEY=<key>`: only when you started the local Kev server with `KEV_API_KEY` set (a Kev server on `127.0.0.1` is open by default and ignores the header).
- Keep some credit on the account: each form page costs one LLM inference call (about $0.001), plus a few cached Jev decisions (about $0.00002 each, often free from cache). `tests/test_model_access.py` shows the key, the account's credit and whether a model answers. An account that has never bought credits gets 50 free-model requests a day across all free models, and rotation cannot get past that: HTTP 429 "free-models-per-day" from every model. $10 of credit raises it to 1,000 a day.
+
+   **Nothing costs money**, which is why there is no spend tracking at all: the cost counters, the spend cap and
+   the `[prices]` table were removed on 2026-10-07. What runs out instead is a **free tier**, and the quota belongs
+   to a *platform*, not a model ID: a 429 reads `All models exhausted: 1 route checked (1 rate-limited or on
+   cooldown) … Soonest reset ~22h`. That is why `models.freellmapi.llm_inference` lists models on four different
+   platforms — the rotation moves to another platform when one is out. Add more provider keys on the router's
+   Keys page to widen the pool. `tests/test_model_access.py` shows, per configured model, whether it is in the
+   live catalogue, whether it supports the strict schema, and whether it answers right now.
+
+   **Both servers must be running before a run**: the FreeLLMAPI router (its desktop app or
+   `curl -fsSL https://freellmapi.co/install.sh | bash`) and the Kev server (`./run_kev_server.command`).
 
 3. **Config.** `config.toml` is already filled in:
 
    | Key | Value |
    |---|---|
    | `paths.base` | the repo root |
-   | `models.chat_route` | who serves the LLM inference: `openrouter` (the free models below) or `vercel` (Vercel AI Gateway, paid from its credit, for when OpenRouter's free quota is out). Both take the same chat/completions request |
-   | `models.openrouter.llm_inference` | free OpenRouter models, tried in turn (`rotation.py`): answers each form page from your files (sent with reasoning off). A call starts at the model that answered last; one that is out (rate-limited, overloaded, timed out, wrong output) hands over to the next at once. A 429 with a short `Retry-After` (30 s or less) is waited out once. When none answers, the job goes to Needs Attention with every model's reason. A single ID also works |
-   | `models.vercel.llm_inference` | `mistral/mistral-small` (about 5 s and $0.0013 a page), then `mistral/mistral-nemo` (cheaper, but about 60 s a page). Vercel limits a new team to 5 requests a minute per model |
-   | `models.<route>.system_one_decision_model` | the decision model of the route in use, for the residual page decisions (`decide.py`). Each route names it its own way: `kev-latest` on a local Kev server, `typesafe-ai/jev` on Vercel, `typesafe/jev-1.13` on OpenRouter |
-   | `models.system_one_decision_provider` | `local` (a Kev server on this Mac: no key, no quota, and nothing leaves the machine), `vercel` (Vercel AI Gateway's TypeSafe-compatible API) or `openrouter` |
+   | `models.freellmapi.base_url` | your FreeLLMAPI router's OpenAI-compatible endpoint (`http://127.0.0.1:31415/v1`). `config.chat_url` appends `/chat/completions` |
+   | `models.freellmapi.llm_inference` | the models tried in turn (`rotation.py`): answers each form page from your files, with reasoning off. A call starts at the model that answered last; one that is out (rate-limited, overloaded, timed out, wrong output) hands over to the next at once. A 429 with a short `Retry-After` (30 s or less) is waited out once. When none answers, the job goes to Needs Attention with every model's reason. A single ID also works. **Name concrete IDs from the router's `GET /v1/models`, never its own `auto`** — `auto` picks whichever free model is up, and one that ignores `response_format` answers prose at HTTP 200, which fails every page. Only a model whose catalogue entry lists `response_format` honours the strict schema. Spread the list over different platforms: that is where the quota lives |
+   | `models.local.system_one_decision_model` | `kev-latest`, the Kev server's name for the decision model used for the residual page decisions (`decide.py`). This is the only decision route: the FreeLLMAPI router serves chat only (`POST /v1/systemone` there is HTTP 404) |
    | `models.local` | the Kev server: `base_url` (`http://127.0.0.1:8009`), `system_one_decision_model` (`kev-latest`, the name the server answers to), `state_chars` (12000: Kev was trained on short states and loses accuracy on long ones) and `timeout` (120 s: one pass on an Apple GPU is seconds) |
    | `google.account_email` | `maaz1377.aa@gmail.com` |
 
@@ -531,9 +538,9 @@ Three details explain how the file is written:
    endpoint with no target id, which needs neither an HTTP API nor a readable file. **No Full Disk Access is
    needed**; see below if preflight still cannot find it.
 
-5. **The decision model on this Mac** (only while `models.system_one_decision_provider = "local"`, which is what
-   `config.toml` ships with). [Kev](https://github.com/jaredpalmer/kev) is a family of small decision models that
-   serve TypeSafe's own System One API, so the assistant reaches them exactly as it reaches Jev. It needs
+5. **The decision model on this Mac** (the only decision route there is, since 2026-10-07).
+   [Kev](https://github.com/jaredpalmer/kev) is a family of small decision models that
+   serve TypeSafe's own System One API, so the assistant reaches them exactly as it reached Jev. It needs
    [uv](https://docs.astral.sh/uv) and git; the first start downloads the checkpoint and its Qwen base model into
    `~/.cache/huggingface`, and the server then runs on MLX (Apple Silicon).
 
@@ -543,17 +550,19 @@ Three details explain how the file is written:
 
    Leave that window open while the assistant runs. **Kev-0.8B is the size for a 16 GB Mac**; `KEV_MODEL=jaredpalmer/kev-4b ./run_kev_server.command` is more accurate but is a 32 GB machine in Kev's own table. What this buys and what it costs:
 
-   | | Jev (Vercel / OpenRouter) | Kev-0.8B here | Kev-4B (32 GB Mac) |
+   | | Hosted Jev (removed 2026-10-07) | Kev-0.8B here | Kev-4B (32 GB Mac) |
    |---|---|---|---|
    | Accuracy on questions it was not trained on (Kev's README) | 0.857 | 0.648 | 0.817 |
    | Cost and quota | about $0.00002 a decision, a key, a rate limit | none | none |
    | Speed | about 0.3 s a page | hundreds of ms a pass, on your own GPU | slower, and it shares 16 GB with Chrome |
-   | Your pages | leave the machine | never leave the machine | never leave the machine |
+   | Your pages | left the machine | never leave the machine | never leave the machine |
 
    A smaller model means more jobs in `Needs-Attention/`, not a wrong application: every threshold in
    `decide.THRESHOLDS` still has to be met, and a decision that cannot be got is never guessed. `models.local.state_chars`
    (12000) keeps each page short, because Kev was trained on states of up to 384 tokens and loses accuracy on long ones.
-   To go back to Jev, set `system_one_decision_provider = "vercel"` (or `"openrouter"`) in `config.toml`.
+   There is no hosted route to go back to: the cloud System One routes were removed on 2026-10-07, and the
+   FreeLLMAPI router that serves the chat models answers HTTP 404 on `POST /v1/systemone`. A bigger `KEV_MODEL` is
+   the way to more accuracy now.
 
 6. Check everything:
 
@@ -617,7 +626,7 @@ Each run writes `runs/<YYYYMMDD-HHMMSS>/`, with a `_run/` folder for run-level w
 | 0 | all parked |
 | 1 | preflight failed, or `--job` matched no queued job; no job was worked on |
 | 2 | at least one job needs attention |
-| 3 | the run was stopped (a safety alarm, LinkedIn signed out, the tracker changed on disk, a folder clash, a hung browser call, a provider outage, the spend cap, or a key/credit failure) |
+| 3 | the run was stopped (a safety alarm, LinkedIn signed out, the tracker changed on disk, a folder clash, a hung browser call, a provider outage, or a key/credit failure) |
 
 ## How it stays one click short of submitting
 
@@ -708,8 +717,8 @@ See [DISCOVERY.md](DISCOVERY.md):
 ```
 
 - `-m unit`: no browser, no network.
-- Plain `pytest`: adds `browser` tests, run against a throwaway headless Chrome on port 9223 and local fixture pages only. `tests/test_model_access.py` also runs here and calls OpenRouter.
-- `--live`: adds `live_model` tests. They call the configured routes — the chat models over the network, and the decision model where `models.system_one_decision_provider` points, so on the `local` route the Kev server must be running — still against local fixtures and saved pages only, and need `.env` for the chat key.
+- Plain `pytest`: adds `browser` tests, run against a throwaway headless Chrome on port 9223 and local fixture pages only. `tests/test_model_access.py` also runs here and calls your FreeLLMAPI router for real (free; it needs the router running).
+- `--live`: adds `live_model` tests. They call both servers on this Mac for real — the FreeLLMAPI router for the chat models and the Kev server for the decisions — so **both must be running**, and `.env` needs `FREELLMAPI_KEY`. Still against local fixtures and saved pages only.
 - **Replay** (`tests/test_replay.py`): unit tests for the harness itself. The harness is driven for real by `python -m assistant replay` — see [Tripwire and replay](#tripwire-and-replay) for what `strict` and `--live` actually do.
 - Offline, the decision model's questions are answered by `tests/rule_decider.py`, a stand-in built from the rules the program used before Jev. The program itself never uses those rules.
 

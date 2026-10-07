@@ -12,9 +12,6 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 TOOL_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = TOOL_DIR / "config.toml"
 DEFAULT_ENV = TOOL_DIR / ".env"
-# Who serves the chat models (the LLM inference and the text helper): both speak OpenAI's chat/completions, and
-# both take the same `response_format` and `reasoning` fields (Vercel docs, checked 2026-09-24).
-CHAT_BASES = {"openrouter": "https://openrouter.ai/api/v1", "vercel": "https://ai-gateway.vercel.sh/v1"}
 
 
 class _Strict(BaseModel):
@@ -38,16 +35,20 @@ class Browser(_Strict):
     max_pages_per_job: int = 15
 
 
-class ChatModels(_Strict):
-    """The models one provider serves for us, as that provider names them. The chat lists are tried in turn
-    (rotation.py): the model that answered last first, the next when one is out. `system_one_decision_model` is that
-    provider's System One decision model — a single ID, e.g. the Jev instance "typesafe-ai/jev" (chosen by
-    models.system_one_decision_provider; the chat lists by models.chat_route)."""
-    llm_inference: tuple[str, ...] = ()
-    text_helper: tuple[str, ...] = ()
-    system_one_decision_model: str = ""
+class FreeLLMAPI(_Strict):
+    """The FreeLLMAPI router on this machine (github.com/tashfeenahmed/freellmapi): one OpenAI-compatible /v1 that
+    fans a chat request out over the free tiers of many providers and falls over when one is rate-limited. It serves
+    the chat models only; the System One decision model stays on the Kev server below.
 
-    @field_validator("llm_inference", "text_helper", mode="before")
+    `llm_inference` is tried in turn (rotation.py): the model that answered last first, the next when one is out.
+    Name concrete model IDs, as `GET /v1/models` lists them — never the router's own "auto", which picks whichever
+    free model is up and so may pick one that ignores `response_format` and answers prose at HTTP 200
+    (live 2026-10-07). Only a model whose catalogue entry lists `response_format` honours the strict json_schema the
+    LLM inference asks for."""
+    base_url: str = "http://127.0.0.1:31415/v1"
+    llm_inference: tuple[str, ...] = ()
+
+    @field_validator("llm_inference", mode="before")
     @classmethod
     def _one_or_many(cls, v):
         """A single model ID is a rotation of one."""
@@ -57,7 +58,7 @@ class ChatModels(_Strict):
 class LocalKev(_Strict):
     """A System One decision server on this machine: Kev (github.com/jaredpalmer/kev), which serves TypeSafe's
     System One API (POST /v1/systemone) with the same request and answer shapes as Jev, so only the URL changes.
-    It serves the decision model only; the chat models (llm_inference, text_helper) stay on models.chat_route."""
+    It serves the decision model only; the chat models (llm_inference) stay on the FreeLLMAPI router above."""
     base_url: str = "http://127.0.0.1:8009"
     system_one_decision_model: str = "kev-latest"       # the name the server answers to; --run picks the checkpoint
     state_chars: int = 12_000       # Kev was trained on states of <=384 tokens: a short state is faster and better
@@ -65,42 +66,34 @@ class LocalKev(_Strict):
 
 
 class Models(_Strict):
-    chat_route: Literal["openrouter", "vercel"] = "openrouter"   # who serves the chat models: the table below
-    openrouter: ChatModels = ChatModels()
-    vercel: ChatModels = ChatModels()
-    local: LocalKev = LocalKev()                                 # a Kev server on this machine (decision model only)
-    # Serves the System One decision model. "local" needs no key and no quota; the cloud routes need theirs.
-    system_one_decision_provider: Literal["vercel", "openrouter", "local"] = "vercel"
+    """Two servers on this machine, and nothing off it: the FreeLLMAPI router answers the chat models, a Kev server
+    answers the System One decision model. The OpenRouter and Vercel AI Gateway routes were removed on 2026-10-07
+    (both were paid, and FreeLLMAPI serves the same OpenAI chat/completions shape for free)."""
+    freellmapi: FreeLLMAPI = FreeLLMAPI()        # the chat models (the LLM inference and the chat fallback)
+    local: LocalKev = LocalKev()                 # a Kev server on this machine (the decision model only)
 
     @model_validator(mode="before")
     @classmethod
-    def _reject_renamed_key(cls, data):
-        """The P0 rename (2026-09-27): point an old config at its new key instead of a generic 'extra' error."""
-        old = "answer_engine"  # rename-guard: the pre-P0 key name, kept only to detect and redirect it
+    def _reject_removed_route(cls, data):
+        """Point a config written for the old paid routes at what replaced them, instead of a generic
+        'extra fields not permitted' from the strict schema."""
         if isinstance(data, dict):
-            for route in ("openrouter", "vercel"):
-                if isinstance(data.get(route), dict) and old in data[route]:
-                    raise ValueError(f"models.{route}.{old} was renamed to models.{route}.llm_inference")
+            for gone in ("openrouter", "vercel", "chat_route", "system_one_decision_provider"):
+                if gone in data:
+                    raise ValueError(
+                        f"models.{gone} was removed on 2026-10-07: the chat models now live in "
+                        f"[models.freellmapi] (base_url + llm_inference) and the System One decision model in "
+                        f"[models.local]")
         return data
 
     @property
-    def chat(self) -> ChatModels:
-        """The chat models of the route in use."""
-        return self.vercel if self.chat_route == "vercel" else self.openrouter
-
-    @property
     def system_one_decision_model(self) -> str:
-        """The System One decision model on models.system_one_decision_provider
-        (models.<system_one_decision_provider>.system_one_decision_model)."""
-        return getattr(self, self.system_one_decision_provider).system_one_decision_model
+        """The System One decision model, which only the local Kev server serves."""
+        return self.local.system_one_decision_model
 
     @property
     def llm_inference(self) -> tuple[str, ...]:
-        return self.chat.llm_inference
-
-    @property
-    def text_helper(self) -> tuple[str, ...]:
-        return self.chat.text_helper
+        return self.freellmapi.llm_inference
 
 
 class Limits(_Strict):
@@ -109,10 +102,6 @@ class Limits(_Strict):
     max_in_flight: int = 1
     min_interval_s: float = 0.25
     max_attempts: int = 3
-
-
-class Budget(_Strict):
-    max_usd_per_run: float = 1.00       # D15: the run stops cleanly when its model spend reaches this
 
 
 class SystemOneLimits(_Strict):
@@ -140,10 +129,8 @@ class Config(_Strict):
     browser: Browser = Browser()
     models: Models = Models()
     limits: Limits = Limits()
-    budget: Budget = Budget()
     jev: SystemOneLimits = SystemOneLimits()
     decider: Decider = Decider()
-    prices: dict[str, tuple[float, float]] = {}
     policy: Policy = Policy()
     google: Google = Google()
     source: Path = DEFAULT_CONFIG  # set by load(); not a TOML key
@@ -161,18 +148,18 @@ class Config(_Strict):
         out = []
         if not self.paths.base:
             out.append("paths.base is empty")
-        route = self.models.chat_route
-        for name in ("llm_inference", "text_helper"):
-            if not getattr(self.models.chat, name):
-                out.append(f"models.{route}.{name} is empty (models.chat_route is {route!r}: list one or more "
-                           f"model IDs as {route} names them)")
-        if self.models.system_one_decision_provider == "local" and not self.models.local.base_url:
+        if not self.models.freellmapi.llm_inference:
+            out.append("models.freellmapi.llm_inference is empty (list one or more model IDs as the FreeLLMAPI "
+                       "router's GET /v1/models names them, e.g. \"kimi-k3\")")
+        if not self.models.freellmapi.base_url:
+            out.append("models.freellmapi.base_url is empty (the address of the FreeLLMAPI router on this "
+                       "machine, e.g. http://127.0.0.1:31415/v1)")
+        if not self.models.local.base_url:
             out.append("models.local.base_url is empty (the address of the Kev server on this machine, "
                        "e.g. http://127.0.0.1:8009)")
         if not self.models.system_one_decision_model:
-            out.append(f"models.{self.models.system_one_decision_provider}.system_one_decision_model is empty "
-                       f"(models.system_one_decision_provider is {self.models.system_one_decision_provider!r}: set "
-                       f"the System One decision model for that provider)")
+            out.append("models.local.system_one_decision_model is empty (the name the Kev server on this machine "
+                       "answers to, e.g. \"kev-latest\")")
         for name in ("applications", "profile", "tracker"):
             if not self.path(name).exists():
                 out.append(f"paths.{name} not found: {self.path(name)}")
@@ -191,37 +178,23 @@ def _env(name: str, env_file: Path) -> str:
     return ((dotenv_values(env_file).get(name) if env_file.exists() else None) or os.environ.get(name, "")).strip()
 
 
-def api_key(env_file: Path = DEFAULT_ENV) -> str:
-    """The OpenRouter key (the LLM inference and the text helper): .env first, then the process environment."""
-    return _env("OPENROUTER_API_KEY", env_file)
-
-
-def gateway_key(env_file: Path = DEFAULT_ENV) -> str:
-    """The Vercel AI Gateway key (the System One decision model, when models.system_one_decision_provider is "vercel")."""
-    return _env("AI_GATEWAY_API_KEY", env_file)
-
-
 def local_key(env_file: Path = DEFAULT_ENV) -> str:
     """KEV_API_KEY: only when the local Kev server was started with one. A Kev server is open by default, and then
     it ignores the Authorization header, so this is empty for most local setups."""
     return _env("KEV_API_KEY", env_file)
 
 
-def system_one_decision_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
-    """The key for the System One decision provider's route ("" for a local server that asks for none)."""
-    return {"vercel": gateway_key, "openrouter": api_key, "local": local_key}[
-        cfg.models.system_one_decision_provider](env_file)
-
-
-def chat_key(cfg: "Config", env_file: Path = DEFAULT_ENV) -> str:
-    """The key for the chat models' route (the LLM inference and the text helper)."""
-    return gateway_key(env_file) if cfg.models.chat_route == "vercel" else api_key(env_file)
+def chat_key(env_file: Path = DEFAULT_ENV) -> str:
+    """FREELLMAPI_KEY: the unified key of the FreeLLMAPI router, which every chat request uses (the LLM inference
+    and the chat fallback). The router refuses an unauthenticated request with HTTP 401, so this is required even
+    though the router runs on this machine."""
+    return _env("FREELLMAPI_KEY", env_file)
 
 
 def chat_url(cfg: "Config") -> str:
-    """chat/completions on the chat models' route."""
-    return CHAT_BASES[cfg.models.chat_route] + "/chat/completions"
+    """chat/completions on the FreeLLMAPI router."""
+    return cfg.models.freellmapi.base_url.rstrip("/") + "/chat/completions"
 
 
-KEY_NAMES = {"openrouter": "OPENROUTER_API_KEY", "vercel": "AI_GATEWAY_API_KEY", "local": "KEV_API_KEY"}
-KEYLESS_PROVIDERS = ("local",)   # a server on this machine: a key only when it was started with KEV_API_KEY set
+CHAT_KEY_NAME = "FREELLMAPI_KEY"   # named in the preflight messages, never printed with its value
+LOCAL_KEY_NAME = "KEV_API_KEY"     # only when the Kev server was started with one; it is open by default

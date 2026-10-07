@@ -54,7 +54,7 @@ def run_until(workspace, stop, monkeypatch, tmp_path, process=None):
     monkeypatch.setattr(cli.tabs, "TabBook", lambda browser: SimpleNamespace(
         handles=lambda: set(), close=lambda: None, release=lambda s: None,
         current_handle=lambda s: "", close_junk=lambda s, b, k: []))
-    monkeypatch.setattr(config_mod, "chat_key", lambda c: "k")
+    monkeypatch.setattr(config_mod, "chat_key", lambda *a: "k")
 
     def raise_stop(job, **kw):
         raise stop
@@ -66,9 +66,8 @@ def run_until(workspace, stop, monkeypatch, tmp_path, process=None):
 
 
 @pytest.mark.parametrize("stop", [
-    G.ProviderOutage("provider outage — vercel HTTP 503: 3 requests in a row failed"),
-    G.BudgetExceeded("spend cap $1.00 reached"),
-    G.CreditOrKey("openrouter.ai rejected the key (HTTP 401) — check the key / add credit on openrouter"),
+    G.ProviderOutage("provider outage — freellmapi HTTP 503: 3 requests in a row failed"),
+    G.CreditOrKey("127.0.0.1 rejected the key (HTTP 401) — check the key / add credit on freellmapi"),
 ])
 def test_a_gateway_stop_records_nothing_and_exits_three(workspace, monkeypatch, tmp_path, stop):
     base = workspace.base
@@ -93,7 +92,7 @@ def test_the_second_job_is_never_started_after_a_stop(workspace, monkeypatch, tm
 
     def process(job, **kw):
         seen.append(job.key)
-        raise G.BudgetExceeded("spend cap $1.00 reached")
+        raise G.ProviderOutage("provider outage — freellmapi HTTP 503: 3 requests in a row failed")
     run_until(workspace, None, monkeypatch, tmp_path, process=process)
     assert seen and len(seen) == 1          # two jobs were queued; the second was never started
 
@@ -115,17 +114,17 @@ def test_a_stop_during_preflight_exits_three_with_a_report(workspace, monkeypatc
     monkeypatch.setattr(cli, "connect_once", lambda *a: None)
     monkeypatch.setattr(cli, "Browser", lambda *a, **k: SimpleNamespace(actions_log=None,
                                                                         connect=lambda *a: None))
-    monkeypatch.setattr(config_mod, "chat_key", lambda c: "k")
+    monkeypatch.setattr(config_mod, "chat_key", lambda *a: "k")
 
     def preflight(browser):
-        raise G.ProviderOutage("provider outage — vercel HTTP 503: 3 requests in a row failed")
+        raise G.ProviderOutage("provider outage — freellmapi HTTP 503: 3 requests in a row failed")
         yield
     monkeypatch.setattr(cli, "preflight", preflight)
     args = SimpleNamespace(job=None, limit=None, no_record=False, dry_run=False, config=None)
     assert cli.run(cfg, args) == EXIT_STOPPED
     inference_log.start_run(None)
     report = next((tmp_path / "runs").glob("*/report.md")).read_text()
-    assert "provider outage — vercel HTTP 503" in report
+    assert "provider outage — freellmapi HTTP 503" in report
     assert list((workspace.base / "Needs-Attention").iterdir()) == []
 
 
@@ -134,26 +133,30 @@ def test_the_report_shows_the_model_rows_p1_asks_for(tmp_path):
     from assistant.report import JobResult, Report
     from datetime import datetime
     from assistant.blockers import Parked
-    run = G.Counters(requests=9, attempts=11, failures=1, cost=0.0123, in_flight=1,
-                     jev_requests=7, chat_requests=2)
-    job = G.Counters(requests=4, attempts=5, jev_requests=3, chat_requests=1, cost=0.004)
+    run = G.Counters(requests=9, attempts=11, failures=1, in_flight=1, jev_requests=7, chat_requests=2)
+    job = G.Counters(requests=4, attempts=5, jev_requests=3, chat_requests=1)
     r = Report(datetime(2026, 9, 28, 12, 0), gateway=SimpleNamespace(run=run), by_fallback=2,
-               decisions=(7, 0.0), decision_model="kev-latest",
+               decisions=7, decision_model="kev-latest",
                results=[JobResult("Acme", "DE", "u", "f", 42, parked=Parked("u", "t", 2), models=job)])
     md = r.write(tmp_path).read_text()
     assert "- Model requests: 7 System One, 2 LLM inference (11 attempts, 1 failed)" in md
-    assert "- Model spend: $0.0123 (reported)" in md
     assert "- Highest number of requests in flight: 1" in md
+    assert "- Decisions by kev-latest: 7 calls" in md
     assert "- Decisions by fallback: 2" in md
     assert "3 System One, 1 LLM, 5 attempts" in md          # the Timings row
 
 
-def test_an_estimated_spend_says_so(tmp_path):
-    from assistant.report import Report
+def test_the_report_names_no_money(tmp_path):
+    """Cost accounting was removed on 2026-10-07: both servers are local and free, so no spend line is printed
+    and no "$" reaches report.md."""
+    from assistant.report import JobResult, Report
     from datetime import datetime
-    run = G.Counters(cost=0.5, estimated=True)
-    md = Report(datetime(2026, 9, 28, 12, 0), gateway=SimpleNamespace(run=run)).markdown()
-    assert "$0.5000 (estimated)" in md
+    from assistant.blockers import Parked
+    run = G.Counters(requests=2, attempts=2, jev_requests=1, chat_requests=1)
+    md = Report(datetime(2026, 9, 28, 12, 0), gateway=SimpleNamespace(run=run), decisions=3,
+                decision_model="kev-latest",
+                results=[JobResult("Acme", "DE", "u", "f", 1, parked=Parked("u", "t", 1), models=run)]).markdown()
+    assert "$" not in md and "spend" not in md.lower() and "cost" not in md.lower()
 
 
 # The vendored-package cleanup-path tests are dropped in P2: the owned driver makes NO model request on the

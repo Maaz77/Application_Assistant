@@ -40,6 +40,8 @@ def test_no_component_name_survives():
     assert not offenders, "old component name still present:\n" + "\n".join(offenders)
 
 
-def test_old_config_key_is_rejected_with_the_new_name():
-    with pytest.raises(ValidationError, match="answer_engine was renamed to models.openrouter.llm_inference"):
-        Config(paths={"base": "x"}, models={"openrouter": {"answer_engine": ["m"]}})
+def test_a_config_naming_a_removed_route_is_rejected_with_what_replaced_it():
+    """The `answer_engine` rename guard went with the routes it named: a config old enough to use that key also
+    has a `[models.openrouter]` table, and this guard is what it now hits first."""
+    with pytest.raises(ValidationError, match="removed on 2026-10-07"):
+        Config(paths={"base": "x"}, models={"openrouter": {"llm_inference": ["m"]}})

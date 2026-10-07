@@ -19,7 +19,7 @@ pytestmark = pytest.mark.unit
 
 def gw(**kw) -> G.Gateway:
     return G.Gateway(limits=SimpleNamespace(max_in_flight=1, min_interval_s=0.0, max_attempts=3),
-                     budget=SimpleNamespace(max_usd_per_run=0.0), sleep=lambda _: None, **kw)
+                     sleep=lambda _: None, **kw)
 
 
 def chat_reply(answers: dict) -> dict:

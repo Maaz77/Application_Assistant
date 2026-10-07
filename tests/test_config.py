@@ -32,24 +32,62 @@ def test_cli_parses_run_flags():
 
 def local_toml(tmp_path, extra: str = "") -> "config.Config":
     f = tmp_path / "c.toml"
-    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models]\nsystem_one_decision_provider = "local"\n'
-                 f'[models.local]\n{extra}')
+    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models.local]\n{extra}')
     return config.load(f)
 
 
-def test_the_local_route_defaults_to_a_kev_server_on_this_machine(tmp_path, monkeypatch):
+def test_the_decision_server_defaults_to_a_kev_server_on_this_machine(tmp_path, monkeypatch):
     monkeypatch.delenv("KEV_API_KEY", raising=False)
     cfg = local_toml(tmp_path)
     assert cfg.models.local.base_url == "http://127.0.0.1:8009"
-    assert cfg.models.system_one_decision_model == "kev-latest"      # read from [models.local], not [models.vercel]
-    assert config.system_one_decision_key(cfg, tmp_path / "no.env") == ""      # an open server needs no key
-    assert "local" in config.KEYLESS_PROVIDERS and config.KEY_NAMES["local"] == "KEV_API_KEY"
+    assert cfg.models.system_one_decision_model == "kev-latest"      # [models.local] is the only route there is
+    assert config.local_key(tmp_path / "no.env") == ""               # an open server needs no key
+    assert config.LOCAL_KEY_NAME == "KEV_API_KEY"
 
 
-def test_the_local_route_reads_kev_api_key_when_the_server_asks_for_one(tmp_path):
+def test_the_decision_server_reads_kev_api_key_when_it_asks_for_one(tmp_path):
     env = tmp_path / ".env"
     env.write_text("KEV_API_KEY=kev-secret\n")
-    assert config.system_one_decision_key(local_toml(tmp_path), env) == "kev-secret"
+    assert config.local_key(env) == "kev-secret"
+
+
+def test_the_chat_route_is_the_freellmapi_router_keyed_by_freellmapi_key(tmp_path):
+    """One chat route: the FreeLLMAPI router on this machine. The URL comes from the config, never a table of
+    hosts, and the key is always FREELLMAPI_KEY (the router answers HTTP 401 without it)."""
+    f = tmp_path / "c.toml"
+    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models.freellmapi]\n'
+                 f'base_url = "http://127.0.0.1:31415/v1"\nllm_inference = "kimi-k3"\n')
+    cfg = config.load(f)
+    assert cfg.models.llm_inference == ("kimi-k3",)                  # a single ID is a rotation of one
+    assert config.chat_url(cfg) == "http://127.0.0.1:31415/v1/chat/completions"
+    env = tmp_path / ".env"
+    env.write_text("FREELLMAPI_KEY=fl-secret\n")
+    assert config.chat_key(env) == "fl-secret" and config.CHAT_KEY_NAME == "FREELLMAPI_KEY"
+
+
+def test_a_trailing_slash_on_the_base_url_does_not_double_up(tmp_path):
+    f = tmp_path / "c.toml"
+    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models.freellmapi]\n'
+                 f'base_url = "http://127.0.0.1:31415/v1/"\nllm_inference = "kimi-k3"\n')
+    assert config.chat_url(config.load(f)) == "http://127.0.0.1:31415/v1/chat/completions"
+
+
+def test_an_empty_freellmapi_base_url_is_a_problem(tmp_path):
+    f = tmp_path / "c.toml"
+    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models.freellmapi]\n'
+                 f'base_url = ""\nllm_inference = "kimi-k3"\n')
+    assert any("models.freellmapi.base_url is empty" in p for p in config.load(f).problems())
+
+
+def test_a_config_written_for_a_removed_route_says_what_replaced_it(tmp_path):
+    """The paid routes went on 2026-10-07. A config still naming one must say where its keys moved, not fail with
+    the strict schema's generic "extra fields not permitted"."""
+    for gone in ('chat_route = "openrouter"', '[models.openrouter]\nllm_inference = ["x"]',
+                 '[models.vercel]\nllm_inference = ["x"]', 'system_one_decision_provider = "vercel"'):
+        f = tmp_path / "c.toml"
+        f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models]\n{gone}\n')
+        with pytest.raises(Exception, match="removed on 2026-10-07"):
+            config.load(f)
 
 
 def test_an_empty_local_base_url_is_a_problem(tmp_path):
@@ -59,8 +97,8 @@ def test_an_empty_local_base_url_is_a_problem(tmp_path):
 
 def test_the_shipped_config_names_a_reachable_decision_route():
     cfg = config.load()
-    assert cfg.models.system_one_decision_model                      # whichever provider is configured
-    assert cfg.models.system_one_decision_provider in ("local", "vercel", "openrouter")
+    assert cfg.models.system_one_decision_model == "kev-latest"
+    assert cfg.models.local.base_url.startswith("http://127.0.0.1")  # the only route: a server on this machine
 
 
 # ------------------------------------------------------------------ P1 (T1, T7)
@@ -69,26 +107,18 @@ def test_the_shipped_config_names_a_reachable_decision_route():
 def test_the_p1_sections_have_the_defaults_p1_asks_for():
     cfg = config.load()
     assert (cfg.limits.max_in_flight, cfg.limits.min_interval_s, cfg.limits.max_attempts) == (1, 0.25, 3)
-    assert cfg.budget.max_usd_per_run == 1.00
     assert cfg.jev.max_questions_per_request == 24
     assert cfg.decider.fallback == "chat"
 
 
-def test_no_free_model_is_configured_on_any_route():
-    """D14. A free model shares its provider's capacity with everyone: 429s and overloaded bodies in bursts."""
-    cfg = config.load()
-    for route in ("openrouter", "vercel"):
-        table = getattr(cfg.models, route)
-        named = list(table.llm_inference) + list(table.text_helper) + [table.system_one_decision_model]
-        assert not [m for m in named if ":free" in m], (route, named)
-
-
-def test_every_configured_chat_model_has_a_price_to_estimate_from():
-    """[prices] is only a fallback for a gateway that reports no cost, but a missing entry silently estimates $0."""
-    cfg = config.load()
-    for route in ("openrouter", "vercel"):
-        for model in getattr(cfg.models, route).llm_inference:
-            assert model in cfg.prices, model
+def test_the_router_auto_model_is_never_configured():
+    """The FreeLLMAPI router's "auto" picks whichever free model is up, and one that does not support
+    response_format answers prose at HTTP 200 instead of the strict json_schema (live 2026-10-07). D14's reason
+    for avoiding `:free` IDs is the same shape of problem, so both are checked here."""
+    named = list(config.load().models.llm_inference)
+    assert named, "models.freellmapi.llm_inference is empty"
+    assert "auto" not in named and not [m for m in named if m.startswith("auto:")], named
+    assert not [m for m in named if ":free" in m], named
 
 
 def test_an_unknown_p1_key_is_still_an_error(tmp_path):

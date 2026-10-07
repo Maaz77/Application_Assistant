@@ -68,15 +68,24 @@ def test_failed_attempts_record_the_error_body_or_a_placeholder(tmp_path):
 
 
 def test_provider_names_the_upstream_when_reported(tmp_path):
+    """The FreeLLMAPI router reports the free tier it routed to at `_routed_via.platform` (live 2026-10-07). The
+    configured model ID is only a slot, so without that the log cannot say who actually answered."""
     L.start_run(tmp_path)
-    L.log_llm("openrouter", {"model": "m", "messages": []},
-              {"provider": "DeepInfra", "choices": [{"message": {"content": "x"}}]})
-    L.log_llm("vercel", {"model": "m", "messages": []}, {"choices": [{"message": {
-        "content": "x", "provider_metadata": {"gateway": {"routing": {"finalProvider": "mistral"}}}}}]})
-    L.log_llm("vercel", {"model": "m", "messages": []}, {"choices": [{"message": {"content": "x"}}]})
-    L.log_llm("openrouter", {"model": "m", "messages": []}, None, "timeout")
+    L.log_llm("freellmapi", {"model": "kimi-k3", "messages": []},
+              {"choices": [{"message": {"content": "x"}}],
+               "_routed_via": {"platform": "huggingface", "model": "moonshot/kimi-k3"}})
+    L.log_llm("freellmapi", {"model": "kimi-k3", "messages": []}, {"choices": [{"message": {"content": "x"}}]})
+    L.log_llm("freellmapi", {"model": "kimi-k3", "messages": []}, None, "timeout")
     es = _read(tmp_path, "_run", L._LLM_FILE)
-    assert [e["provider"] for e in es] == ["openrouter/DeepInfra", "vercel/mistral", "vercel", "openrouter"]
+    assert [e["provider"] for e in es] == ["freellmapi/huggingface", "freellmapi", "freellmapi"]
+
+
+def test_gateway_of_tells_the_two_local_servers_apart():
+    """Both servers run on 127.0.0.1, so a label taken from the host alone would file a chat failure and a Kev
+    failure under the same name in the outage and rejected-key messages."""
+    assert L.gateway_of("http://127.0.0.1:31415/v1/chat/completions") == "freellmapi"
+    assert L.gateway_of("http://127.0.0.1:8009/v1/systemone") == "local"
+    assert L.gateway_of("http://example.com/v1/chat/completions") == "example.com"
 
 
 def test_file_is_valid_json_after_every_append(tmp_path):

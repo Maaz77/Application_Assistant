@@ -124,22 +124,14 @@ def test_nothing_matched_makes_the_report_exit_1(workspace):
 
 
 def test_run_without_key_fails_preflight_with_exit_1(workspace, monkeypatch, capsys):
+    """The FreeLLMAPI router answers HTTP 401 without a key, so a missing FREELLMAPI_KEY must stop the run before
+    anything is written rather than failing the first page. It is the one key a run requires: the Kev decision
+    server is open unless it was started with KEV_API_KEY."""
     base, cfg = workspace
-    cfg.write_text(re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "openrouter"', cfg.read_text()))
-    monkeypatch.setattr(cli.config_mod, "api_key", lambda *a: "")
-    assert cli.main(["--config", str(cfg), "run"]) == 1
-    assert "OPENROUTER_API_KEY is missing" in capsys.readouterr().out
-
-
-def test_a_key_both_routes_use_is_reported_once(workspace, monkeypatch, capsys):
-    base, cfg = workspace
-    text = re.sub(r'(?m)^chat_route = "\w+"', 'chat_route = "vercel"', cfg.read_text())
-    cfg.write_text(re.sub(r'(?m)^system_one_decision_provider = "\w+"', 'system_one_decision_provider = "vercel"', text))   # both routes share the key
-    monkeypatch.setattr(cli.config_mod, "gateway_key", lambda *a: "")
+    monkeypatch.setattr(cli.config_mod, "chat_key", lambda *a: "")
     assert cli.main(["--config", str(cfg), "run"]) == 1
     out = capsys.readouterr().out
-    assert out.count("AI_GATEWAY_API_KEY is missing") == 1 and \
-        "the LLM inference and text helper and the System One decision model" in out
+    assert out.count("FREELLMAPI_KEY is missing") == 1 and "KEV_API_KEY" not in out
 
 
 def test_bad_config_is_exit_1(tmp_path, capsys):
@@ -149,50 +141,99 @@ def test_bad_config_is_exit_1(tmp_path, capsys):
 
 
 def test_the_llm_inference_probe_asks_every_configured_model(monkeypatch):
-    """P1 T1: each configured model, not just the first that answers — a dead second model must be found now and
-    not mid-job. One trivial empty page each."""
+    """P1 T1: each configured model, not just the first that answers, so the report names the ones that are out.
+    One trivial empty page each."""
     cfg = cli.config_mod.load()
     seen = []
     monkeypatch.setattr(cli, "call_engine",
                         lambda **kw: seen.append((kw["url"], list(kw["models"].models))) or None)
-    assert cli._probe_llm_inference(cfg) == list(cfg.models.llm_inference)
+    assert cli._probe_llm_inference(cfg) == (list(cfg.models.llm_inference), [])
     assert [m for _, ms in seen for m in ms] == list(cfg.models.llm_inference)
     assert {url for url, _ in seen} == {cli.config_mod.chat_url(cfg)}
 
 
-def test_the_probe_names_the_model_that_did_not_answer(monkeypatch):
+def test_one_model_out_of_quota_is_reported_but_does_not_fail_preflight(monkeypatch):
+    """The FreeLLMAPI router's free tiers go in and out of quota minute by minute (live 2026-10-07), and a run
+    only ever needs one model per page — that is what the rotation is for. So a single 429 is reported, not fatal.
+    Before 2026-10-07 every cloud model was paid and one failure did fail preflight."""
     cfg = cli.config_mod.load()
     dead = cfg.models.llm_inference[-1]
 
     def fake(**kw):
         if dead in kw["models"].models:
-            raise cli.LLMInferenceError("no capacity")
+            raise cli.LLMInferenceError("HTTP 429 All models exhausted")
     monkeypatch.setattr(cli, "call_engine", fake)
-    with pytest.raises(cli.LLMInferenceError, match=dead):
-        cli._probe_llm_inference(cfg)
+    answered, out = cli._probe_llm_inference(cfg)
+    assert dead not in answered and answered == [m for m in cfg.models.llm_inference if m != dead]
+    assert len(out) == 1 and out[0].startswith(dead) and "429" in out[0]
+
+
+def test_models_out_of_quota_do_not_trip_the_runs_breaker(monkeypatch):
+    """Regression (2026-10-07): `call_engine` reports one failed request per model that cannot answer, so probing
+    five models fed five verdicts into the run's breaker. Three failures in a row is a D21 ProviderOutage — and
+    three configured models being out of quota at once is ordinary on free tiers, two of the five being
+    neighbours — so preflight exited 3 instead of reporting them, defeating the relaxation above, and the models
+    after the third were skipped even when they would have answered. Each model is now probed on a Gateway of its
+    own, and the run's is restored."""
+    from assistant import gateway as gateway_mod
+    cfg = cli.config_mod.load()
+    models = list(cfg.models.llm_inference)
+    assert len(models) >= 5, models
+    monkeypatch.setattr(cli.config_mod, "chat_key", lambda *a: "k")
+
+    def post(url, body, headers, timeout):
+        if body["model"] in models[1:4]:                 # three neighbours out of quota
+            return 429, {"error": {"message": "All models exhausted", "type": "rate_limit_error"}}
+        return 200, {"choices": [{"message": {"content": '{"answers": []}'}}]}
+
+    run_gateway = gateway_mod.for_config(cfg, post=post, sleep=lambda s: None)
+    gateway_mod.use(run_gateway)
+    try:
+        answered, out = cli._probe_llm_inference(cfg)
+    finally:
+        gateway_mod.use(None)
+    assert answered == [models[0], models[4]] and len(out) == 3
+    assert run_gateway.tripped is None                   # the run's breaker never saw the probe's failures
+    assert gateway_mod.current() is None                 # and the run's Gateway was put back
+
+
+def test_a_rejected_key_during_the_probe_still_reaches_preflight(monkeypatch):
+    """The probe's own Gateway must not swallow a CreditOrKey: P1 T1 wants preflight to name the key."""
+    from assistant import gateway as gateway_mod
+    cfg = cli.config_mod.load()
+    monkeypatch.setattr(cli.config_mod, "chat_key", lambda *a: "bad")
+    gateway_mod.use(gateway_mod.for_config(
+        cfg, post=lambda *a: (401, {"error": {"message": "Invalid API key"}}), sleep=lambda s: None))
+    try:
+        with pytest.raises(gateway_mod.CreditOrKey):
+            cli._probe_llm_inference(cfg)
+    finally:
+        gateway_mod.use(None)
 
 
 def test_llm_inference_probe_raises_when_no_model_answers(monkeypatch):
+    """None answering is the condition that really stops a run, and the error names every model that failed."""
     cfg = cli.config_mod.load()
+
     def fake(**kw):
         raise cli.LLMInferenceError("all models unavailable")
     monkeypatch.setattr(cli, "call_engine", fake)
-    with pytest.raises(cli.LLMInferenceError):
+    with pytest.raises(cli.LLMInferenceError) as exc:
         cli._probe_llm_inference(cfg)
+    for model in cfg.models.llm_inference:
+        assert model in str(exc.value)
 
 
-def test_the_local_decision_route_asks_for_no_key(tmp_path, monkeypatch):
-    """A Kev server on this machine is keyless (config.KEYLESS_PROVIDERS): preflight demands only the chat
-    route's key, and never KEV_API_KEY."""
+def test_the_decision_server_asks_for_no_key(tmp_path, monkeypatch):
+    """A Kev server on this machine is open unless it was started with KEV_API_KEY: preflight demands only the
+    chat key, and never KEV_API_KEY."""
     f = tmp_path / "c.toml"
-    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models]\nchat_route = "openrouter"\n'
-                 f'system_one_decision_provider = "local"\n'
-                 f'[models.openrouter]\nllm_inference = ["m"]\ntext_helper = ["t"]\n')
+    f.write_text(f'[paths]\nbase = "{tmp_path}"\n[models.freellmapi]\nllm_inference = ["m"]\n')
     monkeypatch.setattr(cli.config_mod, "local_key", lambda *a: "")
     cfg = cli.config_mod.load(f)
     assert not [p for p in cli._static_checks(cfg, "chat-key") if "API_KEY" in p]
     missing = [p for p in cli._static_checks(cfg, "") if "API_KEY" in p]
-    assert len(missing) == 1 and missing[0].startswith("OPENROUTER_API_KEY is missing") and "KEV_" not in missing[0]
+    assert len(missing) == 1 and missing[0].startswith("FREELLMAPI_KEY is missing") and "KEV_" not in missing[0]
 
 
 def test_a_rejected_key_fails_preflight_and_names_the_variable(monkeypatch):
@@ -205,8 +246,7 @@ def test_a_rejected_key_fails_preflight_and_names_the_variable(monkeypatch):
         raise G.CreditOrKey("the provider rejected the key (HTTP 401) — check the key / add credit")
     monkeypatch.setattr(cli, "call_engine", fake)
     browser = type("B", (), {"cfg": cfg})()
-    keyname = cli.config_mod.KEY_NAMES[cfg.models.chat_route]      # the active chat route's key, whichever it is
-    with pytest.raises(cli.PreflightError, match=keyname):
+    with pytest.raises(cli.PreflightError, match=cli.config_mod.CHAT_KEY_NAME):
         list(cli.preflight(browser))
 
 

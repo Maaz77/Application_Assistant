@@ -13,32 +13,31 @@ chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # test
 max_actions = 2000
 max_pages_per_job = 15
 
-[models]                           # model IDs, as each route names them
-chat_route = "openrouter"                 # who serves the LLM inference and the text helper: "openrouter" (free
-                                          # models below) or "vercel" (paid, for when OpenRouter's free quota is out)
-system_one_decision_provider = "local"    # who serves the System One decision model: "local" (a Kev server on
-                                          # this Mac: no key, no quota — [models.local] below), "openrouter"
-                                          # (models.openrouter.system_one_decision_model, OPENROUTER_API_KEY) or
-                                          # "vercel" (models.vercel.system_one_decision_model, AI_GATEWAY_API_KEY)
+[models]                           # two servers on this machine, and nothing off it
+# The OpenRouter and Vercel AI Gateway routes were removed on 2026-10-07: both were paid, and the FreeLLMAPI router
+# serves the same OpenAI chat/completions shape from free provider tiers.
 
-# Each list is tried in turn: the model that answered last goes first, and one that is out (rate-limited,
+[models.freellmapi]                # FREELLMAPI_KEY. github.com/tashfeenahmed/freellmapi, started on this machine.
+base_url = "http://127.0.0.1:31415/v1"
+# Tried in turn (rotation.Rotation): the model that answered last goes first, and one that is out (rate-limited,
 # overloaded, wrong output) hands over to the next; when none answers the job goes to Needs Attention.
-[models.openrouter]                # OPENROUTER_API_KEY. Paid: no `:free` model is configured (D14) — a free
-# model shares its provider's capacity with everyone and answers 429 or an overloaded body in bursts.
-llm_inference = ["deepseek/deepseek-v4.1-flash", "openai/gpt-5.4-mini"]
-text_helper   = ["deepseek/deepseek-v4.1-flash", "openai/gpt-5.4-mini"]   # the package's text helper, until P2
-system_one_decision_model = "typesafe/jev-1.13"   # TypeSafe System One via https://openrouter.ai/api/alpha/decisions
+# Name concrete model IDs, as the router's GET /v1/models lists them — NOT its own "auto", which picks whichever
+# free model is up and so may pick one that ignores response_format and answers prose at HTTP 200 (live
+# 2026-10-07). Only a model whose catalogue entry lists `response_format` honours the strict json_schema at all.
+#
+# The quota that runs out is the router's key for a *platform*, not a model ID ("All models exhausted: 1 route
+# checked (1 rate-limited or on cooldown)"), so two IDs served by the same platform share one limit and rotating
+# between them buys nothing. These five sit on four platforms — groq, google, huggingface (two), nvidia — which is
+# what makes the rotation survive a tier going out. Verified against the real strict ANSWER_SCHEMA and system
+# prompt on a 6-question page, live 2026-10-07: qwen3.8-27b 1.2 s, gemini-3.5-flash 2.5 s, kimi-k3 9.1 s,
+# deepseek-v4-flash 11.1 s, muse-glimmer-30b 42.5 s. Fast ones lead, because the chat timeout is 45 s.
+# Rejected: "auto" and laguna-s-2.1 (answered, but not to the schema — "output invalid").
+llm_inference = ["qwen3.8-27b", "gemini-3.5-flash", "kimi-k3", "deepseek-v4-flash", "muse-glimmer-30b"]
 
-[models.vercel]                    # AI_GATEWAY_API_KEY (Vercel AI Gateway, paid from its credit)
-# A realistic page (5.3K tokens in), 2026-09-24: Small 5.2 s and $0.0013; Nemo 58.6 s and $0.00013. Both answer in
-# strict JSON. Vercel allows a new team 5 requests a minute per model, so two models also double that.
-llm_inference = ["mistral/mistral-small", "mistral/mistral-nemo"]
-text_helper = ["mistral/mistral-small", "mistral/mistral-nemo"]
-system_one_decision_model = "typesafe-ai/jev"            # Vercel AI Gateway's Jev (now 403 for free-tier; needs a card)
-
-[models.local]                     # Kev (github.com/jaredpalmer/kev) on this Mac: the same System One API as Jev
+[models.local]                     # Kev (github.com/jaredpalmer/kev) on this Mac: the System One decision API
 # Start the server before a run: ./run_kev_server.command (it downloads the weights on the first start). On a 16 GB
 # Mac use kev-0.8b; kev-4b and kev-9b are 32 GB machines. No key unless the server is started with KEV_API_KEY set.
+# This is the only System One route: the FreeLLMAPI router serves chat only (POST /v1/systemone there is HTTP 404).
 base_url = "http://127.0.0.1:8009"
 system_one_decision_model = "kev-latest"   # the name the server answers to; --run picks which checkpoint it serves
 # Kev was trained on states of up to 384 tokens and loses accuracy on long ones (its README, "What to Expect"), and
@@ -51,23 +50,11 @@ max_in_flight = 1                  # a run sent 222 System One requests in 19 mi
 min_interval_s = 0.25              # seconds between the starts of two requests
 max_attempts = 3                   # per request, and the only retry layer there is
 
-[budget]
-max_usd_per_run = 1.00             # D15: the run stops cleanly when its model spend reaches this
-
 [jev]
 max_questions_per_request = 24     # above this a judgment is split, and the parts go one after another
 
 [decider]
 fallback = "chat"                  # "chat" | "none": who answers when the System One model fails (D19)
-
-[prices]                           # USD per million tokens [input, output]; used only when the gateway reports no
-# cost. Vercel reports it at usage.cost and provider_metadata.gateway.cost, so this is a fallback (2026-09-27).
-# A System One model on this machine is free, and so has no entry.
-"mistral/mistral-small"        = [0.20, 0.60]
-"mistral/mistral-nemo"         = [0.02, 0.04]
-"typesafe/jev-1.13"            = [0.042, 0.0]
-"deepseek/deepseek-v4.1-flash" = [0.099, 0.60]
-"openai/gpt-5.4-mini"          = [0.75, 4.50]
 
 [policy]
 prefill = "keep-if-silent"         # or "strict"

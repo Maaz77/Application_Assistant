@@ -41,8 +41,8 @@ class Report:
     warnings: list[str] = field(default_factory=list)
     recovered: list[str] = field(default_factory=list)
     stopped: str | None = None
-    decisions: tuple[int, float] | None = None      # the decision model: calls and cost in USD (each one is in
-    decision_model: str = ""                        # jev_inference_logs.json); a model on this machine costs nothing
+    decisions: int | None = None                    # the decision model: how many calls (each one is logged in
+    decision_model: str = ""                        # jev_inference_logs.json)
     gateway: Counters | None = None                 # the run's model requests (P1 T6); a Gateway is also accepted
     by_fallback: int = 0                            # decisions the chat fallback answered (D19, T4)
     nothing_matched: str | None = None              # --job named a job that is not in the queue: exit 1, not 0
@@ -90,16 +90,13 @@ class Report:
         if self.recovered:
             L += ["- Journal recovery: " + "; ".join(self.recovered)]
         if self.decisions:
-            cost = f", ${self.decisions[1]:.4f}" if self.decisions[1] else ""
             L.append(f"- Decisions by {self.decision_model or 'the System One model'}: "
-                     f"{self.decisions[0]} calls{cost}")
+                     f"{self.decisions} calls")
         if self.by_fallback:
             L.append(f"- Decisions by fallback: {self.by_fallback}")
         if (t := self.totals) is not None:
-            spend = f"${t.cost:.4f}{' (estimated)' if t.estimated else ' (reported)'}" if t.cost else "$0"
             L += [f"- Model requests: {t.jev_requests} System One, {t.chat_requests} LLM inference "
                   f"({t.attempts} attempts, {t.failures} failed)",
-                  f"- Model spend: {spend}",
                   f"- Highest number of requests in flight: {t.in_flight}"]
         L += ["", "## Parked", ""]
         for r in parked:

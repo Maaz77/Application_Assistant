@@ -47,18 +47,22 @@ A plain venv is used, because Poetry's pyenv shim is broken on this Mac. The bro
 .venv/bin/python -m assistant tripwire [--live]          # the never-submit test suite
 ```
 
-Exit codes: 0 all parked, 1 preflight failed (nothing written), 2 some job needs attention, 3 run stopped (alarm, signed out, tracker changed on disk, folder clash, hung browser call, or one of the three clean stops: a provider outage, the spend cap, a key/credit failure).
+Exit codes: 0 all parked, 1 preflight failed (nothing written), 2 some job needs attention, 3 run stopped (alarm, signed out, tracker changed on disk, folder clash, hung browser call, or one of the two clean stops: a provider outage or a key/credit failure).
 
 Tests (markers are defined in `pyproject.toml`; there is no linter configured):
 
 ```bash
 .venv/bin/pytest -m unit -q                                  # no browser, no network
 .venv/bin/pytest -q                                          # + browser tests (throwaway headless Chrome, port 9223, local fixtures)
-.venv/bin/pytest -q --live                                   # + live_model tests (real Jev / OpenRouter; needs .env)
+.venv/bin/pytest -q --live                                   # + live_model tests (real Kev + FreeLLMAPI; needs both servers up)
 .venv/bin/pytest -q tests/test_fill_loop.py::test_name       # one test
 ```
 
-`tests/test_model_access.py` has no `live_model` marker on purpose (the user removed it; do not restore it), so a plain `pytest` makes real OpenRouter calls through it. Deselect it with `--deselect tests/test_model_access.py` when that isn't wanted.
+`tests/test_model_access.py` has no `live_model` marker on purpose (the user removed it; do not restore it), so a plain `pytest` makes real calls through it — free now, against the local router, and it checks every configured model against the live catalogue. Deselect it with `--deselect tests/test_model_access.py` when that isn't wanted.
+
+`preflight` requires **one** model to answer, not all of them (`_probe_llm_inference` returns `(answered, out)` and raises only when none answers). Free tiers go in and out of quota minute by minute, and a run only needs one model per page — that is what the rotation is for. Do not tighten this back to "every model".
+
+Known unrelated flake: `tests/test_gateway.py::test_requests_start_at_least_the_minimum_interval_apart` fails under full-suite load when `time.sleep` returns ~0.2 ms early against its `>= 0.145` threshold. It passes in isolation and fails identically on the pre-P6 code.
 
 ## The model gateway
 
@@ -72,7 +76,9 @@ connection, waiting `Retry-After` ≤ 30 s else 2 s then 6 s), the per-kind time
 `models.local.timeout` on the local route; chat 45 s), the counters the report prints, and the single call to
 `inference_log`. Do not add a retry, a queue or a log line to a sender — they all belong here.
 
-Three conditions end a run instead of one job (`[budget]`, `gateway.ProviderOutage/BudgetExceeded/CreditOrKey`).
+Both servers are local and free, and neither reports `usage.cost`, so **cost accounting was removed on 2026-10-07**: no `BudgetExceeded`, no `[budget]`, no `[prices]`, no `Counters.cost`, and `report.md` prints no money. A paid route would have to bring it back. `inference_log.gateway_of` tells the two loopback servers apart **by path** (`/chat/completions` → `freellmapi`, else `local`), or a chat failure and a Kev failure would both be labelled `local` in the outage and rejected-key messages.
+
+Two conditions end a run instead of one job (`gateway.ProviderOutage/CreditOrKey`).
 Each subclasses `blockers.StopRun`, which is what keeps it out of the `NeedsAttention` paths in `cli.py` and
 `fill.py` — a `NeedsAttention` writes a record, and a stopped run must leave its job untouched. Every model send
 now happens on the run's own thread (the driver has no sender thread), so a stop propagates directly; a
@@ -83,7 +89,19 @@ One model fails; the breaker counts the pair as one request.
 
 ## Keys and models
 
-`.env` (git-ignored) holds `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` (Vercel AI Gateway) and, only when the local Kev server was started with one, `KEV_API_KEY`; which one each model call uses follows `models.chat_route` and `models.system_one_decision_provider`. `config.toml` is strict: unknown keys are errors. `models.chat_route` (`openrouter` or `vercel`) picks who serves the chat models, and with it the `[models.openrouter]` or `[models.vercel]` table, the key (`config.chat_key`) and the URL (`config.chat_url`); `cfg.models.llm_inference`/`text_helper` are properties that read the active table. Each is a list of models tried in turn (`rotation.Rotation`). The package's text helper is gone (P2), so `models.text_helper` is now unused config. `models.system_one_decision_provider` picks who serves the System One decision model, and each route names it differently: `typesafe-ai/jev` on Vercel AI Gateway, `typesafe/jev-1.13` on OpenRouter, `kev-latest` on `local` — a [Kev](https://github.com/jaredpalmer/kev) server on the user's Mac (`[models.local]`: `base_url`, `state_chars`, `timeout`), which serves the same System One API (`POST /v1/systemone`) and needs no key, so only the URL changes (`decide.endpoint`). On that route the state is sent as an object, not as a JSON string (Kev renders objects as labeled text), and preflight first reads `GET /v1/models` (`decide.server_card`). Never print keys: `browser_actions.jsonl` redacts the OpenRouter key, and the inference logs (`llm_inference_logs.json`, `jev_inference_logs.json`) never contain a key.
+Two servers on this Mac, and nothing off it (P6, 2026-10-07 — OpenRouter and Vercel AI Gateway are **removed**, not a fallback; see the dated DISCOVERY entry):
+
+- **The chat models** (the LLM inference and the chat fallback) go to a **FreeLLMAPI** router ([github.com/tashfeenahmed/freellmapi](https://github.com/tashfeenahmed/freellmapi)) at `models.freellmapi.base_url` (`http://127.0.0.1:31415/v1`), one OpenAI-compatible `/v1` over the free tiers of ~34 providers. `config.chat_url` appends `/chat/completions`; `config.chat_key()` is `FREELLMAPI_KEY`, which is **required** — the router answers HTTP 401 without it. `models.freellmapi.llm_inference` is the list tried in turn (`rotation.Rotation`).
+- **The System One decision model** is a [Kev](https://github.com/jaredpalmer/kev) server (`[models.local]`: `base_url`, `system_one_decision_model`, `state_chars`, `timeout`) serving `POST /v1/systemone`. It is now the **only** decision route, because `POST /v1/systemone` on the FreeLLMAPI router is HTTP 404. It needs no key unless it was started with `KEV_API_KEY`. The state goes as an object, not a JSON string (Kev renders objects as labeled text), so `keep_object_state` is always on, and preflight first reads `GET /v1/models` (`decide.server_card`).
+
+`config.toml` is strict: unknown keys are errors, and a config still naming `chat_route`, `[models.openrouter]`, `[models.vercel]` or `system_one_decision_provider` is rejected with a message saying where its keys moved.
+
+Two rules the provider imposes, both load-bearing:
+
+- **Never configure the router's `auto`** (or a `:free` suffix). `auto` picks whichever free model is up and one that ignores `response_format` answers **prose at HTTP 200**; the code only drops to `json_object` on HTTP 400, so every page then fails as `ModelUnavailable("output invalid")`. Only concrete IDs whose `GET /v1/models` entry lists `response_format` honour the strict schema. `config.problems()` does not catch this — `test_config.py` and `test_model_access.py` do.
+- **A quota belongs to a platform, not a model ID** (`_routed_via.platform`), so the rotation must spread over platforms; two IDs on one platform share a limit. Reasoning is switched off with `reasoning_effort = "none"` (`llm_inference.REASONING_EFFORT`), **not** OpenRouter's `reasoning: {"enabled": false}`, which this router ignores.
+
+Never print keys: `browser_actions.jsonl` redacts the key, and the inference logs (`llm_inference_logs.json`, `jev_inference_logs.json`) never contain one.
 
 ## graphify
 

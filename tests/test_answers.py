@@ -347,10 +347,14 @@ def test_computed_is_only_for_total_years_never_for_a_tool():
 
 def test_the_llm_inference_is_asked_for_no_hidden_reasoning():
     """The Flex, live 2026-09-23: qwen3.7-flash spent all 8,192 tokens reasoning — an empty answer, then a cut-off
-    one ("LLM inference output invalid"). With reasoning off the same 43-field page answered in 21 s."""
+    one ("LLM inference output invalid"). With reasoning off the same 43-field page answered in 21 s.
+
+    The field is `reasoning_effort`, not OpenRouter's `reasoning: {"enabled": false}`: the FreeLLMAPI router
+    passed the latter through and ignored it (645 of 696 completion tokens were reasoning tokens), while
+    `reasoning_effort: "none"` did switch reasoning off (kimi-k3: 0 reasoning tokens, live 2026-10-07)."""
     post, calls = canned((200, GOOD))
     A.answer_page(PAGE, SRC, key="k", models="m", policy=Policy(), today=TODAY, post=post)
-    assert calls[0]["reasoning"] == {"enabled": False}
+    assert calls[0]["reasoning_effort"] == "none" and "reasoning" not in calls[0]
 
 
 def test_a_quote_that_differs_only_in_formatting_still_counts():

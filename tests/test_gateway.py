@@ -1,4 +1,4 @@
-"""gateway.py (P1 T7): the queue, the one retry layer, the timeouts, the logging and the three clean stops.
+"""gateway.py (P1 T7): the queue, the one retry layer, the timeouts, the logging and the two clean stops.
 
 The HTTP-level tests run against a real local server (`http.server` on a free port), so the retry rule is exercised
 through httpx and a real `Retry-After` header rather than through a stub that only pretends to be one. Nothing here
@@ -90,10 +90,9 @@ def server():
         s.close()
 
 
-def gw(*, max_in_flight=1, min_interval_s=0.0, max_attempts=3, budget=0.0, prices=None, **kw) -> G.Gateway:
+def gw(*, max_in_flight=1, min_interval_s=0.0, max_attempts=3, **kw) -> G.Gateway:
     return G.Gateway(limits=SimpleNamespace(max_in_flight=max_in_flight, min_interval_s=min_interval_s,
-                                            max_attempts=max_attempts),
-                     budget=SimpleNamespace(max_usd_per_run=budget), prices=prices, **kw)
+                                            max_attempts=max_attempts), **kw)
 
 
 def send(gateway, url, kind=G.JEV, body=None, **kw):
@@ -258,19 +257,14 @@ def test_no_key_reaches_a_log(server, logs):
 # ------------------------------------------------------------------ counters
 
 
-def test_counters_count_requests_attempts_failures_and_cost(server):
-    s = server(step(503, {"error": "busy"}), step(200, {"answers": {}, "usage": {"cost": 0.002}}))
+def test_counters_count_requests_attempts_and_failures(server):
+    """One request, two attempts, no failure: a retried request is still one request (the breaker counts requests,
+    not attempts). Cost is not counted at all since 2026-10-07 — both servers are local and free."""
+    s = server(step(503, {"error": "busy"}), step(200, {"answers": {}}))
     gateway = gw(sleep=lambda _: None)
     send(gateway, s.url)
     assert (gateway.run.requests, gateway.run.attempts, gateway.run.failures) == (1, 2, 0)
-    assert gateway.run.cost == pytest.approx(0.002) and not gateway.run.estimated
-
-
-def test_a_cost_the_gateway_does_not_report_is_estimated_and_marked(server):
-    s = server(step(200, {"answers": {}, "usage": {"prompt_tokens": 1_000_000, "completion_tokens": 0}}))
-    gateway = gw(prices={"m": (0.5, 1.0)})
-    send(gateway, s.url)
-    assert gateway.run.cost == pytest.approx(0.5) and gateway.run.estimated
+    assert not hasattr(gateway.run, "cost") and "$" not in gateway.run.row()
 
 
 def test_per_job_counters_reset_while_the_runs_keep_counting(server):
@@ -318,16 +312,6 @@ def test_the_outage_names_the_route_and_the_status(server):
         send(gateway, s.url)
 
 
-def test_the_spend_cap_stops_the_run_before_the_next_request(server):
-    s = server(step(200, {"answers": {}, "usage": {"cost": 0.6}}))
-    gateway = gw(budget=1.0)
-    send(gateway, s.url)                     # 0.6
-    send(gateway, s.url)                     # 1.2 — over, but this one was already allowed
-    with pytest.raises(G.BudgetExceeded, match=r"spend cap \$1.00 reached"):
-        send(gateway, s.url)
-    assert len(s.seen) == 2                  # the third never left
-
-
 def test_no_key_or_no_credit_stops_the_run_and_is_never_retried(server):
     for status in (401, 402, 403):
         s = server(step(status, {"error": {"message": "nope"}}))
@@ -352,9 +336,9 @@ def test_a_stop_is_sticky_and_comes_back_at_every_later_entry_point(server):
 
 def test_every_stop_is_a_stop_run_so_the_run_writes_no_record():
     """cli.run already turns StopRun into exit 3 with no folder move, no tracker write and no job.md note. Being a
-    subclass is what keeps the three stops out of the NeedsAttention paths, which would record the job."""
+    subclass is what keeps the two stops out of the NeedsAttention paths, which would record the job."""
     from assistant.blockers import NeedsAttention, StopRun
-    for cls in (G.ProviderOutage, G.BudgetExceeded, G.CreditOrKey):
+    for cls in (G.ProviderOutage, G.CreditOrKey):
         assert issubclass(cls, StopRun) and issubclass(cls, G.GatewayStop)
         assert not issubclass(cls, NeedsAttention)
 
@@ -379,8 +363,7 @@ def test_for_config_takes_its_limits_from_the_config():
     from assistant import config
     cfg = config.load()
     gateway = G.for_config(cfg)
-    assert gateway.limits is cfg.limits and gateway.budget is cfg.budget
-    assert gateway.prices == cfg.prices and gateway.timeouts[G.CHAT] == 45.0
+    assert gateway.limits is cfg.limits and gateway.timeouts[G.CHAT] == 45.0
 
 
 def test_a_sender_without_a_gateway_is_refused():

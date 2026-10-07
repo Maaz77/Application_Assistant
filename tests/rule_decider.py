@@ -92,7 +92,6 @@ class RuleDecider:
         self.kinds = dict(kinds or {})      # url → page kind, for what the rules cannot see
         self.asked: list[tuple[str, list[str]]] = []
         self.calls = 0
-        self.cost = 0.0
 
     def ask(self, topic: str, state: Any, questions: dict[str, dict]) -> dict[str, Answer]:
         self.asked.append((topic, list(questions)))

@@ -58,16 +58,18 @@ def scope(name: str | None):
         _scope = prev
 
 
+LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+
 def gateway_of(url: str) -> str:
-    """The gateway a chat or decision URL points at, from its host (00_common §6.2): openrouter.ai -> openrouter,
-    ai-gateway.vercel.sh -> vercel, a server on this machine -> local."""
-    host = urlparse(url).hostname or ""
-    if "openrouter" in host:
-        return "openrouter"
-    if "vercel" in host:
-        return "vercel"
-    if host in ("127.0.0.1", "localhost", "::1"):
-        return "local"
+    """Which server a chat or decision URL points at (00_common §6.2). Both of them run on this machine, so the
+    path is what tells them apart: the FreeLLMAPI router's chat/completions (config models.freellmapi.base_url)
+    from the Kev decision server's /v1/systemone (models.local.base_url). Without that split a chat failure and a
+    Kev failure would both be reported as "local" in the outage and rejected-key messages."""
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if host in LOOPBACK:
+        return "freellmapi" if parsed.path.endswith("/chat/completions") else "local"
     return host or "unknown"
 
 
@@ -105,13 +107,12 @@ def _provider(gateway: str, response: Any) -> str:
     reports it actually routed to, or just `gateway` when none is reported."""
     if not isinstance(response, dict):          # None, or a non-JSON error body
         return gateway
-    upstream = response.get("provider")         # OpenRouter: top level
-    if not upstream:                            # Vercel chat: choices[0].message.provider_metadata (live 2026-09-27)
-        try:
-            meta = response.get("provider_metadata") or response["choices"][0]["message"]["provider_metadata"]
-            upstream = meta["gateway"]["routing"]["finalProvider"]     # who served it, after any fallbacks
-        except (KeyError, IndexError, TypeError):
-            upstream = None
+    # The FreeLLMAPI router names the free tier it actually routed to at `_routed_via.platform`, e.g.
+    # {"platform": "huggingface", "model": "deepseek-ai/DeepSeek-V4-Pro-0813"} (live 2026-10-07). That is the
+    # interesting half of a chat entry: the configured model ID is a slot, and the platform behind it varies per
+    # request, so a log that omits it cannot explain why one page was slow or rate-limited.
+    upstream = (response.get("_routed_via") or {}).get("platform") if isinstance(
+        response.get("_routed_via"), dict) else None
     return f"{gateway}/{upstream}" if isinstance(upstream, str) and upstream else gateway
 
 

@@ -4,9 +4,12 @@
 
 > **Status (2026-10-07):** run over five live `--no-record` passes. Real Ashby forms parked (2/2 in the last full
 > run); the embedded-Greenhouse (Toast) and résumé-upload-re-render cases were fixed from the live evidence. The
-> user **accepted this as the gate** (no full 10-job recorded run). **Prerequisite for re-running on D14:**
-> `config.toml` now has `chat_route = "openrouter"`, so `OPENROUTER_API_KEY` needs purchased credit (a run
-> otherwise stops at preflight with HTTP 402); reverting to `chat_route = "vercel"` is the alternative.
+> user **accepted this as the gate** (no full 10-job recorded run).
+>
+> **Superseded 2026-10-07 (P6):** the D14 credit prerequisite below is gone. The chat models now come from a
+> **FreeLLMAPI** router on this Mac (`FREELLMAPI_KEY`, free tiers), and the decisions from the local Kev server,
+> so no run needs purchased credit. What can stop a run instead is every configured model being out of its free
+> quota at once. Both servers must be running before a run.
 
 External ATS (Greenhouse, Ashby, Lever) by one general loop — no host adapters. An external "Apply" is followed
 off LinkedIn, the ATS tab is adopted, and the same pipeline fills it and parks one click before submit. Other
@@ -86,7 +89,9 @@ park. Nothing here needs a paid key.
 2. Chrome open with remote debugging on 9222, signed in to LinkedIn.
 3. Chrome → Settings → Performance → Memory Saver → "Always keep these sites active": add `linkedin.com`, so Chrome
    does not discard a parked tab.
-4. `.env` needs `AI_GATEWAY_API_KEY` (the chat route is `vercel`). No OpenRouter credit is needed on these settings.
+4. `.env` needs `FREELLMAPI_KEY`, and both local servers must be up: the FreeLLMAPI router on
+   `http://127.0.0.1:31415/v1` (chat models) and the Kev server on `http://127.0.0.1:8009`
+   (`./run_kev_server.command`, decisions). No purchased credit is needed at all (P6, 2026-10-07).
 
 **1. Preflight — one "Allow" click**
 ```bash
@@ -129,10 +134,10 @@ job in Chrome and confirm it shows **Easy Apply**, or the number is meaningless.
 attempts; $0.0002; no `:free` model; nothing submitted; tabs left open; nothing recorded. 3 jobs, 0 parked, 3
 Needs Attention `load_failure` — as expected above. Details in `DISCOVERY.md` (2026-09-29).
 
-**If you want the paid route instead** (this is what unblocks a parked job, and is P3/P4's problem): add ≥ $5 of
-OpenRouter credit, put `OPENROUTER_API_KEY` in `.env`, and set `system_one_decision_provider = "openrouter"` (and, if
-you want one bill, `chat_route = "openrouter"`). Then a 401/402 stops the run with "check the key / add credit",
-rather than failing each job in turn.
+**The paid routes this paragraph used to describe were removed on 2026-10-07 (P6).** There is no hosted route to
+switch to: a rejected `FREELLMAPI_KEY` (HTTP 401) still stops the run with "check the key" rather than failing
+each job in turn, but the cure is the router's own key, not credit. If every configured model is out of free
+quota, add more provider keys on the router's Keys page or wait for the reset it names.
 
 ---
 

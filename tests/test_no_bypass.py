@@ -46,7 +46,7 @@ def sealed(monkeypatch):
             if "questions" in asked and isinstance(asked.get("questions"), dict) else PAGE_ANSWERS
         return 200, {"choices": [{"message": {"content": content}}]}
     gateway = G.Gateway(limits=SimpleNamespace(max_in_flight=1, min_interval_s=0.0, max_attempts=3),
-                        budget=SimpleNamespace(max_usd_per_run=0.0), post=post)
+                        post=post)
     G.use(gateway)
     yield SimpleNamespace(gateway=gateway, sent=sent)
     G.use(None)

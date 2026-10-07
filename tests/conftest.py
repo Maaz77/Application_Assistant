@@ -29,17 +29,15 @@ def cfg():
 @pytest.fixture(autouse=True)
 def decider(request):
     """Every decision the program asks of the System One model: the offline rule stand-in
-    (tests/rule_decider.py), or — for a live_model test — the real thing: a route whose key is in .env, or a
-    keyless one (a Kev server on this machine, which the test then needs running)."""
+    (tests/rule_decider.py), or — for a live_model test — the real thing, the Kev server on this machine, which
+    the test then needs running."""
     from assistant import decide
     from assistant import gateway as gateway_mod
     from tests.rule_decider import RuleDecider
     guard.FORM.started = False                # the never-submit rule's stage: each test starts before any form
     guard.FORM.final = False
     cfg = config.load()
-    live = "live_model" in request.keywords and (
-        cfg.models.system_one_decision_provider in config.KEYLESS_PROVIDERS
-        or config.system_one_decision_key(cfg))
+    live = "live_model" in request.keywords
     # A live test sends for real, so it needs the run's Gateway, as a run has one. An offline test gets none: a
     # sender with no Gateway refuses rather than reaching a provider, which is what keeps the suite off the network.
     gateway = gateway_mod.for_config(cfg) if live else None
@@ -96,16 +94,8 @@ class Secret(str):
 
 @pytest.fixture(scope="session")
 def chat_key(cfg):
-    """The key for models.chat_route: the LLM inference and the text helper."""
-    key = config.chat_key(cfg)
+    """FREELLMAPI_KEY: the FreeLLMAPI router's key, which every chat request uses."""
+    key = config.chat_key()
     if not key:
-        pytest.skip(f"no {config.KEY_NAMES[cfg.models.chat_route]} in .env")
-    return Secret(key)
-
-
-@pytest.fixture(scope="session")
-def api_key():
-    key = config.api_key()
-    if not key:
-        pytest.skip("no OPENROUTER_API_KEY in .env")
+        pytest.skip(f"no {config.CHAT_KEY_NAME} in .env")
     return Secret(key)

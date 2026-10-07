@@ -1,5 +1,5 @@
-"""LLM inference (§7): one chat call per form page (OpenRouter or Vercel AI Gateway), then deterministic checks
-in code."""
+"""LLM inference (§7): one chat call per form page (the FreeLLMAPI router on this machine), then deterministic
+checks in code."""
 from __future__ import annotations
 
 import json
@@ -18,7 +18,9 @@ from assistant.decide import THRESHOLDS as T
 from assistant.pages import Page
 from assistant.rotation import NoModelAvailable, Rotation
 
-OPENROUTER_CHAT = "https://openrouter.ai/api/v1/chat/completions"   # the default route (config.chat_url)
+# The FreeLLMAPI router's chat/completions, matching config.FreeLLMAPI.base_url. A run always passes the
+# configured URL (config.chat_url); this default is only what a caller that names none gets.
+FREELLM_CHAT = "http://127.0.0.1:31415/v1/chat/completions"
 PROMPT = Path(__file__).resolve().parent.parent / "prompts" / "llm_inference.md"
 PAGE_TEXT_MAX = 12_000
 
@@ -111,13 +113,17 @@ ANSWER_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["
                  "properties": {"answers": {"type": "array", "items": ANSWER_ITEM_SCHEMA}}}
 
 LONG_TEXT = 300
-# Vercel AI Gateway caps a new team at 5 requests a minute per model and says when to come back (HTTP 429 with
-# `Retry-After: 22`, mistral-nemo, live 2026-09-24). A wait that short beats failing the page; longer ones rotate on.
-MAX_TOKENS = 8192          # one page of answers; OpenRouter otherwise reserves the model maximum (HTTP 402)
+# A free tier behind the FreeLLMAPI router runs out often: it answers HTTP 429 with a `rate_limit_error` body
+# ("All models exhausted … Soonest reset ~16s") and a `retryAtMs`. The Gateway waits a short Retry-After; the
+# rotation hands a longer one over to the next model (live 2026-10-07).
+MAX_TOKENS = 8192          # one page of answers
 # Extraction with quotes needs no hidden reasoning, and a reasoning model spends MAX_TOKENS on it: qwen3.7-flash
 # returned an empty and then a cut-off answer on The Flex's 43-field form (live 2026-09-23, finish_reason=length).
 # With reasoning off the same page answered in 21 s with 2,473 tokens. `effort: low` still used all 8,192.
-REASONING = {"enabled": False}
+# OpenRouter's `reasoning: {"enabled": false}` is not the FreeLLMAPI router's spelling — it was passed through and
+# ignored there (645 of 696 completion tokens were reasoning tokens, live 2026-10-07). `reasoning_effort` is what
+# its catalogue lists, and "none" does switch reasoning off (kimi-k3: 0 reasoning tokens, same day).
+REASONING_EFFORT = "none"
 
 
 class LLMInferenceError(RuntimeError):
@@ -402,17 +408,18 @@ def system_prompt(free_text_max_chars: int) -> str:
     return PROMPT.read_text().replace("{free_text_max_chars}", str(free_text_max_chars))
 
 
-# Mistral Nemo on Vercel took 58.6 s for a realistic page (5.3K tokens in, 970 out) and timed out at 60 s on
-# Linda AI's Easy Apply form (live 2026-09-24).
+# A realistic 6-question page through the FreeLLMAPI router, live 2026-10-07: kimi-k3 9.1 s, deepseek-v4-flash
+# 11.1 s, deepseek-v4-pro-0813 21.0 s, glm-5.2 32.2 s, qwen3.8-2.4t-a95b 34.0 s. The slower ones leave little room,
+# which is why the configured rotation leads with the two fast models.
 LLM_INFERENCE_TIMEOUT = 45.0
 
 
 def call_engine(*, key: str, models: Rotation | str | list[str], system: str, user: dict,
-                url: str = OPENROUTER_CHAT, post: Callable | None = None, timeout: float = LLM_INFERENCE_TIMEOUT,
+                url: str = FREELLM_CHAT, post: Callable | None = None, timeout: float = LLM_INFERENCE_TIMEOUT,
                 sleep: Callable[[float], None] = time.sleep,
                 schema: dict | None = None, response_cls: type | None = None) -> PageAnswers | ModelResponse:
     """Ask the models in turn (rotation.py) until one gives a valid answer; LLMInferenceError when none does.
-    `url` is the route's chat/completions (config.chat_url): OpenRouter and Vercel AI Gateway take the same request.
+    `url` is the FreeLLMAPI router's chat/completions (config.chat_url), an OpenAI-compatible endpoint.
     `post(url, json, headers, timeout) -> (status, body)` is injectable for tests."""
     schema = schema or SCHEMA
     response_cls = response_cls or PageAnswers
@@ -434,9 +441,9 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
     except NoModelAvailable as exc:
         # Every model in the rotation failed: that is one failed request for the breaker, not one per model. A model
         # handing over to the next is the rotation working, and counting each handover would trip an outage on a
-        # provider that is answering — Vercel allows 5 requests a minute per model, so a busy first model plus a
-        # second that answers is a steady alternation of failures and successes (D21, and the same rule as T4's
-        # fallback).
+        # provider that is answering — a free tier behind the FreeLLMAPI router is rate-limited in bursts, so a
+        # busy first model plus a second that answers is a steady alternation of failures and successes (D21, and
+        # the same rule as T4's fallback).
         gateway.note_failure(True)
         raise LLMInferenceError(f"LLM inference: {exc}") from None
     else:
@@ -460,13 +467,9 @@ def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post:
     schema = schema or SCHEMA
     response_cls = response_cls or PageAnswers
     fmt: dict = {"type": "json_schema", "json_schema": {"name": "page_answers", "strict": True, "schema": schema}}
-    body = {"model": model, "temperature": 0, "max_tokens": MAX_TOKENS, "reasoning": REASONING,
+    body = {"model": model, "temperature": 0, "max_tokens": MAX_TOKENS, "reasoning_effort": REASONING_EFFORT,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": json.dumps(user, ensure_ascii=False)}]}
-    # OpenRouter only: route to a provider that supports every parameter sent, instead of one that drops
-    # response_format or temperature silently. Vercel AI Gateway has no such field.
-    if inference_log.gateway_of(url) == "openrouter":
-        body["provider"] = {"require_parameters": True}
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     gateway = gateway_mod.required()
     while True:
@@ -478,8 +481,10 @@ def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post:
         if out.status == 400 and fmt["type"] == "json_schema":
             fmt = {"type": "json_object"}
             continue
-        # OpenRouter passes an overloaded upstream through as HTTP 200 with an error body and an empty choice
-        # (nemotron-3-super:free, live 2026-09-24), so an error body fails the model whatever the status.
+        # A router can pass an overloaded upstream through as HTTP 200 with an error body and an empty choice
+        # (OpenRouter's nemotron-3-super:free did, 2026-09-24), so an error body fails the model whatever the
+        # status. The same guard catches the FreeLLMAPI router's own "auto" model, which answers 200 with prose
+        # when the free model it picked ignores response_format — which is why only concrete IDs are configured.
         err = data.get("error") if isinstance(data, dict) else None
         if not out.ok or err:
             raise ModelUnavailable(f"HTTP {_code(out.status, err)} {_message(err)}".rstrip())
@@ -501,8 +506,8 @@ def _code(status: int, err) -> int:
 
 
 def _message(err) -> str:
-    """Errors: {"message", "code" or "type", "metadata": {"raw"}} (metadata on OpenRouter only); the upstream's
-    raw text says more."""
+    """Errors: {"message", "code" or "type", "metadata": {"raw"}}; the upstream's raw text says more. The
+    FreeLLMAPI router's rate-limit body is {"error": {"message", "type": "rate_limit_error", "retryAtMs"}}."""
     if not isinstance(err, dict):
         return str(err or "")[:120]
     raw = (err.get("metadata") or {}).get("raw")
@@ -780,7 +785,7 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
 
 
 def answer_page(p: Page, src: Sources, *, key: str, models: Rotation | str | list[str], policy: Policy,
-                today: date | None = None, url: str = OPENROUTER_CHAT, post: Callable | None = None) -> PageAnswers:
+                today: date | None = None, url: str = FREELLM_CHAT, post: Callable | None = None) -> PageAnswers:
     """Code extracts questions, the model answers them, checks run in code (P3 T4). `models` rotate
     (rotation.py): pass one Rotation for a whole run so each page starts at the model that answered last."""
     today = today or date.today()
