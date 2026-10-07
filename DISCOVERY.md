@@ -1624,3 +1624,104 @@ per-job **request count** cap (`jev.max_requests_per_job`), unrelated to money, 
 Two tests now assert the absence rather than the behaviour: `test_counters_count_requests_attempts_and_failures`
 checks `not hasattr(gateway.run, "cost")` and that `row()` carries no `$`, and `test_the_report_names_no_money`
 checks that no `$`, "spend" or "cost" reaches `report.md`. Re-adding a paid route means re-adding this layer.
+
+## The chat transport moves to the `openai` SDK (user decision, 2026-10-07)
+
+**This reverses the decision recorded earlier today** ("The existing sender was kept… 'Via the OpenAI API' is
+therefore read as the wire format"). The user asked again, with the router's own Python example, for the chat
+calls to go through the official SDK. That is their call; the earlier reasoning is left above as the record of
+what was weighed.
+
+What changed is only the **transport inside the Gateway**, not the architecture. `gateway._post` dispatches on the
+URL path — `/chat/completions` to `_openai_post` (the SDK), anything else to `_httpx_post` — so all three senders
+(`decide.Decider`, `decide.ChatDecider`, `llm_inference._ask_model`) are untouched, the injectable
+`post(url, body, headers, timeout)` contract is unchanged, and `Gateway.send` is still the only place a model
+request leaves the program. Kev's `POST /v1/systemone` stays on httpx because it is not an OpenAI endpoint.
+
+Dispatch is by **path**, not body shape: `_openai_post` derives the SDK's `base_url` by stripping
+`/chat/completions`, which is only valid when the suffix is there, and it matches the rule `gateway_of` already
+uses.
+
+### Four things the SDK forced, each verified live
+
+- **`max_retries=0`.** `openai.DEFAULT_MAX_RETRIES` is 2 and `_base_client.request` has its own retry loop, so the
+  default would put three HTTP requests inside *each* of the Gateway's three attempts. `[limits] max_attempts = 3`
+  would have meant nine. `test_the_sdk_sender_does_not_retry_on_its_own` asserts one HTTP hit per attempt.
+- **Return the raw wire JSON, never `parse().model_dump()`.** The typed model adds its own unset fields
+  (`refusal`, `audio`, `tool_calls`, `service_tier`) to every logged response, and — decisively — it cannot carry
+  the router's non-standard `_routed_via`, which `inference_log._provider` reads to name the platform that
+  actually answered. It also cannot represent the HTTP 200 with an error body and no `choices` that
+  `llm_inference._ask_model` deliberately treats as a failed model. `with_raw_response` plus
+  `raw.http_response.json()` keeps this sender's contract byte-identical to `_httpx_post`'s.
+- **Carry `Retry-After` off the exception.** The SDK raises `APIStatusError` where HTTP returns a status, so the
+  header has to be read from `exc.response` and put into the body where `_retry_after` looks for it. Without this
+  the Gateway's "wait exactly as long as the provider asked" degrades silently to the fixed `BACKOFF` ladder.
+- **Map the exceptions back to statuses.** `APIStatusError` keeps its status and body; `APIError` (which covers
+  `APIConnectionError` and `APITimeoutError`) becomes status 0, the same shape `_httpx_post` returns for a
+  transport failure. `Gateway._attempts` only catches `httpx.HTTPError`, so an uncaught SDK exception would have
+  crashed the run instead of being retried.
+
+### The SDK does not use httpx — it uses httpx2
+
+`openai` 3.26.0 depends on **`httpx2`** (pydantic's client, 2.13.0) and its `_client` is a
+`SyncHttpxClientWrapper(_DefaultHttpxClient, httpx2.Client)`; the only transport call in `SyncAPIClient` is
+`self._client.send`. So `tests/test_no_bypass.py`'s existing seal could never have caught it: with `httpx.post`,
+`httpx.Client.post` **and** `httpx.Client.send` all sealed, a real SDK request still reached the local router and
+returned `'OK'`. Only `monkeypatch.setattr(httpx2.Client, "send", forbidden)` stops it.
+
+The file now seals both stacks, and `test_the_seal_itself_catches_the_openai_sdk` asserts the seal catches the SDK
+— so if the SDK changes transport again, that test fails loudly instead of leaving every other test in the file
+passing vacuously. The project now carries two HTTP stacks (`httpx` + `httpx2`, plus `anyio`, `jiter`, `sniffio`),
+which is the real cost of this change.
+
+### Coverage
+
+The SDK path had none as first written, because every existing test injects `post=`. `tests/test_gateway.py` now
+drives `_openai_post` against the real local `http.server` fixture (which ignores the path, so the same server
+serves both senders via a new `chat_url`): wire-JSON passthrough including `_routed_via`, no self-retry,
+`Retry-After` honoured, 401 → `CreditOrKey`, a non-JSON error body, a closed port → status 0, and `/v1/systemone`
+staying on httpx.
+
+## Model choice belongs to the router, not to this code (user decision, 2026-10-07)
+
+**This corrects an error made earlier today.** The entry above claims the router's `"auto"` ignores
+`response_format` and answers prose at HTTP 200, and on that basis `config.toml` pinned five concrete model IDs,
+`CLAUDE.md` said "never configure `auto`", and two tests asserted `auto` was absent. **That finding was wrong.**
+It came from a bad test: a toy `{"n": integer}` schema with the bare prompt `"n=7"` and no system message. The
+router picked GLM-5.2, which replied in prose — which says something about that prompt, not about `auto`.
+
+Re-tested with the program's real system prompt and the real strict `ANSWER_SCHEMA` on a 5-question page, three
+trials per strategy, **all twelve returned schema-valid answers**:
+
+| Routing | Trials | Verdict |
+|---|---|---|
+| `auto` | 4.8 / 6.0 / 5.2 s | ✓ 3/3 |
+| `auto:fast` | 6.2 / 6.4 / 4.8 s | ✓ 3/3 |
+| `auto:smart` | 14.0 / 5.2 / 6.2 s | ✓ 3/3 |
+| `fusion` | 78.1 / 40.2 / 31.9 s | ✓ 3/3, but far over the 45 s chat timeout |
+
+`decide.ChatDecider`'s `json_object` path on `auto`: 4.4 / 3.0 / 2.3 s, three for three.
+
+The decisive evidence is not the pass rate but *when* it passed: `auto` answered in ~5 s while **four of the five
+pinned IDs were 429 or 413**, their free tiers spent. Routing around an exhausted tier is exactly what the router
+is for, and a hand-written list in `config.toml` cannot do it — the list could only name tiers that were already
+dead. The second rotation layer was duplicating the router's own job and doing it worse.
+
+So `models.freellmapi.llm_inference = "auto"`. A list is still accepted and `rotation.Rotation` still works, for a
+caller that deliberately pins several concrete IDs; it is simply not what is shipped. `config.py`'s docstring,
+`CLAUDE.md`, the `llm_inference` comment about 200-with-prose, and both tests are corrected:
+`test_the_shipped_config_lets_the_router_choose_the_model` now asserts the config names a routing mode, and
+`test_model_access.py` checks `response_format` support only for a concrete ID, since a routing mode's catalogue
+entry carries no `supported_parameters` (the router picks the model per request).
+
+Two tests in `test_cli.py` had to stop leaning on the shipped config, which now has one entry: they build their
+own pinned multi-model config (`pinned_cfg`), because the per-model probe behaviour they protect is still real for
+anyone who pins a list.
+
+### The preflight skip line is now one short reason per model
+
+Preflight printed five nested `LLM inference: none of 1 models answered (<model>: HTTP 429 …)` strings on one
+line, repeating each model name and wrapping into an unreadable paragraph. `cli._why` strips that wrapper — the
+probe asks one model at a time, so the caller already prints the name — and keeps the status plus the first 90
+characters of what the provider said. The full text stays in `llm_inference_logs.json`. With `auto` configured
+there is usually nothing to skip at all; preflight's whole LLM check is now one line in ~1.6 s.

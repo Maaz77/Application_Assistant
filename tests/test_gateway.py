@@ -65,6 +65,9 @@ class _Server:
 
         self.http = HTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.http.server_port}/v1/systemone"
+        # The handler ignores the path, so the same server serves both senders: `url` goes to httpx and
+        # `chat_url` to the OpenAI SDK (gateway._post dispatches on the /chat/completions suffix).
+        self.chat_url = f"http://127.0.0.1:{self.http.server_port}/v1/chat/completions"
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
 
@@ -409,3 +412,83 @@ def test_a_rotation_where_no_model_answers_is_one_failed_request():
                           url="https://x/v1/chat/completions")
     finally:
         G.use(None)
+
+
+# ------------------------------------------------------------------ the OpenAI SDK transport (2026-10-07)
+#
+# Every other test in this file injects `post=`, so none of them ever runs the real chat sender. These do: they
+# drive `gateway._openai_post` against the local server through `Gateway.send`, which is the only way a chat
+# request leaves the program.
+
+
+def chat_body(**kw):
+    return {"model": "m", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 16, **kw}
+
+
+def chat_send(gateway, url, **kw):
+    return gateway.send(G.CHAT, url, chat_body(), {"Authorization": "Bearer k"}, model="m", **kw)
+
+
+def test_the_sdk_sender_passes_the_wire_json_through_untouched(server):
+    """The raw body, not the SDK's typed model: `_routed_via` is a field the SDK knows nothing about, and
+    `inference_log._provider` reads it. A `parse().model_dump()` would also add the SDK's own unset fields."""
+    answer = {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+              "usage": {"prompt_tokens": 3, "completion_tokens": 1},
+              "_routed_via": {"platform": "groq", "model": "qwen/qwen3.8-27b"}}
+    s = server(step(200, answer))
+    out = chat_send(gw(), s.chat_url)
+    assert out.ok and out.status == 200
+    assert out.body["_routed_via"] == {"platform": "groq", "model": "qwen/qwen3.8-27b"}
+    assert out.body["choices"][0]["message"]["content"] == "ok"
+    assert "refusal" not in out.body["choices"][0]["message"]    # the SDK model would have added it
+    assert s.seen[0]["model"] == "m" and s.seen[0]["max_tokens"] == 16
+
+
+def test_the_sdk_sender_does_not_retry_on_its_own(server):
+    """max_retries=0. The SDK's default is 2, which would make 3 HTTP requests inside each Gateway attempt — the
+    nesting this module exists to remove. One Gateway attempt must be exactly one HTTP request."""
+    s = server(step(500, {"error": "boom"}))
+    out = chat_send(gw(sleep=lambda _: None), s.chat_url)
+    assert not out.ok and out.attempts == 3        # the Gateway's three, and no more
+    assert len(s.seen) == 3                       # exactly one HTTP request per attempt
+
+
+def test_the_sdk_sender_honours_retry_after(server):
+    """The SDK raises instead of returning, so `Retry-After` has to be carried off the exception's response or the
+    Gateway silently falls back to the fixed BACKOFF ladder."""
+    waits = []
+    s = server(step(429, {"error": "slow down"}, {"retry-after": "7"}), step(200, {"choices": []}))
+    out = chat_send(gw(sleep=waits.append), s.chat_url)
+    assert out.ok and waits == [7.0]
+
+
+def test_the_sdk_sender_maps_a_rejected_key_to_credit_or_key(server):
+    s = server(step(401, {"error": {"message": "Invalid API key"}}))
+    with pytest.raises(G.CreditOrKey, match="HTTP 401"):
+        chat_send(gw(), s.chat_url)
+    assert len(s.seen) == 1                       # never retried
+
+
+def test_the_sdk_sender_reports_a_non_json_body(server):
+    """A proxy answering HTML must not crash the sender; the body shape stays the same as httpx's."""
+    s = server(step(502, None))
+    out = chat_send(gw(sleep=lambda _: None), s.chat_url)
+    assert not out.ok and out.status == 502
+
+
+def test_the_sdk_sender_reports_no_connection_as_status_zero(server):
+    """An SDK APIConnectionError becomes status 0, exactly as a transport failure does on the httpx sender, so
+    `_retryable` and the log do not depend on which sender ran."""
+    s = server(step(200))
+    port = s.http.server_port
+    s.close()
+    out = chat_send(gw(sleep=lambda _: None), f"http://127.0.0.1:{port}/v1/chat/completions")
+    assert out.status == 0 and not out.ok and out.attempts == 3
+
+
+def test_the_systemone_path_stays_on_httpx(server):
+    """Kev's /v1/systemone is not an OpenAI endpoint, so it must not go near the SDK. Dispatch is by path."""
+    s = server(step(200, {"answers": {}}))
+    out = send(gw(), s.url)
+    assert out.ok and out.body == {"answers": {}}
+    assert G._post is not G._openai_post

@@ -8,7 +8,9 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "websockets (>=13)",                 # the owned driver's CDP transport (assistant/driver/cdp.py), P2
-    "httpx (>=0.27)",
+    "httpx (>=0.27)",                    # Kev's /v1/systemone, which is not an OpenAI endpoint
+    "openai (>=3.26)",                   # the chat/completions transport (gateway._openai_post). Brings its own
+                                         # HTTP stack, httpx2 — which is why tests/test_no_bypass.py seals both.
     "pydantic (>=2,<3)",
     "pypdf (>=4)",
     "python-dotenv (>=1.0)",
@@ -29,7 +31,7 @@ testpaths = ["tests"]
 markers = [
     "unit: no browser, no network",
     "browser: throwaway headless Chrome, no model",
-    "live_model: OpenRouter against local fixtures; needs --live",
+    "live_model: the local FreeLLMAPI router and Kev server against local fixtures; needs --live",
 ]
 
 [build-system]

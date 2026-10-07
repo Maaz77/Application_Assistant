@@ -34,7 +34,7 @@ A plain venv is used, because Poetry's pyenv shim is broken on this Mac. The bro
 
 ```bash
 /opt/homebrew/bin/python3 -m venv .venv
-.venv/bin/pip install websockets httpx "pydantic>=2" pypdf python-dotenv numbers-parser pytest
+.venv/bin/pip install websockets httpx openai "pydantic>=2" pypdf python-dotenv numbers-parser pytest
 ```
 
 ```bash
@@ -70,11 +70,29 @@ Every model request — `decide.Decider`, `decide.ChatDecider` and `llm_inferenc
 (`assistant/gateway.py`, installed per run by `gateway.use`). The owned browser driver (P2) makes no model request
 at all: navigation is deterministic (`assistant/navigate.py`) and the only Jev calls are `decide`'s. Nothing else
 may send: `gateway.required()` raises instead of falling back to an HTTP client, and `tests/test_no_bypass.py`
-seals off `httpx.post` and `httpx.Client.post` to prove it. The Gateway owns the queue
+seals off every HTTP stack to prove it. The Gateway owns the queue
 (`[limits] max_in_flight`, `min_interval_s`), the **only** retry layer (`max_attempts`, on 429/5xx/timeout/no
 connection, waiting `Retry-After` ≤ 30 s else 2 s then 6 s), the per-kind timeout (System One 20 s, or
 `models.local.timeout` on the local route; chat 45 s), the counters the report prints, and the single call to
 `inference_log`. Do not add a retry, a queue or a log line to a sender — they all belong here.
+
+**The transport** (`gateway._post`) dispatches on the URL path: `/chat/completions` goes through the official
+`openai` SDK (`_openai_post`, user decision 2026-10-07), and everything else — Kev's `POST /v1/systemone`, which
+has no OpenAI equivalent — stays on `httpx` (`_httpx_post`). Three things about the SDK path are load-bearing and
+must not be "simplified":
+
+- **`max_retries=0`** on the cached client. The SDK's default is 2, which would make three HTTP requests inside
+  *each* Gateway attempt — exactly the nesting this module was built to remove.
+- **It returns the raw wire JSON**, never `parse().model_dump()`. The typed model adds its own unset fields
+  (`refusal`, `audio`, `tool_calls`, …) to every entry in `llm_inference_logs.json`, drops the router's
+  non-standard `_routed_via`, and cannot represent the HTTP 200 carrying an error body and no choices that
+  `_ask_model` treats as a failed model.
+- **`Retry-After` is carried off the exception's response** into the body, because the SDK raises where HTTP
+  returns. Lose it and the Gateway silently falls back to the fixed `BACKOFF` ladder.
+
+The SDK does **not** use `httpx`: it depends on `httpx2` and calls `httpx2.Client.send`. Sealing only the `httpx`
+names let a real SDK request reach the network (verified live 2026-10-07), so `test_no_bypass.py` seals both
+stacks and `test_the_seal_itself_catches_the_openai_sdk` pins that down.
 
 Both servers are local and free, and neither reports `usage.cost`, so **cost accounting was removed on 2026-10-07**: no `BudgetExceeded`, no `[budget]`, no `[prices]`, no `Counters.cost`, and `report.md` prints no money. A paid route would have to bring it back. `inference_log.gateway_of` tells the two loopback servers apart **by path** (`/chat/completions` → `freellmapi`, else `local`), or a chat failure and a Kev failure would both be labelled `local` in the outage and rejected-key messages.
 
@@ -98,7 +116,7 @@ Two servers on this Mac, and nothing off it (P6, 2026-10-07 — OpenRouter and V
 
 Two rules the provider imposes, both load-bearing:
 
-- **Never configure the router's `auto`** (or a `:free` suffix). `auto` picks whichever free model is up and one that ignores `response_format` answers **prose at HTTP 200**; the code only drops to `json_object` on HTTP 400, so every page then fails as `ModelUnavailable("output invalid")`. Only concrete IDs whose `GET /v1/models` entry lists `response_format` honour the strict schema. `config.problems()` does not catch this — `test_config.py` and `test_model_access.py` do.
+- **Model choice and failover belong to the router, not to this code** (user decision 2026-10-07). `models.freellmapi.llm_inference` is `"auto"`; `"auto:fast"`, `"auto:smart"`, `"fusion"` and concrete IDs also work. `auto` honours the strict `json_schema` — verified 9/9 across the three strategies, and it answered while four of five hand-picked IDs were 429/413, because routing around a spent free tier is precisely what it does. An earlier note here claimed `auto` ignores `response_format`; that was a bad test (a toy schema with no system prompt), now corrected. A list is still accepted and still rotates, for a caller that wants to pin several concrete IDs.
 - **A quota belongs to a platform, not a model ID** (`_routed_via.platform`), so the rotation must spread over platforms; two IDs on one platform share a limit. Reasoning is switched off with `reasoning_effort = "none"` (`llm_inference.REASONING_EFFORT`), **not** OpenRouter's `reasoning: {"enabled": false}`, which this router ignores.
 
 Never print keys: `browser_actions.jsonl` redacts the key, and the inference logs (`llm_inference_logs.json`, `jev_inference_logs.json`) never contain one.

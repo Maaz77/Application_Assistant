@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 import dataclasses
@@ -74,6 +75,18 @@ class PreflightError(RuntimeError):
 
 
 PROBE_TIMEOUT = 60.0   # a preflight LLM-inference probe: a trivial page should answer well within this
+# How much of a failure to show per skipped model. The probe asks one model at a time, so `call_engine`'s
+# "none of 1 models answered (<model>: …)" wrapper repeats what the caller already prints; strip it and keep the
+# status plus the first clause of what the provider said. The full text is in llm_inference_logs.json.
+_PROBE_NOISE = re.compile(r"^LLM inference: none of \d+ models answered \((?:[^:]+: )?(.*)\)$", re.S)
+PROBE_REASON_CHARS = 90
+
+
+def _why(exc: Exception) -> str:
+    """One short line for a model that did not answer."""
+    text = " ".join(str(exc).split())
+    m = _PROBE_NOISE.match(text)
+    return (m.group(1) if m else text)[:PROBE_REASON_CHARS].rstrip(" .,") or "no answer"
 
 
 def _probe_llm_inference(cfg: config_mod.Config) -> tuple[list[str], list[str]]:
@@ -113,7 +126,7 @@ def _probe_llm_inference(cfg: config_mod.Config) -> tuple[list[str], list[str]]:
             except LLMInferenceError as exc:
                 # Only this model is out. A CreditOrKey is not caught: it names the key and must still reach
                 # preflight.
-                out.append(f"{model} ({exc})")
+                out.append(f"{model}: {_why(exc)}")
                 continue
             answered.append(model)
     finally:

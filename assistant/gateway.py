@@ -18,11 +18,13 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from types import SimpleNamespace
 from urllib.parse import urlparse
 from typing import Any, Callable
 
 import httpx
+import openai
 
 from assistant import inference_log
 from assistant.blockers import StopRun
@@ -37,6 +39,7 @@ RETRY_STATUS = {429, 529}       # plus every 5xx, plus 0 (no connection) — see
 # and 403 a refused account, kept because any OpenAI-compatible server may answer them. None of the three is cured
 # by waiting or by another model, so each stops the run instead of rotating.
 CREDIT_STATUS = {401, 402, 403}
+CHAT_PATH = "/chat/completions"   # the one OpenAI endpoint we call; everything else stays on httpx (see _post)
 
 
 class GatewayStop(StopRun):
@@ -77,19 +80,70 @@ class Outcome:
     attempts: int
 
 
+def _body_of(response: Any) -> Any:
+    """A response's JSON, or its first 500 characters when it is not JSON. Shared by both senders so the shape
+    `_attempts` sees never depends on which one ran."""
+    try:
+        return response.json()
+    except ValueError:
+        return {"raw": response.text[:500]}
+
+
+def _carry_retry_after(response: Any, body: Any) -> Any:
+    """`Retry-After` moves into the body, which is where `_retry_after` reads it. Dropping it would silently turn
+    the Gateway's "wait exactly as long as the provider asked" into the fixed BACKOFF ladder."""
+    if isinstance(body, dict) and response.headers.get("retry-after"):
+        body["_retry_after"] = response.headers["retry-after"]
+    return body
+
+
 def _httpx_post(url: str, body: dict, headers: dict, timeout: float) -> tuple[int, Any]:
-    """The default sender. Status 0 means no HTTP answer at all; the body then names the transport error."""
+    """The non-OpenAI sender: Kev's `POST /v1/systemone`, which has no OpenAI equivalent. Status 0 means no HTTP
+    answer at all; the body then names the transport error."""
     try:
         r = httpx.post(url, json=body, headers=headers, timeout=timeout)
     except httpx.HTTPError as exc:
         return 0, {"error": {"message": f"{type(exc).__name__}: {exc}"}}
+    return r.status_code, _carry_retry_after(r, _body_of(r))
+
+
+@lru_cache(maxsize=8)
+def _client(base_url: str, key: str) -> "openai.OpenAI":
+    """One SDK client per (base_url, key). A client owns a connection pool, so building one per request would open
+    a new pool every time. `max_retries=0` is load-bearing: the Gateway is the only retry layer (P1 T2), and the
+    SDK's default of 2 would nest 3 attempts inside each of ours — the request multiplication the Gateway exists
+    to remove (see this module's docstring)."""
+    return openai.OpenAI(base_url=base_url, api_key=key or "none", max_retries=0)
+
+
+def _openai_post(url: str, body: dict, headers: dict, timeout: float) -> tuple[int, Any]:
+    """The chat sender, through the official `openai` SDK (user decision 2026-10-07).
+
+    It returns the **raw wire JSON**, never `parse().model_dump()`. The SDK's typed model would add its own unset
+    fields (`refusal`, `audio`, `tool_calls`, `service_tier`, …) to every entry in llm_inference_logs.json, and it
+    cannot represent the HTTP 200 carrying an error body and no choices that `llm_inference._ask_model`
+    deliberately treats as a failed model. Reading the raw response keeps this sender's contract identical to
+    `_httpx_post`'s, so nothing above it can tell which one ran.
+
+    The SDK raises where HTTP returns, so both shapes are mapped back: a status error keeps its status and body,
+    and a connection or timeout error becomes status 0, the same as `_httpx_post`.
+    """
+    client = _client(url[: -len(CHAT_PATH)], (headers.get("Authorization") or "").removeprefix("Bearer ").strip())
     try:
-        body = r.json()
-    except ValueError:
-        body = {"raw": r.text[:500]}
-    if isinstance(body, dict) and r.headers.get("retry-after"):
-        body["_retry_after"] = r.headers["retry-after"]
-    return r.status_code, body
+        raw = client.chat.completions.with_raw_response.create(**body, timeout=timeout)
+    except openai.APIStatusError as exc:
+        return exc.status_code, _carry_retry_after(exc.response, _body_of(exc.response))
+    except openai.APIError as exc:          # APIConnectionError and APITimeoutError land here
+        return 0, {"error": {"message": f"{type(exc).__name__}: {exc}"}}
+    return raw.http_response.status_code, _carry_retry_after(raw.http_response, _body_of(raw.http_response))
+
+
+def _post(url: str, body: dict, headers: dict, timeout: float) -> tuple[int, Any]:
+    """Dispatch by path, the same rule `inference_log.gateway_of` uses: chat/completions goes through the OpenAI
+    SDK, and anything else — Kev's /v1/systemone — stays on httpx, because it is not an OpenAI endpoint. Dispatch
+    on the URL rather than the body shape, because `_openai_post` derives the SDK's base_url by stripping
+    CHAT_PATH, which is only valid when the suffix is actually there."""
+    return (_openai_post if url.endswith(CHAT_PATH) else _httpx_post)(url, body, headers, timeout)
 
 
 def _retryable(status: int) -> bool:
@@ -115,7 +169,7 @@ class Gateway:
                  sleep: Callable[[float], None] = time.sleep, monotonic: Callable[[], float] = time.monotonic):
         self.limits = limits
         self.timeouts = {JEV: 20.0, CHAT: 45.0, **(timeouts or {})}
-        self.post = post or _httpx_post
+        self.post = post or _post
         self.sleep, self.monotonic = sleep, monotonic
         self._slots = threading.BoundedSemaphore(max(1, limits.max_in_flight))
         self._lock = threading.Lock()

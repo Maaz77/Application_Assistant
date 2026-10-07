@@ -483,8 +483,8 @@ def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post:
             continue
         # A router can pass an overloaded upstream through as HTTP 200 with an error body and an empty choice
         # (OpenRouter's nemotron-3-super:free did, 2026-09-24), so an error body fails the model whatever the
-        # status. The same guard catches the FreeLLMAPI router's own "auto" model, which answers 200 with prose
-        # when the free model it picked ignores response_format — which is why only concrete IDs are configured.
+        # status. The same guard covers a routed model that returns something unusable: the validation below is
+        # what finally decides, so a 200 is never trusted on its status alone.
         err = data.get("error") if isinstance(data, dict) else None
         if not out.ok or err:
             raise ModelUnavailable(f"HTTP {_code(out.status, err)} {_message(err)}".rstrip())

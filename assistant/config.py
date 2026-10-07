@@ -40,11 +40,11 @@ class FreeLLMAPI(_Strict):
     fans a chat request out over the free tiers of many providers and falls over when one is rate-limited. It serves
     the chat models only; the System One decision model stays on the Kev server below.
 
-    `llm_inference` is tried in turn (rotation.py): the model that answered last first, the next when one is out.
-    Name concrete model IDs, as `GET /v1/models` lists them — never the router's own "auto", which picks whichever
-    free model is up and so may pick one that ignores `response_format` and answers prose at HTTP 200
-    (live 2026-10-07). Only a model whose catalogue entry lists `response_format` honours the strict json_schema the
-    LLM inference asks for."""
+    `llm_inference` is normally the router's own `"auto"`: picking the model and routing around an exhausted free
+    tier is the router's job, not this program's (user decision 2026-10-07). `"auto:fast"`, `"auto:smart"`,
+    `"fusion"` and a concrete ID from `GET /v1/models` all work too. A list is still accepted and still rotates
+    (rotation.py), which is what a caller pinning several concrete IDs would want, but the shipped config names one
+    routing mode and lets the router do the rest."""
     base_url: str = "http://127.0.0.1:31415/v1"
     llm_inference: tuple[str, ...] = ()
 

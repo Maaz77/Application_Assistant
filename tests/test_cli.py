@@ -152,11 +152,19 @@ def test_the_llm_inference_probe_asks_every_configured_model(monkeypatch):
     assert {url for url, _ in seen} == {cli.config_mod.chat_url(cfg)}
 
 
+def pinned_cfg(*models):
+    """A config with several concrete model IDs pinned, instead of the shipped `auto`. The probe's per-model
+    behaviour is still worth testing: pinning a list is still supported, it is just not what we ship."""
+    cfg = cli.config_mod.load()
+    return cfg.model_copy(update={"models": cfg.models.model_copy(update={
+        "freellmapi": cfg.models.freellmapi.model_copy(update={"llm_inference": models})})})
+
+
 def test_one_model_out_of_quota_is_reported_but_does_not_fail_preflight(monkeypatch):
     """The FreeLLMAPI router's free tiers go in and out of quota minute by minute (live 2026-10-07), and a run
     only ever needs one model per page — that is what the rotation is for. So a single 429 is reported, not fatal.
     Before 2026-10-07 every cloud model was paid and one failure did fail preflight."""
-    cfg = cli.config_mod.load()
+    cfg = pinned_cfg("alpha", "beta", "gamma")
     dead = cfg.models.llm_inference[-1]
 
     def fake(**kw):
@@ -176,9 +184,8 @@ def test_models_out_of_quota_do_not_trip_the_runs_breaker(monkeypatch):
     after the third were skipped even when they would have answered. Each model is now probed on a Gateway of its
     own, and the run's is restored."""
     from assistant import gateway as gateway_mod
-    cfg = cli.config_mod.load()
+    cfg = pinned_cfg("m1", "m2", "m3", "m4", "m5")
     models = list(cfg.models.llm_inference)
-    assert len(models) >= 5, models
     monkeypatch.setattr(cli.config_mod, "chat_key", lambda *a: "k")
 
     def post(url, body, headers, timeout):
@@ -211,9 +218,26 @@ def test_a_rejected_key_during_the_probe_still_reaches_preflight(monkeypatch):
         gateway_mod.use(None)
 
 
+def test_a_skipped_models_reason_is_one_readable_line():
+    """The probe asks one model at a time, so call_engine's "none of 1 models answered (<model>: …)" wrapper
+    repeats the name the caller already prints. Preflight listed five of those nested in one line, which wrapped
+    into an unreadable paragraph (live 2026-10-07). `_why` keeps the status and the start of what the provider
+    said; the full text stays in llm_inference_logs.json."""
+    nested = ("LLM inference: none of 1 models answered (qwen3.8-27b: HTTP 413 The request is too large for "
+              "every available candidate's context/token window. Reduce the prompt/history size)")
+    why = cli._why(cli.LLMInferenceError(nested))
+    assert why.startswith("HTTP 413 The request is too large")
+    assert "none of" not in why and "qwen3.8-27b" not in why     # the caller prints the model itself
+    assert len(why) <= cli.PROBE_REASON_CHARS
+    # a short reason is left alone, and an unwrapped message passes through
+    assert cli._why(cli.LLMInferenceError(
+        "LLM inference: none of 1 models answered (muse-glimmer-30b: output invalid)")) == "output invalid"
+    assert cli._why(cli.LLMInferenceError("HTTP 429 rate limited")) == "HTTP 429 rate limited"
+
+
 def test_llm_inference_probe_raises_when_no_model_answers(monkeypatch):
     """None answering is the condition that really stops a run, and the error names every model that failed."""
-    cfg = cli.config_mod.load()
+    cfg = pinned_cfg("alpha", "beta")
 
     def fake(**kw):
         raise cli.LLMInferenceError("all models unavailable")

@@ -1,7 +1,14 @@
 """A2: no model request bypasses the Gateway (P1 T7).
 
-Both HTTP clients that could carry a model request — `httpx.post` and `httpx.Client.post`, which our senders could call — are replaced with one that fails the test if it is ever used. Every sender is
-then exercised. A sender that still had a way around the Gateway would reach one of them and fail here.
+Every HTTP client that could carry a model request is replaced with one that fails the test if it is ever used,
+then every sender is exercised. A sender with a way around the Gateway would reach one of them and fail here.
+
+There are **two** HTTP stacks to seal, which is easy to get wrong. `httpx` carries Kev's /v1/systemone, and the
+`openai` SDK carries chat/completions (user decision 2026-10-07) — but the SDK does not use httpx at all: it
+depends on `httpx2` (pydantic's client) and calls `httpx2.Client.send`. Sealing only `httpx.post`,
+`httpx.Client.post` and even `httpx.Client.send` let a real SDK request reach the network, verified live on
+2026-10-07. `test_the_seal_itself_catches_the_openai_sdk` below pins that down, so this file cannot quietly stop
+testing anything the day the SDK changes transport again.
 """
 from __future__ import annotations
 
@@ -9,6 +16,7 @@ import json
 from types import SimpleNamespace
 
 import httpx
+import httpx2
 import pytest
 
 from assistant import decide, gateway as G, llm_inference
@@ -23,13 +31,32 @@ class Bypassed(AssertionError):
     """Raised by the clients nothing may use any more."""
 
 
-@pytest.fixture
-def sealed(monkeypatch):
-    """No HTTP client is usable; one Gateway with an injected sender is."""
+def _seal(monkeypatch):
+    """Make every HTTP stack unusable. Returns nothing; raises Bypassed if anything sends."""
     def forbidden(*a, **kw):
         raise Bypassed("a model request was sent without going through the Gateway")
     monkeypatch.setattr(httpx, "post", forbidden)
     monkeypatch.setattr(httpx.Client, "post", forbidden)
+    monkeypatch.setattr(httpx.Client, "send", forbidden)
+    monkeypatch.setattr(httpx2.Client, "send", forbidden)   # what the openai SDK actually uses
+    return forbidden
+
+
+def test_the_seal_itself_catches_the_openai_sdk(monkeypatch):
+    """The seal is only as good as its targets. The SDK reaches the network through an httpx-only seal, so this
+    asserts the httpx2 target is the one that stops it — if the SDK ever moves again, this fails loudly rather
+    than leaving every other test in this file passing vacuously."""
+    import openai
+    _seal(monkeypatch)
+    client = openai.OpenAI(base_url="http://127.0.0.1:1/v1", api_key="k", max_retries=0)
+    with pytest.raises(Bypassed):
+        client.chat.completions.create(model="m", messages=[{"role": "user", "content": "x"}])
+
+
+@pytest.fixture
+def sealed(monkeypatch):
+    """No HTTP client is usable; one Gateway with an injected sender is."""
+    _seal(monkeypatch)
     sent = []
 
     def post(url, body, headers, timeout):

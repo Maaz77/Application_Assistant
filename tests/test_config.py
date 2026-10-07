@@ -111,14 +111,17 @@ def test_the_p1_sections_have_the_defaults_p1_asks_for():
     assert cfg.decider.fallback == "chat"
 
 
-def test_the_router_auto_model_is_never_configured():
-    """The FreeLLMAPI router's "auto" picks whichever free model is up, and one that does not support
-    response_format answers prose at HTTP 200 instead of the strict json_schema (live 2026-10-07). D14's reason
-    for avoiding `:free` IDs is the same shape of problem, so both are checked here."""
+ROUTING_MODES = ("auto", "auto:fast", "auto:smart", "fusion")
+
+
+def test_the_shipped_config_lets_the_router_choose_the_model():
+    """User decision 2026-10-07: model choice and failover are the router's job, not this program's — so the
+    shipped config names a routing mode rather than a hand-picked list. `auto` honours the strict json_schema
+    (9/9 across the three strategies, live) and routes around a free tier that is spent, which a fixed list
+    cannot. A concrete ID is still allowed for pinning one deliberately."""
     named = list(config.load().models.llm_inference)
-    assert named, "models.freellmapi.llm_inference is empty"
-    assert "auto" not in named and not [m for m in named if m.startswith("auto:")], named
-    assert not [m for m in named if ":free" in m], named
+    assert named == ["auto"], named
+    assert not [m for m in named if ":free" in m], named          # D14 still stands for concrete IDs
 
 
 def test_an_unknown_p1_key_is_still_an_error(tmp_path):

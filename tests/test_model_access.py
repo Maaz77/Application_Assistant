@@ -21,6 +21,8 @@ import pytest
 from assistant import config
 from assistant.llm_inference import MAX_TOKENS, REASONING_EFFORT
 
+ROUTING_MODES = ("auto", "auto:fast", "auto:smart", "fusion")   # the router chooses the model behind these
+
 TIMEOUT = 90.0
 
 
@@ -53,23 +55,25 @@ def catalogue(chat_key, cfg):
 
 def test_the_configured_models_are_in_the_catalogue(catalogue, cfg):
     """Every models.freellmapi.llm_inference entry exists, is available, and honours response_format. A typo or a
-    retired ID would otherwise only show up as "none of N models answered" mid-run."""
+    retired ID would otherwise only show up as "none of N models answered" mid-run.
+
+    A routing mode (`auto`, `auto:*`, `fusion`) is checked only for being listed and available: the router picks
+    the underlying model per request, so its catalogue entry carries no `supported_parameters` to inspect. A
+    concrete ID must additionally list `response_format`, or it cannot honour the strict json_schema."""
     problems = []
     for model in cfg.models.llm_inference:
         entry = catalogue.get(model)
         if entry is None:
             problems.append(f"{model}: NOT in the catalogue — check the spelling against GET /v1/models")
             continue
-        params = entry.get("supported_parameters") or []
         if not entry.get("available"):
             problems.append(f"{model}: listed but not available ({entry.get('unavailable_reason')})")
-        if "response_format" not in params:
+        if model in ROUTING_MODES:
+            continue
+        if "response_format" not in (entry.get("supported_parameters") or []):
             problems.append(f"{model}: does not list response_format, so it will not honour the strict "
                             f"json_schema the LLM inference asks for")
     assert not problems, "\n".join(problems)
-    assert "auto" not in cfg.models.llm_inference, \
-        'models.freellmapi.llm_inference must name concrete model IDs, never the router\'s "auto": auto picks ' \
-        'whichever free model is up, and one that ignores response_format answers prose at HTTP 200'
 
 
 def test_each_configured_model_replies(chat_key, cfg, catalogue):

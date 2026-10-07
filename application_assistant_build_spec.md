@@ -134,11 +134,10 @@ max_pages_per_job = 15
 
 [models.freellmapi]                # FREELLMAPI_KEY (required: the router answers HTTP 401 without it).
 # A FreeLLMAPI router (github.com/tashfeenahmed/freellmapi) on this Mac: one OpenAI-compatible /v1 over the free
-# tiers of ~34 providers. Name concrete IDs from its GET /v1/models, never its own "auto" (which ignores
-# response_format and answers prose at HTTP 200), and spread them over platforms — the quota belongs to a
-# platform key, not a model ID.
+# tiers of ~34 providers. The router picks the model and routes around a spent free tier itself, which is why
+# "auto" is configured rather than a model list (v4.2; a list still works for pinning concrete IDs).
 base_url = "http://127.0.0.1:31415/v1"
-llm_inference = ["qwen3.8-27b", "gemini-3.5-flash", "kimi-k3", "deepseek-v4-flash", "muse-glimmer-30b"]
+llm_inference = "auto"             # or "auto:fast" | "auto:smart" | "fusion" | a concrete GET /v1/models id
 
 [models.local]                     # a Kev server on this Mac: the ONLY System One route (the router 404s it)
 base_url = "http://127.0.0.1:8009"
