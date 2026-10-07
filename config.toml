@@ -14,7 +14,7 @@ max_actions = 2000
 max_pages_per_job = 15
 
 [models]                           # model IDs, as each route names them
-chat_route = "vercel"                     # who serves the LLM inference and the text helper: "openrouter" (free
+chat_route = "openrouter"                 # who serves the LLM inference and the text helper: "openrouter" (free
                                           # models below) or "vercel" (paid, for when OpenRouter's free quota is out)
 system_one_decision_provider = "local"    # who serves the System One decision model: "local" (a Kev server on
                                           # this Mac: no key, no quota — [models.local] below), "openrouter"

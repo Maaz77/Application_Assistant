@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Software Engineer II, IQ Grow - Careers at Toast</title></head>
+<body><h1>Software Engineer II, IQ Grow</h1><p>Dublin, Ireland.</p>
+<form role="search"><label>Search by job title, location, department <input type="text" name="q"></label>
+  <button type="button">Search</button></form>
+<a href="#applynow">Apply now</a>
+<div id="applynow"></div>
+<script>
+// The Greenhouse application form is embedded on this same careers page but renders a beat after load, below the
+// fold — so the first observe snapshot sees only the nav + search box + "Apply now" anchor (live: Toast).
+setTimeout(() => { document.getElementById('applynow').innerHTML =
+  '<form action="/submit" method="post" onsubmit="return false">' +
+  '<label>Legal First Name <input type="text" required></label>' +
+  '<label>Email <input type="text" required></label>' +
+  '<label>Resume/CV <input type="file" required></label>' +
+  '<button type="submit">Apply now!</button></form>'; }, 2200);
+</script>
+</body></html>

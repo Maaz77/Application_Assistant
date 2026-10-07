@@ -174,3 +174,31 @@ def test_a_greenhouse_careers_page_reaches_the_form_via_apply_now(fixture_server
     for t in chrome.tabs():
         if "toast_careers.html" in t["url"] or "greenhouse_like.html" in t["url"]:
             chrome.close_tab(t["id"])
+
+
+def test_an_embedded_greenhouse_form_rendered_late_is_reached(fixture_server, chrome, tmp_path, monkeypatch):
+    """P5 regression for live Toast: the Greenhouse form is embedded on the company careers page and renders
+    below the fold a beat after load, so the first observe sees only the nav + search box + an 'Apply now'
+    anchor. The loop must wait for the embedded form (re-read only, never a submit) and reach it, not give up
+    unsupported_ats."""
+    cfg = config_mod.load()
+    cfg = cfg.model_copy(update={"browser": cfg.browser.model_copy(update={"cdp_url": CDP_URL})})
+    monkeypatch.setattr(cli, "answer_page", canned)
+    d = _job_dir(tmp_path, "4012345613_Toast_Software-Engineer",
+                 fixture_server.url("jobs/view/4012345613-toast-embedded.html"))
+    with nullcontext(Browser(cfg, "", actions_log=tmp_path / "browser_actions.jsonl")) as browser:
+        browser.connect(5.0)
+        book = tabs.TabBook(browser)
+        try:
+            outcome = cli.process(Job.from_dir(d), browser=browser, book=book, cfg=cfg, key="", profile="",
+                                  run_dir=tmp_path / "run", today=date(2026, 9, 23))
+            url, cls = outcome.url, "parked"
+        except NeedsAttention as na:
+            url, cls = na.url, na.cls
+        book.close()
+    assert "toast_embedded.html" in (url or ""), f"did not reach the embedded form: {url!r} ({cls})"
+    assert cls in ("parked", "gate", "broken_form"), f"gave up on the embedded form as {cls}"
+    assert fixture_server.posts() == []
+    for t in chrome.tabs():
+        if "toast_embedded.html" in t["url"]:
+            chrome.close_tab(t["id"])

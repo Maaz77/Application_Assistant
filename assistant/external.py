@@ -161,13 +161,15 @@ FORM_WAIT = 12          # s: an external form can render after a "Fetching appli
 
 
 def _wait_for_form(ctx, secs: int = FORM_WAIT) -> pages.Page:
-    """Re-read until an application form's fields appear (Ashby renders its form a beat after the page, behind
-    'Fetching application form'), or until a blocker / sign-in / confirmation shows. Returns the latest page so
-    the caller can re-classify it. Bounded; no model call."""
+    """Re-read until the page is a fillable application (`looks_like_application`), or until a blocker / sign-in /
+    confirmation shows. Covers a form that renders a beat after the page: Ashby's "Fetching application form",
+    and a Greenhouse form embedded below the fold on a company careers page that renders after load (Toast,
+    live 2026-10-07). Re-reading only — never a click or a scroll-trigger — so it cannot submit. Bounded; no
+    model call. Returns the latest page for the caller to re-classify."""
     deadline = time.monotonic() + secs
     p = ctx.read()
     while time.monotonic() < deadline:
-        if pages.judge(p).app_fields or pages.is_alarm(p):
+        if looks_like_application(p) or pages.is_alarm(p):
             return p
         if pages.classify(p).kind in ("blocker", "google", "google_wall"):
             return p
@@ -226,6 +228,12 @@ def run_external(ctx) -> Parked:
                     continue
                 if v.kind in ("form", "final"):
                     if not looks_like_application(p):
+                        # A careers page may show incidental fields while its real application form (embedded
+                        # Greenhouse, Toast) is still rendering below the fold. Wait for the complete form before
+                        # giving up — re-reading only, so this cannot submit.
+                        if looks_like_application(_wait_for_form(ctx)):
+                            filled = False
+                            continue
                         raise NeedsAttention("unsupported_ats",
                                              f"fields on {p.host} but not a job-application form")
                     if not filled:
@@ -249,7 +257,7 @@ def run_external(ctx) -> Parked:
                 # to click, wait for a late-rendering form (Ashby shows "Fetching application form" first) before
                 # giving up as unsupported.
                 if not _click_forward(ctx, p, allow_apply=True):
-                    if pages.judge(_wait_for_form(ctx)).app_fields:
+                    if looks_like_application(_wait_for_form(ctx)):
                         filled = False
                         continue
                     raise NeedsAttention("unsupported_ats", f"no application form on {p.host} ({v.detail})")
