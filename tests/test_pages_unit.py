@@ -46,6 +46,26 @@ def test_resume_input_skips_an_autofill_parser_input():
     assert pages.judge(p).resume_ref == "e15"
 
 
+def test_settle_is_bounded_by_wall_clock_not_read_count(monkeypatch):
+    """P6 fix (DISCOVERY 2026-10-07): a persistently-unsettled page whose reads are slow must not make settle run
+    `seconds` reads. settle caps by wall-clock, so slow multi-second reads still return after ~`seconds` with only
+    a few reads, not one read per second."""
+    clock = [0.0]
+    monkeypatch.setattr(pages.time, "monotonic", lambda: clock[0])
+    reads = [0]
+
+    def slow_read():
+        reads[0] += 1
+        return page([])                 # no elements, no text -> unsettled() stays True
+
+    def fake_sleep(_):
+        clock[0] += 4.0                 # each read "costs" ~4 s of wall-clock (the slow gadget page)
+
+    out = pages.settle(slow_read, sleep=fake_sleep, seconds=10.0)
+    assert pages.unsettled(out)         # gave up on the deadline, not on a count
+    assert reads[0] <= 4, reads[0]      # ~10 s / 4 s per loop -> ~3 reads, not the old 10
+
+
 def test_forward_submit_counts_an_apply_labelled_control():
     """P5: Greenhouse's 'Apply now!' is not _submit_like, but pages.forward_submit counts it, so a filled
     'Apply now!' final page passes the gate (parks) instead of failing 'no submit button'. The guard still
@@ -115,13 +135,22 @@ def test_unsettled_pages_are_recognised():
     assert pages.unsettled(page([], text="", captcha=True))                        # nothing drawn at all
 
 
-def test_settle_rereads_until_rendered_and_gives_up_after_the_budget():
+def test_settle_rereads_until_rendered_and_gives_up_after_the_budget(monkeypatch):
     bare = page([Element(ref="e1", role="link", name="Home")], text="0 notifications")
     job = page([Element(ref="e1", role="button", name="Easy Apply")], text="Data Engineer")
     seq, slept = iter([bare, bare, job]), []
     assert pages.settle(lambda: next(seq), slept.append) is job and slept == [1.0, 1.0]
+    # Gives up after the WALL-CLOCK budget (seconds), not after `seconds` reads: drive a fake clock that each
+    # sleep advances by 1 s, so a never-settling page stops once the deadline passes (P6 fix, 2026-10-07).
+    clock = [0.0]
+    monkeypatch.setattr(pages.time, "monotonic", lambda: clock[0])
     slept.clear()
-    assert pages.settle(lambda: bare, slept.append, seconds=3) is bare and len(slept) == 3
+
+    def tick(s):
+        clock[0] += 1.0
+        slept.append(s)
+
+    assert pages.settle(lambda: bare, tick, seconds=3) is bare and len(slept) == 3
 
 
 def test_the_real_linkedin_capture_was_taken_too_early():

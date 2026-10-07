@@ -364,12 +364,18 @@ def unsettled(p: Page) -> bool:
 
 
 def settle(read, sleep=time.sleep, seconds: float = SETTLE_SECONDS) -> Page:
-    """Re-read until the page is no longer `unsettled`, at most `seconds` (one read per second)."""
+    """Re-read until the page is no longer `unsettled`, bounded by `seconds` of WALL-CLOCK time.
+
+    Wall-clock, not a read counter: a `read()` is cheap on a fast page but can cost several seconds on a slow one
+    (a client-rendered page behind a slow local model, or Workday's blank "Apply with LinkedIn" gadget whose
+    observe burns the driver's 4 s client-render wait twice per read). Counting iterations (`waited += 1` per
+    loop) let a persistently-unsettled slow page run ~`seconds` reads of several seconds each — ~90 s per call,
+    which stacked up into the P6 live-run "stuck" (DISCOVERY 2026-10-07). A monotonic deadline caps the real time
+    spent here regardless of read cost."""
+    deadline = time.monotonic() + seconds
     p = read()
-    waited = 0.0
-    while unsettled(p) and waited < seconds:
+    while unsettled(p) and time.monotonic() < deadline:
         sleep(1.0)
-        waited += 1.0
         p = read()
     return p
 
