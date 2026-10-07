@@ -1725,3 +1725,27 @@ line, repeating each model name and wrapping into an unreadable paragraph. `cli.
 probe asks one model at a time, so the caller already prints the name — and keeps the status plus the first 90
 characters of what the provider said. The full text stays in `llm_inference_logs.json`. With `auto` configured
 there is usually nothing to skip at all; preflight's whole LLM check is now one line in ~1.6 s.
+
+## 2026-10-07 — `run` hung after preflight: pages.settle counted iterations, not wall-clock
+
+A recorded `run` (P6 FreeLLMAPI chat route) printed the preflight ✓ lines then appeared to hang. A faulthandler
+stack (`faulthandler.dump_traceback_later(150, exit=True)` around `cli.main(['run','--no-record','--limit','1'])`)
+caught the main thread in `external.run_external` → `pages.settle` → `pages.read_page` → `session.observe`, on the
+Genesys Workday "Apply with LinkedIn" gadget page (`applywithlinkedin.myworkdaygadgets.com/awli/`, blank:
+0 elements, 0 text). 16 observes of that page; last observe 4123 ms.
+
+**Root cause.** `pages.settle` bounded its re-read loop by a counter (`waited += 1.0` per iteration, `waited <
+seconds`), not by wall-clock. A `read()` is cheap on a fast page but costs ~8 s on this one — `read_page` does two
+observes (the element table, then `captcha_present`'s observe), and each pays `session.observe`'s 4 s
+client-render wait because the gadget page has body children but no actionable elements. So a persistently
+`unsettled` slow page ran ~10 loops of ~9 s ≈ **90 s per settle call**, and `run_external` calls settle on every
+loop iteration (the P5 settle-on-each-read change surfaced the latent bug). Genesys alone burned minutes before
+its `load_failure` raised, so the whole run looked stuck. Not an infinite hang — a dead CDP socket would raise
+`DriverTimeout` (caught → StopRun) — purely slowness compounding.
+
+**Fix.** `pages.settle` loops against a `time.monotonic()` deadline, so the real time spent is capped by `seconds`
+(10 s) regardless of read cost. Tests: the existing budget-give-up test drives a fake clock (each sleep ticks 1 s);
+a new `test_settle_is_bounded_by_wall_clock_not_read_count` proves a slow, always-unsettled read yields ~3 reads in
+a 10 s budget, not 10. **Confirmed live:** `run --no-record --limit 3` finished on its own in ~97 s (exit 2) —
+Genesys now gives up in 48 s (`load_failure: blank page (after 2 attempts)`) instead of hanging, Mastercard
+`navigation` in 2 s, Linda AI **parked** in 19 s; no submit, no ALARM, report written.
