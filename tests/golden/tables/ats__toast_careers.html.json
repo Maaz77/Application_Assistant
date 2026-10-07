@@ -1,0 +1,30 @@
+{
+  "url": "ats/toast_careers.html",
+  "title": "Software Engineer II, IQ Grow - Careers at Toast",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "textbox",
+      "name": "Search by job title, location, department",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Search",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e3",
+      "role": "link",
+      "name": "Apply now",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

@@ -211,12 +211,13 @@ def page_state(p: Page) -> dict:
 
 
 def code_app_fields(p: Page) -> set[str]:
-    """Application fields: scoped inside a dialog (Easy Apply), or all form-role elements on external ATS."""
-    scoped = {e.ref for e in fields(p) if e.scope}
-    if scoped:
-        return scoped
+    """Application fields: scoped inside the LinkedIn Easy Apply dialog, or all form-role elements on external
+    ATS minus the site chrome. `scope` marks a field inside that dialog and is a LinkedIn concept — off LinkedIn
+    a scoped field is just a form field (e.g. a site-search box in a `<form role=search>`, which carries a
+    scope), so there it must still be filtered as site chrome rather than short-circuiting to the app fields
+    (Toast's careers page, live 2026-10-07)."""
     if "linkedin.com" in p.host:
-        return set()
+        return {e.ref for e in fields(p) if e.scope}
     return {e.ref for e in fields(p)
             if e.role != "searchbox" and not _SITE_CHROME_RE.match(e.name or "")}
 
@@ -245,7 +246,7 @@ def _code_kind(p: Page) -> str:
         return "closed"
     if transmit and not advance:
         return "final_step"
-    if any(e.scope for e in flds) or real:
+    if (any(e.scope for e in flds) and "linkedin.com" in p.host) or real:   # scope counts only on LinkedIn
         return "application_form"
     if any(re.search(r"^\s*(easy apply|apply)\b", e.name or "", re.I) for e in btns):
         return "job_posting"

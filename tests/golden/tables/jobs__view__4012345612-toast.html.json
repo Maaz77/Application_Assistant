@@ -1,0 +1,22 @@
+{
+  "url": "jobs/view/4012345612-toast.html",
+  "title": "Software Engineer | Toast | LinkedIn",
+  "elements": [
+    {
+      "ref": "e1",
+      "role": "link",
+      "name": "Apply",
+      "value": "",
+      "checked": null,
+      "options": []
+    },
+    {
+      "ref": "e2",
+      "role": "button",
+      "name": "Save",
+      "value": "",
+      "checked": null,
+      "options": []
+    }
+  ]
+}

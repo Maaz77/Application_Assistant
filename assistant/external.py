@@ -94,9 +94,13 @@ def _click_forward(ctx, p: pages.Page, *, allow_apply: bool) -> bool:
     if ctrl is None:
         return False
     before = _page_signature(p)
+    known = ctx.book.handles()
     ctx.browser.act([{"op": "click", "ref": ctrl.ref}], ctx.session, p.table, stop_on_error=False)
     deadline = time.monotonic() + navigate.ADVANCE_WAIT
     while time.monotonic() < deadline:
+        if ctx.book.handles() - known - ctx.baseline:        # the forward click opened the form in a new tab
+            if ctx.book.hand_off(ctx.session, ctx.baseline, known):
+                return True
         q = ctx.read()
         if pages.is_alarm(q):
             raise StopRun(f"ALARM: confirmation text after a forward click on {q.url}")
