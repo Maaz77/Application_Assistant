@@ -1421,3 +1421,38 @@ re-injects); (b) `run_external` gained an outer `except DriverError` → NeedsAt
 not D14's `deepseek`/`gpt` models; `mistral-small` under-quotes and `mistral-nemo` times out. The model choice is
 the user's. **Gate note:** the current queue has only 3 target-host jobs (Ashby×2, Greenhouse×1) and no Lever, so
 the ≥5/10 gate cannot be reached with it; it needs ~10 external Resume-Built jobs mixing Greenhouse/Ashby/Lever.
+
+### Runs 3–5 and the Toast live inspection (same day)
+
+**Run 3 (`runs/20261007-093653`-era re-run).** UUID labels fixed (now "Select one"); The Flex SE (Ashby)
+parked. Two new findings: The Flex Full-Stack hit `broken_form` on the résumé upload (`page_changed`: Ashby
+re-rendered the form around the upload) — fixed by retrying the upload once after a re-observe
+(`fill.upload_resume`, mirroring `type_long`). Toast still `unsupported_ats`.
+
+**Run 4 (`runs/20261007-100753`).** 3 parked (Easy Apply + both Ashby); the upload-retry fix confirmed live (The
+Flex SE hit `page_changed`, retried, parked). Toast still `unsupported_ats`. Reconciling the Toast logs offline
+(rebuilding `pages.classify` on the saved observes) kept giving `navigate` while live gave the form branch — an
+unresolvable gap from logs alone. Added `pages.settle` on each external read first (Toast's careers page loads in
+stages: blank → a transient blocker-looking state → the real page); that did not resolve Toast.
+
+**Toast — live inspection (Claude in Chrome, user-authorized).** Opening the real careers URL showed the cause:
+the Greenhouse application form is **embedded inline on the same careers page** at `#applynow` (a `<form>` with
+"Legal First Name", a "Resume" file input and an "Apply now!" submit), **not** a cross-origin iframe, and it
+renders a beat after load, below the fold. The loop's early snapshot saw only the nav, a site-search box and an
+"Apply now" anchor (`href="#applynow"`). **Fix:** `external._wait_for_form` now waits for a complete
+`looks_like_application` (résumé, or name+email) rather than any field, and the `form`/`final`-not-application
+branch calls it before `unsupported_ats`. Re-reading only — never a click or a scroll-trigger — so it cannot
+submit (the never-submit line the advisor drew: an "Apply now" on a fields page can be a JS submit). Fixture
+`ats/toast_embedded.html` reproduces the late-rendered embed.
+
+**Run 5 — stopped at preflight.** Per the user's decision the chat route was switched to `openrouter` (D14:
+`deepseek/deepseek-v4.1-flash` + `openai/gpt-5.4-mini`). Preflight stopped with OpenRouter **HTTP 402
+"Insufficient credits. This account never purchased credits"** (exit 1, nothing written — the clean key/credit
+stop worked). So D14 is unvalidated live until the user adds OpenRouter credit (or confirms the key's account);
+reverting `models.chat_route` to `vercel` is the one-line alternative, at the cost of the mistral under-quote/
+timeout. The Toast embedded-form fix is therefore proven offline (new fixture + test) but not yet live.
+
+**Net external-ATS result:** the generic loop parks real Ashby forms reliably (2/2 in run 4), and standard hosted
+Greenhouse/Lever via fixtures; the embedded-careers-page Greenhouse (Toast) is fixed offline; Workday/Mastercard
+are correctly non-parked (account wall / no apply control at observe time). The user accepted this as the gate
+(no full 10-job live gate), recorded in `recore/HANDOVER.md`.

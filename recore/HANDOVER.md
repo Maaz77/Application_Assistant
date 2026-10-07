@@ -4,9 +4,14 @@
 - **Date:** 2026-10-07
 - **Branch:** `recore/p5-external-ats` (off `main`; P0–P4 are already in `main`).
 - **Build spec:** v5.0 (bumped this phase; the P3→v4.1 and P4→v4.2 banners, deferred earlier, were also written now).
-- **State:** **code complete, offline suite green; the live gate is the user's to run and has not been run yet**
-  (invariant §4.4 — the agent never drives real sites). The offline suite, the tripwire (including each ATS's
-  final button) and replay all pass; the end-to-end external hand-off and park are validated on local fixtures.
+- **State:** **code complete; offline suite green; five live `--no-record` runs done (user-authorized) and the
+  external flow confirmed on real sites.** The user **accepted the live evidence as the gate** (no full 10-job
+  recorded gate) on 2026-10-07. Real Ashby forms park reliably (2/2 in the last full run); the embedded-careers
+  Greenhouse case (Toast) was fixed after live inspection and is proven offline; standard hosted Greenhouse/Lever
+  are proven by fixtures. **Open, user-side:** the chat route was switched to D14/OpenRouter per the user, whose
+  OpenRouter account currently has no credit (preflight HTTP 402), so D14 is unvalidated live until credit is
+  added; and Mastercard's LinkedIn entry (no apply control at observe time) is unresolved. Never-submit held in
+  every live run (zero submit/apply `ok`, zero ALARM, `--no-record` wrote nothing).
 
 ## Decisions taken this phase (by the user, 2026-10-07)
 
@@ -78,16 +83,39 @@ catches it and runs `external.run_external`. New module `assistant/external.py`:
 - **End-to-end external hand-off + park:** `test_process_browser.py` parks the three hand-off variants
   (immediate / delayed tab / leaving-dialog) on the generic ATS form, LinkedIn tab closed, one tab per job, no
   POST; the job-alert box ends `unsupported_ats` with zero clicks.
-- **A2 (live gate — ≥ 5 of 10 parked):** NOT YET RUN. The agent does not drive real sites (§4.4); this is the
-  user's step (`LIVE_TEST.md`, P5).
+- **A2 (live gate):** the user authorized live `--no-record` runs and **accepted the live evidence as the gate**
+  (2026-10-07) — no full 10-job recorded gate. Five live runs: real **Ashby** forms parked (2/2 in the last full
+  run), the résumé-upload-across-a-re-render retry confirmed live, no crash/submit/ALARM. See `DISCOVERY.md`
+  (2026-10-07, runs 1–5).
+
+## Live-debugging fixes (commits after the first HANDOVER draft)
+
+Five live runs drove these, each with an offline regression test:
+- `9000ee5` observer null-`document.body` guard (helper v14) + outer `except DriverError` + `_wait_for_form`
+  (fixed the Toast run-aborting crash and Ashby's "Fetching application form" give-up).
+- `399c5c1` `pages` honour `scope` only on linkedin.com + `_click_forward` new-tab hand-off (a careers page's
+  site-search box no longer misreads as an application).
+- `6ae6071` `_OPAQUE_ID_RE` — a compound-UUID radio-group key falls back to "Select one" (restores C16 and
+  stopped the chain that failed an Ashby job on the chat model).
+- `3ab5b79` settle on each external read + `fill.upload_resume` retry on `page_changed`.
+- `4b0a280` `_wait_for_form` waits for a complete `looks_like_application`, so a Greenhouse form **embedded** on a
+  company careers page that renders late (Toast — same-page inline, confirmed by live Chrome inspection) is
+  reached, re-reading only; and `config.toml` `chat_route` → `openrouter` (D14 models).
 
 ## Known issues / open questions
 
-- **No Lever capture in the repo.** `ats/lever_like.html` is authored from Lever's known form shape; the live
-  gate needs a real `python -m assistant capture <lever-url>` to confirm the extraction.
-- **Ashby autofill-input fix** is verified against the 2026-09-23 capture + a fixture; confirm on a live Ashby.
-- **T2 (embedded cross-origin Greenhouse)** is deferred — only the `browser_open(src)` hop handles it, and that
-  fails if the embed `src` is trimmed by the `IFRAME_SRCS` ~170-char cap. Revisit only if a live run hits it.
+- **OpenRouter credit (user-side, blocks live D14).** With `chat_route = "openrouter"` (D14, the user's choice),
+  the account behind `OPENROUTER_API_KEY` returned HTTP 402 "never purchased credits" at preflight. D14 is
+  unvalidated live until the user adds credit (or confirms the key's account); reverting `models.chat_route` to
+  `vercel` is the one-line alternative, at the cost of the mistral under-quote/timeout. The Toast embedded-form
+  fix is proven offline but not yet live for this reason.
+- **Mastercard entry.** Its LinkedIn posting showed no Apply control in the observe snapshot (only nav chrome),
+  so it ends `navigation` "no way to start". A LinkedIn top-card render-timing edge, not external-ATS; unresolved.
+- **No Lever capture in the repo.** `ats/lever_like.html` is authored from Lever's known form shape; a live Lever
+  run still needs a real `python -m assistant capture <lever-url>` to confirm the extraction.
+- **Embedded forms are handled by waiting, not scrolling.** The Toast fix waits for a late-rendered same-page
+  embedded form; a form that only renders on *scroll* (IntersectionObserver) would still be missed — no live case
+  seen. **T2 (cross-origin iframe)** remains deferred (no repo evidence it is hit by LinkedIn's external Apply).
 
 ## Deviations from the phase file
 
@@ -97,9 +125,10 @@ catches it and runs `external.run_external`. New module `assistant/external.py`:
 
 ## Merge
 
-Not yet mergeable: A2 (the live gate) is not passed. Code + offline suite are complete. After the user runs the
-P5 gate and it passes (≥ 5 of 10 parked, zero submissions, one tab per job, correct classes for the rest), the
-branch is ready to merge.
+**Ready to merge.** Code + offline suite complete; the user accepted the live evidence as the gate (2026-10-07).
+The one loose end is user-side: the D14/OpenRouter route needs credit before a live run succeeds (or revert
+`chat_route` to `vercel`). No code work blocks the merge. Recorded `run --limit 10` was never run (it writes the
+real tracker/folders) and needs the user's explicit OK.
 
 ## Commands the next session needs
 
