@@ -451,14 +451,13 @@ def system_prompt(free_text_max_chars: int) -> str:
     return PROMPT.read_text().replace("{free_text_max_chars}", str(free_text_max_chars))
 
 
-# A realistic 6-question page through the FreeLLMAPI router, live 2026-10-07: kimi-k3 9.1 s, deepseek-v4-flash
-# 11.1 s, deepseek-v4-pro-0813 21.0 s, glm-5.2 32.2 s, qwen3.8-2.4t-a95b 34.0 s. The slower ones leave little room,
-# which is why the configured rotation leads with the two fast models.
-LLM_INFERENCE_TIMEOUT = 45.0
-
-
+# This module owns no timeout of its own: `timeout=None` leaves it to the Gateway's CHAT timeout, which is
+# `models.freellmapi.timeout` (config.py). The 45 s constant that used to live here was measured on a 6-question
+# page, and a real form page is a different request — 8.8k prompt tokens, and five of nine live calls took longer
+# than 45 s (2026-10-08, the slowest answering at 89.2 s). A caller passes a timeout only to ask for less, as
+# preflight's probe does.
 def call_engine(*, key: str, models: Rotation | str | list[str], system: str, user: dict,
-                url: str = FREELLM_CHAT, post: Callable | None = None, timeout: float = LLM_INFERENCE_TIMEOUT,
+                url: str = FREELLM_CHAT, post: Callable | None = None, timeout: float | None = None,
                 sleep: Callable[[float], None] = time.sleep,
                 schema: dict | None = None, response_cls: type | None = None) -> PageAnswers | ModelResponse:
     """Ask the models in turn (rotation.py) until one gives a valid answer; LLMInferenceError when none does.
@@ -498,15 +497,16 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
     return pa
 
 
-def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post: Callable, timeout: float,
+def _ask_model(model: str, *, key: str, system: str, user: dict, url: str, post: Callable, timeout: float | None,
                sleep: Callable[[float], None], attempts: int | None = None,
                schema: dict | None = None, response_cls: type | None = None) -> PageAnswers | ModelResponse:
     """One model: POST chat/completions through the Gateway, json_schema strict with a json_object fallback on
     HTTP 400. Anything that fails is ModelUnavailable, so the rotation tries the next model; a rejected key or an
     account out of credit is not — the Gateway raises CreditOrKey and stops the run, because no other model on that
-    key would do better. The Gateway holds the one retry layer, the queue and the log (P1 T2); `post`, `timeout` and
-    `sleep` are honoured only when a test passes its own gateway-less sender. `attempts` is 1 while the rotation
-    still has an untried model: handing over is cheaper than waiting to ask a rate-limited model again."""
+    key would do better. The Gateway holds the one retry layer, the queue, the log and the timeout (P1 T2):
+    `timeout=None` is the Gateway's own CHAT timeout, and `post` and `sleep` are honoured only when a test passes
+    its own gateway-less sender. `attempts` is 1 while the rotation still has an untried model: handing over is
+    cheaper than waiting to ask a rate-limited model again."""
     schema = schema or SCHEMA
     response_cls = response_cls or PageAnswers
     fmt: dict = {"type": "json_schema", "json_schema": {"name": "page_answers", "strict": True, "schema": schema}}

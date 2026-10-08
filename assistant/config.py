@@ -47,6 +47,11 @@ class FreeLLMAPI(_Strict):
     routing mode and lets the router do the rest."""
     base_url: str = "http://127.0.0.1:31415/v1"
     llm_inference: tuple[str, ...] = ()
+    # The chat timeout, for every request on this route: LLM inference and the System One chat fallback. A free tier
+    # queues a long prompt behind its other traffic, so the same 8.8k-token form page took anywhere from 6.3 s to
+    # 89.2 s over nine live `auto` calls (2026-10-08) — five of the nine over the 45 s this used to be, which is how
+    # three timeouts in a row stopped a run for a "provider outage" while the router was up and answering.
+    timeout: float = 180.0
 
     @field_validator("llm_inference", mode="before")
     @classmethod

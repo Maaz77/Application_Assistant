@@ -73,8 +73,11 @@ at all: navigation is deterministic (`assistant/navigate.py`) and the only Jev c
 may send: `gateway.required()` raises instead of falling back to an HTTP client, and `tests/test_no_bypass.py`
 seals off every HTTP stack to prove it. The Gateway owns the queue
 (`[limits] max_in_flight`, `min_interval_s`), the **only** retry layer (`max_attempts`, on 429/5xx/timeout/no
-connection, waiting `Retry-After` ≤ 30 s else 2 s then 6 s), the per-kind timeout (System One 20 s, or
-`models.local.timeout` on the local route; chat 45 s), the counters the report prints, and the single call to
+connection, waiting `Retry-After` ≤ 30 s else 2 s then 6 s), the per-kind timeout (both come from the config on a
+run: `models.local.timeout` for System One and `models.freellmapi.timeout` — 180 s — for chat, the 20 s and 45 s in
+`Gateway.__init__` being only what a Gateway built without a config keeps; the 45 s one was raised on 2026-10-08
+after a form page took 66-89 s through the router and three such timeouts stopped a run as a false outage), the
+counters the report prints, and the single call to
 `inference_log`. Do not add a retry, a queue or a log line to a sender — they all belong here.
 
 **The transport** (`gateway._post`) dispatches on the URL path: `/chat/completions` goes through the official

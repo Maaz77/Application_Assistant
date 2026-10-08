@@ -315,6 +315,28 @@ def test_the_outage_names_the_route_and_the_status(server):
         send(gateway, s.url)
 
 
+def test_a_slow_server_times_out_and_is_not_called_unreachable(server):
+    """A server that answers too slowly is not an unreachable one. Every status 0 was labelled "unreachable", which
+    is how the run of 2026-10-08 reported "freellmapi unreachable" while the router was up (gateway._no_answer)."""
+    # One attempt per request: a retry ladder would leave nine held requests queued on a server that answers one
+    # at a time, and the connection refused by that backlog is a different failure from the one under test.
+    s = server(step(hold=0.3))
+    gateway = gw(max_attempts=1, sleep=lambda _: None)
+    send(gateway, s.url, timeout=0.05)
+    send(gateway, s.url, timeout=0.05)
+    with pytest.raises(G.ProviderOutage, match="timed out"):
+        send(gateway, s.url, timeout=0.05)
+
+
+def test_a_server_that_is_really_unreachable_still_says_so():
+    dead = "http://127.0.0.1:9/v1/systemone"          # discard port: nothing listens
+    gateway = gw(sleep=lambda _: None)
+    send(gateway, dead)
+    send(gateway, dead)
+    with pytest.raises(G.ProviderOutage, match="unreachable"):
+        send(gateway, dead)
+
+
 def test_no_key_or_no_credit_stops_the_run_and_is_never_retried(server):
     for status in (401, 402, 403):
         s = server(step(status, {"error": {"message": "nope"}}))
@@ -362,11 +384,16 @@ def test_the_slot_is_free_again_as_soon_as_a_request_is_done(server):
 # ------------------------------------------------------------------ wiring
 
 
-def test_for_config_takes_its_limits_from_the_config():
+def test_for_config_takes_its_limits_and_both_timeouts_from_the_config():
     from assistant import config
     cfg = config.load()
     gateway = G.for_config(cfg)
-    assert gateway.limits is cfg.limits and gateway.timeouts[G.CHAT] == 45.0
+    assert gateway.limits is cfg.limits
+    # Both routes are on this Mac and neither answers in a data-centre's milliseconds, so neither keeps the
+    # hard-coded default: the chat timeout is models.freellmapi.timeout (a 45 s constant in llm_inference.py made a
+    # slow free tier look like an outage, 2026-10-08) and the System One one is models.local.timeout.
+    assert gateway.timeouts[G.CHAT] == cfg.models.freellmapi.timeout
+    assert gateway.timeouts[G.JEV] == cfg.models.local.timeout
 
 
 def test_a_sender_without_a_gateway_is_refused():

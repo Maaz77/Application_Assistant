@@ -131,6 +131,11 @@ def test_an_unknown_p1_key_is_still_an_error(tmp_path):
         config.load(p)
 
 
-def test_the_llm_inference_timeout_is_the_p1_value():
+def test_the_chat_timeout_is_a_config_knob_not_a_constant():
+    """The 45 s constant llm_inference.py used to own was measured on a 6-question page. A real form page is 8.8k
+    prompt tokens and took 66.1 s and 73.0 s on two of five live `auto` calls (2026-10-08), so three pages in a row
+    timed out and stopped the run as a provider outage while the router was up and answering."""
     from assistant import llm_inference
-    assert llm_inference.LLM_INFERENCE_TIMEOUT == 45.0
+    assert not hasattr(llm_inference, "LLM_INFERENCE_TIMEOUT")
+    assert config.FreeLLMAPI().timeout == 180.0
+    assert config.load().models.freellmapi.timeout >= 120.0

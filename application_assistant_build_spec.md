@@ -274,7 +274,7 @@ path). `gateway.required()` raises rather than fall back to an HTTP client of it
 | never retried | — | every other 4xx, and 401/402/403 (§4.3) |
 | wait before a retry | `Retry-After` if ≤ 30 s, else | 2 s, then 6 s |
 | timeout, System One | `gateway.timeouts[JEV]` | 20 s, or `models.local.timeout` on the local route |
-| timeout, chat | `gateway.timeouts[CHAT]` | 45 s (`LLM_INFERENCE_TIMEOUT`) |
+| timeout, chat | `gateway.timeouts[CHAT]` | 45 s, or `models.freellmapi.timeout` (180 s) on a run |
 | questions per System One request | `jev.max_questions_per_request` | 24; above it the judgment is split and the parts go one after another |
 
 - **A model rotation hands over before it retries.** A chat request passes `attempts=1` while the rotation still has
@@ -517,7 +517,7 @@ Derived answers:
 - **Per model:**
   - JSON-schema output, falling back to `json_object` on HTTP 400;
   - a 429 with `Retry-After` ≤ `RETRY_AFTER_MAX = 30` s is waited out once;
-  - any other failure hands over to the next model with no wait: 429/5xx, a 200 with an error body, a timeout (`LLM_INFERENCE_TIMEOUT = 120` s), or invalid output;
+  - any other failure hands over to the next model with no wait: 429/5xx, a 200 with an error body, a timeout (`models.freellmapi.timeout`, 180 s), or invalid output;
   - a 401 fails at once, because every model would fail the same way.
 - **When none answers:** `LLMInferenceError("LLM inference: none of N models answered (<each reason>)")`, and the job goes to Needs Attention (class `llm_inference`).
 - **The text helper** rotates the same way (§3.3).

@@ -2348,3 +2348,69 @@ carries `{id, host}` for all seven jobs.
 One cosmetic fix on the way out: the external path put `"<cls>: <cue>"` in the message while the reason code
 already carries the class, so the report read `Reason: closed — closed: the site says…` and
 `Reason: signup — signup: site asks…`. `run_external` now passes the cue alone.
+
+## 2026-10-08 — run 20261008-202134: the chat timeout was under the router's real latency, and a slow free tier read as an outage
+
+```
+⚠ needs attention  Linda AI – Founding Software Engineer: LLM inference: none of 1 models answered
+                                                          (auto: HTTP 0 APITimeoutError: Request timed out.)
+⚠ needs attention  The Flex – Senior Software Engineer:   the same
+■ run stopped: provider outage — freellmapi unreachable: 3 requests in a row failed
+```
+
+The router was up the whole time, and every request it was blamed for answers when it is given long enough. The
+three failed requests are 9 timed-out attempts in the per-job logs — three attempts each at 45 s, which is also
+what the timings show (The Flex 146 s = 3×45 + 2 + 6 s of backoff).
+
+Replaying the exact request bodies out of `runs/20261008-202134/*/llm_inference_logs.json` against the live router,
+same key, same strict `ANSWER_SCHEMA`, `max_tokens` 8192, `reasoning_effort = "none"` — The Flex's page (33,791
+prompt chars = 8,791 prompt tokens, 1,196 completion tokens), nine calls on `auto`, one at a time:
+
+| # | Time | HTTP | Routed to |
+|---|---|---|---|
+| 1 | 73.0 s | 200 | google / `gemini-3-flash-preview` |
+| 2 | 66.1 s | 200 | google / `gemini-3-flash-preview` |
+| 3 | 10.4 s | 200 | nvidia / `poolside/laguna-xs-2.1` |
+| 4 | 89.2 s | 200 | cloudflare / `@cf/zai-org/glm-4.7-flash` |
+| 5 | 60.6 s | **502** | — (the router gave up on its upstream) |
+| 6 | 6.3 s | 200 | google / `gemini-3-flash-preview` |
+| 7 | 38.6 s | 200 | cloudflare / `@cf/zai-org/glm-4.7-flash` |
+| 8 | 12.6 s | 200 | nvidia / `poolside/laguna-xs-2.1` |
+| 9 | 67.1 s | 200 | nvidia / `meta/muse-glimmer-30b` |
+
+Linda AI's page (27,141 chars) answered in 2.6 s and The Flex – Full-Stack's (34,981 chars) in 5.4 s, both 200 and
+schema-valid. So **the page is not what makes a request slow**: the same `gemini-3-flash-preview` answered the same
+8.8k-token body in 6.3 s and in 73.0 s. What varies is which free tier `auto` lands on and how much of someone
+else's traffic is queued in front of this request. That is a wait to be sat out, not a latency to be predicted —
+and it is precisely what the router is for, so there is nothing to route around on this side.
+
+**45 s was measured on the wrong workload.** It came from the 6-question page of 2026-10-07 (the table above: 1.2
+to 42.5 s) and from the 5-question routing trials (`auto` 4.8 / 6.0 / 5.2 s). A real form page is 8.8k prompt
+tokens, and **five of the nine calls above crossed 45 s**.
+
+Two things changed:
+
+- **`[models.freellmapi] timeout = 180.0`**, the one chat timeout, reaching every chat request (LLM inference and
+  the System One chat fallback) through `gateway.for_config`, exactly as `[models.local] timeout` already reached
+  the Kev route. `llm_inference.LLM_INFERENCE_TIMEOUT` is gone: a second source of truth was what made raising the
+  Gateway's own 45 s pointless, because `call_engine` passed its constant over the top of it. 180 s is twice the
+  slowest answer measured; a caller now passes a timeout only to ask for *less*, as preflight's 60 s probe does.
+- **A timeout is no longer reported as an unreachable server** (`gateway._no_answer`). Status 0 covers both, and
+  labelling both "unreachable" is what put "freellmapi unreachable" on a report while the router was answering.
+  The message now reads `provider outage — freellmapi timed out: 3 requests in a row failed`.
+
+Verified on the real path, not on the replay: `config.load()` -> `gateway.for_config` -> `llm_inference.call_engine`
+with the body that failed the run answered **17 answers in 48.9 s on one attempt** (`CHAT` timeout 180 s, `JEV`
+120 s, 0 failures, breaker untripped). An earlier call of the same kind needed all three attempts and 311.7 s, which
+is the retry ladder doing its job rather than multiplying a timeout: the third attempt answered. At 45 s both of
+those requests were failures.
+
+The breaker itself was not touched: three timed-out requests in a row is still a stopped run, but a timeout now
+means the request really was stuck rather than merely slower than a number measured on a smaller page. Retrying a
+timeout was also left alone — the ladder is 3 attempts, so a genuinely hung route now costs 548 s before the job is
+recorded, against 135 s before.
+
+The three jobs the run gave up on are in `Needs-Attention/` with their records written, and their reason class is
+exactly what separates them from the real outcomes: `requeue --class llm_inference` brings those three back to
+`Applications/` with `Status = Resume Built` and leaves Mastercard and Toast (`closed`) and Genesys (`signup`)
+where they belong.

@@ -246,7 +246,7 @@ class Gateway:
                 break
             self.sleep(self._wait(attempt, response))
         where = f"{inference_log.gateway_of(url)} HTTP {status}" if status else \
-            f"{inference_log.gateway_of(url)} unreachable"
+            f"{inference_log.gateway_of(url)} {_no_answer(response)}"
         self._last_failure = where
         if not defer:
             self.note_failure(True, where)
@@ -354,6 +354,13 @@ def _provider_message(response: Any) -> str:
     return str(err or "")[:160]
 
 
+def _no_answer(response: Any) -> str:
+    """How a status-0 attempt failed, for the outage message. A server that answers slowly is not an unreachable
+    one: the run of 2026-10-08 reported "freellmapi unreachable" while the router was up and answering every
+    request it was given long enough to finish."""
+    return "timed out" if "Timeout" in _transport_reason(response) else "unreachable"
+
+
 def _transport_reason(response: Any) -> str:
     if isinstance(response, dict):
         err = response.get("error")
@@ -393,6 +400,9 @@ def private(post: Callable | None = None, *, sleep: Callable[[float], None] = ti
 
 
 def for_config(cfg, **kwargs) -> Gateway:
-    """The run's Gateway. The System One model runs on this machine and answers in seconds, not in a data-centre's
-    milliseconds, so it gets models.local.timeout rather than the 20 s default a cloud route was given."""
-    return Gateway(limits=cfg.limits, timeouts={JEV: cfg.models.local.timeout}, **kwargs)
+    """The run's Gateway. Both timeouts come from the config, because both routes are slower than the data-centre
+    milliseconds the defaults were written for: models.local.timeout for the Kev server on this Mac, and
+    models.freellmapi.timeout for the router, which queues a long prompt behind a free tier's other traffic. These
+    are the only chat and System One timeouts there are — a sender passes one of its own only to ask for less."""
+    return Gateway(limits=cfg.limits,
+                   timeouts={JEV: cfg.models.local.timeout, CHAT: cfg.models.freellmapi.timeout}, **kwargs)
