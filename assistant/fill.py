@@ -18,7 +18,8 @@ from typing import Callable
 
 from assistant import decide, navigate, pages, tabs, guard, widgets
 from assistant.llm_inference import (LONG_TEXT, LLMInferenceError, PageAnswers, Question, checked_option,
-                               judge_questions, uncovered_optional, uncovered_required)
+                               judge_questions, uncovered_optional, uncovered_required,
+                               wants_checked)
 from assistant.decide import DecisionError
 from assistant.blockers import Attempts, NeedsAttention, OpenQuestion, Parked, RestartFromEntry, StopRun, ParkedAtQuestion
 from assistant.guard import label_of
@@ -189,8 +190,8 @@ def _goal_items(pa: PageAnswers, p: Page) -> list[Question]:
             continue
         el = by_ref.get(q.ref or "")
         opt = by_ref.get(q.option_ref or "")
-        if opt is not None and opt.checked:
-            continue
+        if opt is not None and bool(opt.checked) == wants_checked(q, opt):
+            continue            # already in the state the answer wants (a tick OR a clear)
         if el is not None and opt is None and pages.norm_label(el.current or el.value) == pages.norm_label(q.answer):
             continue
         items.append(q)
@@ -204,7 +205,6 @@ OPTION_REF_RE = re.compile(r"^(e\d+):\d+$")     # an option of a native <select>
 
 
 TOGGLES = {"radio", "checkbox", "switch"}
-_UNCHECKED = {"no", "false", "off", "unchecked", "decline", "none"}   # a checkbox answer that means clear it
 LISTS = {"combobox", "listbox"}
 FILL_OPS = {
     "type": "Type the answer into the field: a text box, a text area or a number field.",
@@ -326,12 +326,7 @@ def _carry_out(q: Question, how: str | None, field: str | None, option: str | No
     if how == "check":
         t = by_ref.get(option or "")
         if t is not None and t.role in TOGGLES:
-            # A self-labelled checkbox/switch is answered with its own label or "No", so "No" means UNCHECK.
-            # A radio's option_ref already IS the option to pick, so it is always a check (live 2026-10-08:
-            # with `state` hard-coded True a toggle could only ever tick a box, so LinkedIn's
-            # "Follow <company>" default could not be declined).
-            off = t.role != "radio" and pages.norm_label(q.answer) in _UNCHECKED
-            return {"op": "toggle", "ref": t.ref, "state": not off}
+            return {"op": "toggle", "ref": t.ref, "state": wants_checked(q, t)}
     return None
 
 
@@ -381,7 +376,7 @@ def mismatches(items: list[Question], p: Page) -> list[Question]:
     def holds(q: Question) -> bool:
         opt = by_ref.get(q.option_ref or "")
         if opt is not None:
-            return bool(opt.checked)
+            return bool(opt.checked) == wants_checked(q, opt)
         if q.option_ref:
             # A <select>'s option is not a top-level element: its ref is "<combobox>:<n>", so the lookup above
             # always misses and the radio-group fallback below can never answer for it. The choice shows on the
@@ -398,6 +393,10 @@ def mismatches(items: list[Question], p: Page) -> list[Question]:
         e = by_ref.get(q.ref or "")
         if e is None:
             return False
+        if e.role in ("checkbox", "switch"):
+            # A toggle holds by its CHECKED state. It has no `value`/`current` to read, so without this a
+            # checkbox addressed by `ref` alone could never read back and every answer to one was a mismatch.
+            return bool(e.checked) == wants_checked(q, e)
         held = (e.current or e.value or "").strip()
         return bool(held) and _fuzzy_holds(q.answer or "", held)
 

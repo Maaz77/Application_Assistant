@@ -150,7 +150,10 @@ def _hand_off(ctx) -> pages.Page:
         # A consent modal over the landed form makes pages.covered true, so form_is_here stays false and
         # the hand-off would time out on a form that is right there. Decline it; the next read sees the
         # form (live 2026-10-08, careers.toasttab.com's "Cookie consent" <dialog>).
-        navigate.decline_consent(ctx, p)
+        if navigate.decline_consent(ctx, p, clicked):
+            q = ctx.read()
+            if pages.is_alarm(q):          # every other click in this module checks; this one must too
+                raise StopRun(f"ALARM: confirmation text after a consent click on {q.url}")
         if pages.form_is_here(p) and "linkedin" not in p.host:          # same-tab navigation to the form
             return p
         il = _leaving_control(p)

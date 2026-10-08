@@ -29,6 +29,8 @@ def engine(by_title: dict):
                 q["ref"] = names.get(q["question"])
             if q["option_ref"] == "auto":
                 q["option_ref"] = names.get(q["answer"])
+            if q["option_ref"] == "same":
+                q["option_ref"] = q["ref"]      # what _set_option_refs does for a checkbox/switch
             qs.append(q)
         return PageAnswers.model_validate({"questions": qs})
     return fn
@@ -523,3 +525,65 @@ def test_a_checkbox_answered_no_is_unticked_but_a_radio_is_always_clicked(tmp_pa
                     options=["Yes", "No"], required=True, answer="No", source="profile", quote="x",
                     relies_on=None)
     assert _carry_out(auth, "check", None, "e151", by_ref) == {"op": "toggle", "ref": "e151", "state": True}
+
+
+def test_an_unanswered_required_radio_group_parks_at_the_question(tmp_path):
+    """US-001's behaviour end to end: with the group marked required (extract_questions does that from the
+    page's asterisk — see test_answers.py) and no answer, the loop must raise ParkedAtQuestion and park with
+    the question noted, NOT click Review and report "the Easy Apply step did not advance" (live 2026-10-08,
+    Linda AI). `_starred_in_text` is unit-tested separately; what this pins is the loop's reaction."""
+    answers = {"Data Engineer | Acme | LinkedIn": [
+        Q("City", "Milan", ref="auto"),
+        Q("Are you comfortable working in an onsite setting?", None, kind="choice",
+          options=["Yes", "No"], ref=None, option_ref=None, source=None, required=True),
+        Q("Resume", None, kind="file", ref="auto", source=None)]}
+    site = single_dialog()
+    onsite = "Are you comfortable working in an onsite setting?"
+    site["s1"].els[1:1] = [El("radio", onsite, label="Yes", dialog="d", group=onsite),
+                           El("radio", onsite, label="No", dialog="d", group=onsite)]
+    browser, fake = fake_browser(site, "job")
+    result = run_pages(ctx_for(browser, answers, tmp_path))
+    assert isinstance(result, Parked) and fake.sent == []
+    assert [o.question for o in result.parked_at] == [onsite]
+    assert all(e.checked is not True for e in site["s1"].els if e.role == "radio")   # nothing was guessed
+
+
+def test_the_follow_checkbox_is_actually_unticked_end_to_end(tmp_path):
+    """The reviewer's finding: FOUR places decide what a toggle answer means, and only _carry_out had been
+    taught to untick — `_set_option_refs` nulled the "No", `_goal_items` skipped an already-checked box and
+    `mismatches` read `checked` as success. So the box stayed ticked AND went back on the Scratch Pad. This
+    drives the whole loop over a pre-ticked box and asserts the live DOM state, not an intermediate."""
+    follow = "Follow Acme to stay up to date with their page"
+    answers = {"Data Engineer | Acme | LinkedIn": [
+        Q("City", "Milan", ref="auto"),
+        Q(follow, "No", kind="choice", options=[follow, "No"], ref="auto", option_ref="same",
+          source="computed", required=False),
+        Q("Resume", None, kind="file", ref="auto", source=None)]}
+    site = single_dialog()
+    box = El("checkbox", follow, dialog="d", checked=True)
+    site["s1"].els.insert(1, box)
+    browser, fake = fake_browser(site, "job")
+    parked = run_pages(ctx_for(browser, answers, tmp_path))
+    assert isinstance(parked, Parked) and fake.sent == []
+    assert box.checked is False                                  # unticked on the page
+    assert follow not in [o.question for o in parked.optional_empty]      # and off the Scratch Pad
+
+
+def test_a_checkbox_whose_own_label_means_no_is_still_ticked(tmp_path):
+    """A word list got this backwards: EEO forms use "Decline" and "None" as the OPTION TEXT, so answering
+    such a checkbox with its own label means TICK it. The own-label test has to come before the deny list."""
+    from assistant.browser import Element
+    from assistant.llm_inference import Question, wants_checked
+    for label in ("Decline", "None", "No"):
+        el = Element(ref="e7", role="checkbox", name=label, tag="INPUT", type="checkbox")
+        q = Question(id="c_e7", question=label, kind="choice", ref="e7", option_ref="e7",
+                     options=[label, "No"], required=False, answer=label, source="profile", quote="x",
+                     relies_on=None)
+        assert wants_checked(q, el) is True, label
+    # A radio's answer is always its own option label, so "No" there is a click, never a clear.
+    no_radio = Element(ref="e151", role="radio", name="Are you legally authorized to work in Ireland?",
+                       label="No", tag="DIV")
+    auth = Question(id="r_e151", question=no_radio.name, kind="choice", ref=None, option_ref="e151",
+                    options=["Yes", "No"], required=True, answer="No", source="profile", quote="x",
+                    relies_on=None)
+    assert wants_checked(auth, no_radio) is True

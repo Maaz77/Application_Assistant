@@ -71,26 +71,32 @@ class TabBook:
                 closed.append(tid)
         return closed
 
-    def close_stale(self, session: str, keep: str, *, job_key: str = "", remembered: str = "") -> list[str]:
-        """Close the tabs an EARLIER run of THIS job left open, and nothing else.
+    def close_stale(self, session: str, keep: str, *, remembered: str = "", host: str = "") -> list[str]:
+        """Close the ONE tab an earlier run of this job was left on, and nothing else.
 
-        Two narrow rules, because the two kinds of leftover look different: `remembered` is the exact tab id
-        TabMemory recorded when the job was last released (the only way to recognise an adopted ATS tab, whose
-        URL carries no job id), and a LinkedIn posting tab is recognised by `/jobs/view/<job_key>` in its URL,
-        which needs no state and so works on the first run after this fix. `keep` — the tab this run is
-        driving — is never closed. A failure is ignored: the user may have closed the tab already."""
-        closed = []
+        `remembered` is the exact target id TabMemory recorded when this job was last released — the only
+        evidence that a tab is ours, and the only way to recognise an adopted ATS tab, whose URL carries no
+        job id. `host` is that tab's host at the time, re-checked here: a target id outlives the page, so a
+        tab that has since been navigated somewhere else is left alone.
+
+        An earlier version also closed any tab whose URL contained `/jobs/view/<job_key>`. That had no
+        ownership test at all, and `list_tabs` is every tab in the user's Chrome: it would close the posting
+        the user had open themselves, which is how they queue a job in the first place. It broke the promise
+        at the top of this module, so it is gone. `keep` — the tab this run is driving — is never closed, and
+        a failed close is ignored because the user may have closed it already."""
+        if not remembered or remembered == keep:
+            return []
         for t in self.browser.list_tabs():
-            tid = t["target_id"]
-            if tid == keep or not tid:
+            if t["target_id"] != remembered:
                 continue
-            if tid == remembered or (job_key and f"/jobs/view/{job_key}" in (t.get("url") or "")):
-                try:
-                    self.browser.close_tab_id(session, tid)
-                except (DriverError, RuntimeError):
-                    continue
-                closed.append(tid)
-        return closed
+            if host and host not in (t.get("url") or ""):
+                return []                       # the tab has moved on; it is no longer the one we parked
+            try:
+                self.browser.close_tab_id(session, remembered)
+            except (DriverError, RuntimeError):
+                return []
+            return [remembered]
+        return []
 
     def release(self, session: str) -> None:
         """Drop the session's bookkeeping and leave its tab open (D13). No scratch tab, no close (P2)."""
@@ -124,12 +130,16 @@ class TabMemory:
             return {}
         return data if isinstance(data, dict) else {}
 
-    def get(self, key: str) -> str:
-        return str(self._read().get(key) or "")
+    def get(self, key: str) -> tuple[str, str]:
+        """(target_id, host) for this job's last tab, or ("", "")."""
+        entry = self._read().get(key)
+        if isinstance(entry, dict):
+            return str(entry.get("id") or ""), str(entry.get("host") or "")
+        return str(entry or ""), ""          # a file written before the host was recorded
 
-    def remember(self, key: str, target_id: str) -> None:
+    def remember(self, key: str, target_id: str, host: str = "") -> None:
         data = self._read()
-        data[key] = target_id
+        data[key] = {"id": target_id, "host": host}
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n", encoding="utf-8")

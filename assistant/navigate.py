@@ -24,10 +24,10 @@ APPLY_RE = re.compile(r"^\s*apply\b", re.I)
 # "no way to start the application", and so looked requeueable when the job is simply shut).
 CLOSED_RE = re.compile(r"(no longer|not currently) accepting applications|this job is (closed|no longer)", re.I)
 APPLIED_RE = re.compile(r"\bapplied\b|application submitted|see application", re.I)
-COOKIE_REJECT_RE = re.compile(r"^\s*(reject|decline|refuse|only necessary|necessary (cookies )?only|"
+COOKIE_REJECT_RE = re.compile(r"^\s*(reject|decline|only necessary|refuse|"
                               r"(i )?do ?n[o']t accept)\b", re.I)
 # An open modal dialog that is a cookie/consent dialog rather than the application's own.
-CONSENT_DIALOG_RE = re.compile(r"cookie|consent|privacy preference|gdpr", re.I)
+CONSENT_DIALOG_RE = re.compile(r"cookie|consent", re.I)
 
 DIALOG_WAIT = 8            # s: LinkedIn shows the Easy Apply dialog a moment after the click
 ADVANCE_WAIT = 8          # s: wait for the dialog to change after an advance click
@@ -71,20 +71,30 @@ def cookie_reject(p: pages.Page):
     inside an open consent modal (Toast's own <dialog>, which no CMP selector matches)."""
     # ponytail: reject/decline labels only. A consent wall offering just Accept and Close stays stuck —
     # add "close" here when a live site needs it, and keep the privacy-preserving option first.
-    modal = consent_modal(p)
+    #
+    # `e.dialog` is set for ANY ancestor dialog, modal or not, while `p.dialogs` lists only the modal ones.
+    # So an aria-modal consent overlay alongside a non-modal div[role=dialog] application panel would let
+    # the modal branch pick a control out of the APPLICATION panel. If more than one dialog is contributing
+    # elements we cannot say which is the consent one, so we decline to guess.
+    modal = consent_modal(p) and len({e.dialog for e in p.elements if e.dialog}) <= 1
     return next((e for e in p.elements
                  if e.role in {"button", "link"} and (e.consent or (modal and e.dialog))
                  and COOKIE_REJECT_RE.search(e.name or "")), None)
 
 
-def decline_consent(ctx, p: pages.Page) -> bool:
-    """Click a cookie-consent reject when one is up. True if something was clicked, so the caller re-reads
-    and looks again. Used by both entry (LinkedIn) and the external ATS loop."""
+def decline_consent(ctx, p: pages.Page, clicked: set[str] | None = None) -> bool:
+    """Click a cookie-consent reject when one is up. True only if the click was actually CARRIED OUT, so a
+    control the never-submit guard refuses (a native <dialog> consent often uses `<form method=dialog>` with
+    untyped buttons, which the guard reads as structural submits) does not look like a successful decline and
+    send the caller round the loop until it gives up as "not making progress". `clicked` lets a polling
+    caller avoid re-clicking the same control every pass. Used by entry, the external loop and the hand-off."""
     c = cookie_reject(p)
-    if c is None:
+    if c is None or (clicked is not None and c.ref in clicked):
         return False
-    ctx.browser.act([{"op": "click", "ref": c.ref}], ctx.session, p.table, stop_on_error=False)
-    return True
+    if clicked is not None:
+        clicked.add(c.ref)
+    out = ctx.browser.act([{"op": "click", "ref": c.ref}], ctx.session, p.table, stop_on_error=False)
+    return not out.lstrip().startswith("0/")
 
 
 def in_dialog(p: pages.Page) -> list:

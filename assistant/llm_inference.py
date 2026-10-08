@@ -259,39 +259,6 @@ def checked_option(question: str, p: Page) -> str | None:
 
 
 NO_LABEL = "Select one"          # the placeholder for a radio group whose question text we cannot find
-_LABEL_MAX = 120
-
-
-def _label_from_text(options: list[str], p: Page) -> str:
-    """The question a radio group's own elements do not carry, read off the page text.
-
-    Ashby groups its demographic radios under a compound-UUID id with `label`, `context` and `scope` all
-    empty, so `_group_label` fell back to the placeholder and the model was asked SEVEN questions all titled
-    "Select one" (live 2026-10-08, The Flex). It answered them anyway: `Gender -> Male` citing the candidate's
-    own name as the quote, and the same question got opposite answers on two forms of the same company.
-
-    An ATS renders "<question> <option1> <option2> ...", so the words immediately before the option run are
-    the question. The window reaches back into the previous field, so everything up to the last OTHER element
-    label in it is cut. Returns "" when the option run is not in the text at all — the observation's text is
-    capped, so for a group below that cap there is genuinely no label anywhere in what we collected, and
-    `check_answers` then refuses to answer it rather than guessing."""
-    # Matched case-insensitively but SLICED from the original, so the question keeps the page's own casing.
-    flat = re.sub(r"\s+", " ", p.text or "").strip()
-    low = flat.lower()
-    run = pages.norm_label(" ".join(options))
-    if not run or run not in low:
-        return ""
-    head = flat[: low.index(run)]
-    cut = 0
-    for e in p.elements:
-        for other in (e.name, e.label):
-            n = pages.norm_label(other).strip(" *?:|-")
-            if len(n) > 2 and n != head.strip().lower():
-                k = head.lower().rfind(n)
-                if k >= 0:
-                    cut = max(cut, k + len(n))
-    head = head[cut:].strip(" *?:|-\u2022")
-    return head if 2 <= len(head) <= _LABEL_MAX else ""
 
 
 def _group_label(group_key: str, members: list) -> str:
@@ -325,9 +292,11 @@ def _radio_q(group_key: str, members: list, p: Page) -> tuple[str, list[str], di
             unique.append(o)
             seen.add(o)
     if q_text == NO_LABEL:
-        # Last resort: the options at least identify the question in the record and on the Scratch Pad,
-        # where a bare "Select one — A: ___" told the user nothing (live 2026-10-08).
-        q_text = _label_from_text(unique, p) or f"{NO_LABEL} ({' / '.join(unique[:6])})"
+        # The form gives this group no question text at all (Ashby's demographic radios: a compound-UUID
+        # group id with label, context and scope all empty). The options at least identify it in the record
+        # and on the Scratch Pad, where a bare "Select one — A: ___" told the user nothing, and
+        # `check_answers` refuses to answer it rather than guessing (live 2026-10-08, The Flex).
+        q_text = f"{NO_LABEL} ({' / '.join(unique[:6])})"
 
     omap: dict[str, str] = {}
     for m in members:
@@ -444,10 +413,10 @@ def _set_option_refs(pa: PageAnswers, option_maps: dict[str, dict[str, str]], p:
         if el is None:
             continue
         if el.role in ("checkbox", "switch"):
-            if norm(q.answer).lower() == "no":
-                q.answer = None
-            else:
-                q.option_ref = q.ref
+            # A "No" here is a real answer — clear the box — not a missing one. Nulling it made
+            # `decline_follow_the_company` inert and put the box back on the Scratch Pad (live 2026-10-08);
+            # `wants_checked` is what the fill sites read to tell check from clear.
+            q.option_ref = q.ref
         elif el.options:
             for opt in el.options:
                 if opt.label and norm(opt.label).lower() == norm(q.answer).lower() and opt.ref:
@@ -730,22 +699,51 @@ def _held(e, v: Verdicts) -> str:
     return "" if norm(held) in v.placeholders else held
 
 
+# A question the candidate's own contact details DO answer — including "where are you based", which is what
+# an address is evidence for (live 2026-10-08: Toast's "Are you currently based in Ireland? (required)" was
+# answered "No" from `Address: Via Padova, Milano, MI, Italy, 20132`, which is exactly right).
 _CONTACT_Q_RE = re.compile(r"\b(full name|first name|last name|given name|family name|name|e-?mail|phone|"
-                           r"mobile|cell|telephone|address|location|city|country|postcode|zip)\b", re.I)
-# A quote that is only a contact detail: an email, a phone number, or a line that announces itself as one.
+                           r"mobile|cell|telephone|address|location|located|city|country|postcode|zip|"
+                           r"based|reside|resident|residence)\b", re.I)
+# A quote that is only a contact detail, by announcing itself as one. Deliberately NOT a bare email/phone
+# value match: `_PHONE_V` fullmatches a résumé date range like "2019 - 2023", which would have dropped a
+# years-of-experience answer, and the bare-value case has no live evidence behind it.
 _CONTACT_QUOTE_RE = re.compile(r"^(address|location|phone|mobile|cell|telephone|e-?mail)\b\s*[:\-]", re.I)
 
 
+_DENY = {"no", "false", "off", "unchecked"}      # a toggle answer that means CLEAR the control
+
+
+def wants_checked(q: Question, el) -> bool:
+    """Whether this toggle answer means CHECK the control or CLEAR it.
+
+    FOUR places decide this (`_set_option_refs` below, `fill._goal_items`, `fill._carry_out`,
+    `fill.mismatches`), and every one of them used to assume "a toggle is only ever ticked". That is why
+    LinkedIn's "Follow <company>" default could not be declined: one site was taught to untick and the other
+    three still skipped, nulled or mis-read the answer (live 2026-10-08).
+
+    The own-label test comes FIRST and is what makes a radio safe: a radio's answer is always its own option
+    label, so "No" on a Yes/No group means click the No radio, never clear it. A checkbox or switch answered
+    with something else that plainly means no is a clear — which also keeps an EEO checkbox whose own label
+    is "Decline" or "None" working, where a word-list check got it backwards."""
+    answer = pages.norm_label(q.answer)
+    own = pages.norm_label(getattr(el, "label", "") or getattr(el, "name", ""))
+    if answer and answer == own:
+        return True
+    return answer not in _DENY
+
+
 def _unlabelled(q: Question) -> bool:
-    """True when this question carries only the NO_LABEL placeholder (plus, maybe, its own option list)."""
-    return pages.norm_label(q.question).startswith(pages.norm_label(NO_LABEL))
+    """True when this question carries only the NO_LABEL placeholder, or the placeholder plus its own option
+    list. Matched exactly: `startswith` also swallowed "Select one option that best describes your
+    race/ethnicity", which is a labelled, answerable question and standard on Workday and Greenhouse."""
+    label = pages.norm_label(q.question)
+    base = pages.norm_label(NO_LABEL)
+    return label == base or label.startswith(base + " (")
 
 
 def _contact_quote(quote: str | None) -> bool:
-    q = (quote or "").strip()
-    if not q:
-        return False
-    return bool(_CONTACT_QUOTE_RE.match(q) or _EMAIL_V.fullmatch(q) or _PHONE_V.fullmatch(q))
+    return bool(_CONTACT_QUOTE_RE.match((quote or "").strip()))
 
 
 def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today: date,

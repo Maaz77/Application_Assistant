@@ -271,3 +271,39 @@ def test_the_apply_with_linkedin_widget_host_is_not_a_hosted_form():
     assert pages._FORM_IFRAME_RE.search(real) and not pages._NON_FORM_IFRAME_RE.search(real)
     greenhouse = "https://boards.greenhouse.io/embed/job_app?token=123"
     assert pages._FORM_IFRAME_RE.search(greenhouse) and not pages._NON_FORM_IFRAME_RE.search(greenhouse)
+
+
+def test_consent_is_not_declined_while_a_second_dialog_contributes_elements():
+    """`e.dialog` is set for ANY ancestor dialog, modal or not, while `Page.dialogs` lists only the modal
+    ones. So an aria-modal consent overlay alongside a non-modal div[role=dialog] application panel let the
+    modal branch pick a control out of the APPLICATION panel — the reviewer reproduced
+    `cookie_reject -> 'Decline this offer' (dialog='appForm')`. If more than one dialog is contributing
+    elements we cannot say which is the consent one, so we decline to guess."""
+    from assistant import navigate
+    els = [Element(ref="e1", role="button", name="Decline", dialog="cookieBanner"),
+           Element(ref="e2", role="button", name="Decline this offer", dialog="appForm")]
+    p = page(els, text="We use cookies", dialogs=["Cookie consent"])
+    assert navigate.consent_modal(p) is True          # the only MODAL dialog is the consent one
+    assert navigate.cookie_reject(p) is None          # but two dialogs are listed, so no guess is made
+    # One dialog contributing elements is the Toast shape, and it still works.
+    assert navigate.cookie_reject(page([els[0]], text="We use cookies", dialogs=["Cookie consent"])) is not None
+
+
+def test_a_consent_click_the_guard_refuses_is_not_reported_as_declined():
+    """A native <dialog> consent often uses `<form method=dialog>` with untyped buttons, which the guard
+    reads as structural submits. Returning True for a refused click sent run_external round its loop until it
+    gave up as "not making progress" — a misleading diagnosis for "the guard refused the consent button"."""
+    from types import SimpleNamespace
+    from assistant import navigate
+    refused = Element(ref="e1", role="button", name="Decline", tag="BUTTON", form="consentForm",
+                      dialog="cookieBanner")
+    p = page([refused], text="We use cookies", dialogs=["Cookie consent"])
+    assert guard.never_click_element(refused) is not None            # structural submit inside a form
+    calls = []
+
+    def act(ops, session, table, **kw):
+        calls.append(ops)
+        return "0/1 ops ok  (stopped early)\n  x click e1 → Decline  needs_confirmation: refused"
+
+    ctx = SimpleNamespace(browser=SimpleNamespace(act=act), session="t")
+    assert navigate.decline_consent(ctx, p) is False and len(calls) == 1

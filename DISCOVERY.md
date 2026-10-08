@@ -2036,12 +2036,12 @@ model was guessing which question it was being asked, independently, twice.
 
 **Fixes (user decision 2026-10-08: strict — an answer that cannot be checked is left to the user).**
 
-1. `_label_from_text(options, p)` recovers the question from the page text, which renders
-   `"<question> <option1> <option2> …"`: take the words before the option run and cut everything up to the
-   last *other* element label in that window, so the previous field's label is not dragged in. Matched
-   case-insensitively but sliced from the original text, so the label keeps the page's own casing (`Gender`,
-   not `gender`). The observation's text is capped, so this recovers the first group on the Flex form and
-   nothing below the cap — for those there is genuinely no label anywhere in what the program collected.
+1. ~~`_label_from_text(options, p)` recovers the question from the page text.~~ **Written, then deleted
+   the same day — see the reviewer section below.** It matched the FIRST occurrence of the option run, so
+   two unlabelled Yes/No groups both took the first group's question: a felony question would have been
+   answered, confidently and under the user's name, as a visa-sponsorship question, and written into
+   `answers.json` under the wrong label. That is worse than the bug it fixed, and the refusal in (3)
+   cannot catch it — a recovered label is no longer the placeholder.
 2. Such a group's placeholder now names its own options —
    `Select one (Single / Married / I prefer not to say / Married with kids)` — because the earlier reports
    listed `Q: Select one — A: ___` on the Scratch Pad, which told the user nothing.
@@ -2058,6 +2058,10 @@ model was guessing which question it was being asked, independently, twice.
 
 ### The "Follow <company>" checkbox is declined, and a checkbox can finally be unticked
 
+**Falsified by review, then actually fixed — see the reviewer section below: the decline was inert,
+because four separate places decide what a toggle answer means and only one of them had been
+taught about unticking. The box stayed ticked AND stayed on the Scratch Pad.**
+
 `decline_follow_the_company` answers a `^follow\b` checkbox as unchecked, `source: computed`, after all the
 checks — so it leaves the Scratch Pad and submitting no longer follows the company silently (user decision
 2026-10-08). That exposed a second gap: `fill._carry_out`'s `check` branch hard-coded `"state": True`, so a
@@ -2065,3 +2069,132 @@ toggle could only ever **tick** a box and the decline could not have been carrie
 **checkbox or switch** is answered `no/false/off/unchecked/decline/none`. A radio keeps `state: True`
 unconditionally, because a radio's `option_ref` already *is* the option to pick — "No" there means click the
 No radio, not clear it.
+
+## 2026-10-08 — reviewer pass on `0362f98..90cebe8`: three of the last commit's five changes were wrong
+
+An architect review of the five fix commits found **never-submit intact** — no path by which
+`navigate.decline_consent` can click a transmitting control; `guard.REFUSE_LABEL_RE` and the structural-submit
+rule block every shape `COOKIE_REJECT_RE` can reach, including the adversarial `"Decline and submit
+application"`, which the reviewer checked directly. Both suites pass when run independently.
+
+It also found a clean pattern worth recording: **the three commits with a live run behind them each landed
+clean; the one without a live run (`90cebe8`) carried three defects**, two of which a run against the same
+three jobs would have shown in its first minute. Unit tests written from captured data proved the mechanism
+and missed the integration.
+
+### `_label_from_text` relabelled the wrong question — deleted
+
+`low.index(run)` takes the **first** occurrence of the option run, so two unlabelled Yes/No groups both get
+the first group's question:
+
+```
+text: "Do you require visa sponsorship to work in Ireland? Yes No
+       Have you ever been convicted of a felony? Yes No"
+group 1 -> 'Do you require visa sponsorship to work in Ireland'   unlabelled=False
+group 2 -> 'Do you require visa sponsorship to work in Ireland'   unlabelled=False
+```
+
+A second shape cut mid-question: with an unrelated element named `work`, *"Are you legally authorized to work
+in Ireland?"* became `'in Ireland'`. Both defeat the placeholder refusal, because a recovered label is not the
+placeholder any more — so instead of refusing, the program answers a legal question it has mislabelled.
+
+A one-line guard (`if low.count(run) != 1: return ""`) fixes the first shape and not the second. The function
+was 26 lines of heuristic buying exactly one recovered label (`Gender`), while the one-line sibling fallback —
+the placeholder naming its own options — delivers the actual user-visible value. **Deleted.** `Gender` now
+lands on the Scratch Pad with the rest.
+
+### `close_stale`'s URL rule could close the user's own tab — deleted
+
+`if tid == remembered or (job_key and f"/jobs/view/{job_key}" in url)` — the second disjunct had **no
+ownership test**, and `list_tabs()` is `Target.getTargets`: every tab in the user's Chrome. Reading the
+posting and then running the tool is exactly how the user queues a job, so that rule would silently close
+their own tab, breaking the promise at the top of `tabs.py`. Note the asymmetry the reviewer spotted:
+`close_junk` takes `baseline` and honours it; `close_stale` took none.
+
+Passing `baseline` cannot fix it — `cli.py` computes it *before* `browser.open`, so it contains the stale tabs
+too and honouring it would make `close_stale` a no-op. The URL rule's only purpose was a one-time migration
+for tabs predating `TabMemory`, and that migration completed in run 152050. **Deleted.** `TabMemory` now
+records `{id, host}` and `close_stale` re-checks the host, because a target id outlives its page: a tab the
+user has since navigated elsewhere is no longer ours to close. That also honours this file's own earlier rule
+about a tab the user has typed into — "closing it is their call, not the program's".
+
+### The Follow decline was inert: FOUR places decide what a toggle answer means
+
+The previous section claimed the Follow checkbox was unticked and off the Scratch Pad. **Both claims were
+false live**, and the reviewer proved it end to end. `_carry_out` was fixed at the wrong layer:
+
+| Location | Rule | Assumed |
+|---|---|---|
+| `llm_inference._set_option_refs` | answer `"no"` → `q.answer = None` | toggle = tick |
+| `fill._goal_items` | `opt.checked` → skip | toggle = tick |
+| `fill._carry_out` | `_UNCHECKED` → untick | **both** |
+| `fill.mismatches.holds` | `bool(opt.checked)` | toggle = tick |
+
+So the answer was nulled before `plan_fill` ever saw it, a pre-ticked box was skipped as already done, and a
+successful untick read back as a mismatch. The shipped test passed only because it called
+`decline_follow_the_company` and stopped — it never called `_set_option_refs`, the very next line in
+`answer_page`.
+
+`_UNCHECKED` was also the wrong discriminator: it contained `decline` and `none`, which are the **option
+labels** EEO forms use on Greenhouse and Ashby. A checkbox whose own label is `Decline` answered `Decline`
+unticked itself, failed read-back and raised a false `broken_form`.
+
+**Fix:** one predicate, `llm_inference.wants_checked(q, el)`, read by all four sites. The own-label test comes
+**first**, and that is what makes a radio safe — a radio's answer is always its own option label, so `"No"` on
+a Yes/No group means click the No radio, never clear it. Only a toggle answered something else that plainly
+means no (`no|false|off|unchecked`) is a clear. Net −4 lines across the four sites, and `_UNCHECKED` is gone.
+A fifth gap surfaced while testing it: `mismatches` read a toggle's `value`/`current`, which a checkbox does
+not have, so a checkbox addressed by `ref` alone could never read back; it now compares `checked` against
+`wants_checked`.
+
+### The contact rule dropped the live answer the `<select>` fix had just made work
+
+`runs/20261008-152050/…Toast…/answers.json` records
+`"Are you currently based in Ireland? (required)" → "No"`, quoting
+`Address: Via Padova, Milano, MI, Italy, 20132`. The address **is** the right evidence for a "where are you
+based" question, and `_CONTACT_Q_RE` had `location` but not `based`, `located` or `reside` — so the next run
+would have emptied that required `<select>` and parked Toast at a question. A regression on the one job this
+batch had fixed, provable from the run's own artifact.
+
+`_CONTACT_Q_RE` gained `based|reside|resident|residence|located`. `relocat` was considered and left out: an
+address is weak evidence for willingness to move, which is the kind of mismatch the rule exists to catch.
+The bare-value clause is gone too — `_PHONE_V` fullmatches a résumé date range like `2019 - 2023`, which
+would have dropped a years-of-experience answer as a "contact detail", and that clause had no live evidence
+behind it. Only a line that announces itself (`Address:`, `Location:`, `Phone:`) counts now.
+
+### `_unlabelled` ate a real question
+
+`startswith` also matched *"Select one option that best describes your race/ethnicity"* — labelled,
+answerable, and standard phrasing on Workday and Greenhouse. It now matches the placeholder exactly, or the
+placeholder followed by its own option list.
+
+### Two narrower hardenings
+
+- **`consent_modal` could reach into a second dialog.** `e.dialog` is set for *any* ancestor dialog, modal or
+  not, while `Page.dialogs` lists only the modal ones. An `aria-modal` consent overlay beside a non-modal
+  `div[role=dialog]` application panel let `cookie_reject` return `"Decline this offer"` from the
+  **application** panel, which the guard allows (it is not a submit). The modal branch now fires only when at
+  most one dialog is contributing elements: if two are, we cannot say which is the consent one, so we decline
+  to guess.
+- **A refused consent click is no longer reported as a decline.** `decline_consent` returned `True` whatever
+  `act` said, and `stop_on_error=False` turns a guard refusal into text rather than an exception. A native
+  `<dialog>` consent often uses `<form method=dialog>` with untyped buttons, which the guard reads as
+  structural submits — so `run_external` would loop to `"the external page loop is not making progress"`, a
+  misleading diagnosis for "the guard refused the consent button". It now reports what `act` carried out,
+  takes a `clicked` set so a polling caller does not re-click every pass, and `external._hand_off` checks
+  `pages.is_alarm` after it, which every other click in that module already did.
+
+### Trimmed as speculative
+
+`CONSENT_DIALOG_RE` lost `privacy preference|gdpr` and `COOKIE_REJECT_RE` lost
+`necessary (cookies )?only`: only `cookie|consent` and `(i )?do ?n[o']t accept` have live evidence, and
+`consent` alone is already broad enough to reach an ATS's own *"Candidate Data Processing Consent"* dialog,
+which is part of the application rather than a cookie banner.
+
+### Still open from the review
+
+- `browser.close_tab_id` logs **after** the CDP call, so a close that raises is never logged, and
+  `close_stale` swallows the failure. A failed close is still not auditable.
+- `observer.js`'s overlay list is `.slice(0, 3)`, so a fourth visible dialog never reaches `Page.dialogs`.
+- US-004's "the tester never clicked anything" is the tester's own account of its own restraint; no
+  third-party artifact corroborates it.

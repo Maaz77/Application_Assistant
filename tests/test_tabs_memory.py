@@ -6,37 +6,45 @@ import json
 
 import pytest
 
-from assistant.tabs import TabMemory
+from assistant.tabs import TabBook, TabMemory
 
 pytestmark = pytest.mark.unit
+LI = "https://www.linkedin.com/jobs/view/"
+ASHBY = "https://jobs.ashbyhq.com/The-Flex/d9457005/application"
 
 
 def test_a_missing_or_corrupt_file_is_an_empty_memory(tmp_path):
     """Losing the memory costs one extra tab next run; it must never fail a job."""
-    assert TabMemory(tmp_path / "nope.json").get("4470918779") == ""
+    assert TabMemory(tmp_path / "nope.json").get("4470918779") == ("", "")
     bad = tmp_path / "open-tabs.json"
     bad.write_text("{not json")
-    assert TabMemory(bad).get("4470918779") == ""
+    assert TabMemory(bad).get("4470918779") == ("", "")
     bad.write_text('["a list, not a map"]')
-    assert TabMemory(bad).get("4470918779") == ""
+    assert TabMemory(bad).get("4470918779") == ("", "")
 
 
-def test_a_job_remembers_its_tab_across_runs(tmp_path):
+def test_a_job_remembers_its_tab_and_host_across_runs(tmp_path):
     path = tmp_path / "runs" / "open-tabs.json"
-    TabMemory(path).remember("4470918779", "27AE5834C87D461FDC8A9712B6FE5B19")
-    TabMemory(path).remember("4470932445", "3E87AF66CDD5B45367EC0472BB22557E")
-    # A fresh instance reads it, as the next run's process() does.
-    assert TabMemory(path).get("4470918779") == "27AE5834C87D461FDC8A9712B6FE5B19"
-    assert TabMemory(path).get("4470932445") == "3E87AF66CDD5B45367EC0472BB22557E"
-    assert TabMemory(path).get("4470941188") == ""          # a job that has never run
+    TabMemory(path).remember("4470918779", "27AE5834C87D", "jobs.ashbyhq.com")
+    TabMemory(path).remember("4470932445", "3E87AF66CDD5", "jobs.ashbyhq.com")
+    assert TabMemory(path).get("4470918779") == ("27AE5834C87D", "jobs.ashbyhq.com")   # a fresh instance
+    assert TabMemory(path).get("4470941188") == ("", "")                               # never run
+
+
+def test_a_file_written_before_the_host_was_recorded_still_reads(tmp_path):
+    """runs/open-tabs.json was seeded as {key: id} before the host was added; it must not become unreadable."""
+    path = tmp_path / "open-tabs.json"
+    path.write_text(json.dumps({"4470918779": "27AE5834C87D"}))
+    assert TabMemory(path).get("4470918779") == ("27AE5834C87D", "")
 
 
 def test_a_later_run_overwrites_only_its_own_job(tmp_path):
     path = tmp_path / "open-tabs.json"
-    TabMemory(path).remember("4470918779", "OLD")
-    TabMemory(path).remember("4470932445", "OTHER")
-    TabMemory(path).remember("4470918779", "NEW")
-    assert json.loads(path.read_text()) == {"4470918779": "NEW", "4470932445": "OTHER"}
+    TabMemory(path).remember("4470918779", "OLD", "a.example")
+    TabMemory(path).remember("4470932445", "OTHER", "b.example")
+    TabMemory(path).remember("4470918779", "NEW", "a.example")
+    assert json.loads(path.read_text()) == {"4470918779": {"id": "NEW", "host": "a.example"},
+                                            "4470932445": {"id": "OTHER", "host": "b.example"}}
 
 
 class _Tabs:
@@ -54,40 +62,46 @@ class _Tabs:
 
 
 def _book(tabs):
-    from assistant.tabs import TabBook
     b = _Tabs(tabs)
     return TabBook(b), b
 
 
-LI = "https://www.linkedin.com/jobs/view/"
-
-
-def test_close_stale_closes_this_jobs_leftovers_and_nothing_else():
-    """The two kinds of leftover look different: an adopted ATS tab is only recognisable by the id TabMemory
-    recorded, a LinkedIn posting tab by its own job id (which needs no state, so it works on the first run
-    after this fix)."""
-    book, b = _book([
-        {"target_id": "NOW", "url": f"{LI}4470918779/?trackingId=new"},          # this run — keep
-        {"target_id": "OLD-LI", "url": f"{LI}4470918779/?trackingId=old"},       # earlier run, same job
-        {"target_id": "OLD-ATS", "url": "https://jobs.ashbyhq.com/The-Flex/d9457005/application"},
-        {"target_id": "OTHER-JOB", "url": f"{LI}4470932445/?trackingId=x"},      # a different job — keep
-        {"target_id": "USER", "url": "https://docs.stagehand.dev/v4"},           # the user's own — keep
-    ])
-    closed = book.close_stale("job-4470918779", "NOW", job_key="4470918779", remembered="OLD-ATS")
-    assert sorted(closed) == ["OLD-ATS", "OLD-LI"]
+def test_close_stale_closes_only_the_remembered_tab():
+    book, b = _book([{"target_id": "NOW", "url": ASHBY},
+                     {"target_id": "OLD", "url": ASHBY},
+                     {"target_id": "OTHER-JOB", "url": f"{LI}4470932445/"},
+                     {"target_id": "USER", "url": "https://docs.stagehand.dev/v4"}])
+    assert book.close_stale("job-4470918779", "NOW", remembered="OLD", host="jobs.ashbyhq.com") == ["OLD"]
     assert sorted(t["target_id"] for t in b.tabs) == ["NOW", "OTHER-JOB", "USER"]
 
 
-def test_close_stale_never_closes_the_tab_this_run_is_driving():
-    """Even when the remembered id IS the current tab — a job whose previous run left the very tab this run
-    adopted — the live tab must survive."""
-    book, b = _book([{"target_id": "NOW", "url": f"{LI}4470918779/"}])
-    assert book.close_stale("job-4470918779", "NOW", job_key="4470918779", remembered="NOW") == []
+def test_close_stale_never_touches_a_tab_the_user_opened():
+    """An earlier version also closed any tab whose URL held /jobs/view/<job_key>, with no ownership test at
+    all — and list_tabs() is every tab in the user's Chrome. Reading the posting and then running the tool is
+    exactly how the user queues a job, so that rule would have closed their own tab (reviewer finding)."""
+    user_tab = {"target_id": "USER-READING-THE-POSTING", "url": f"{LI}4470918779/?trackingId=theirs"}
+    book, b = _book([{"target_id": "NOW", "url": f"{LI}4470918779/?trackingId=ours"}, user_tab])
+    assert book.close_stale("job-4470918779", "NOW", remembered="", host="") == []
+    assert b.closed == [] and user_tab in b.tabs
+
+
+def test_close_stale_leaves_a_tab_that_has_since_moved_on():
+    """A target id outlives the page. If the remembered tab is no longer on the host we parked it on, the
+    user has navigated it somewhere else and it is not ours to close."""
+    book, b = _book([{"target_id": "NOW", "url": ASHBY},
+                     {"target_id": "OLD", "url": "https://news.example.com/article"}])
+    assert book.close_stale("job-4470918779", "NOW", remembered="OLD", host="jobs.ashbyhq.com") == []
     assert b.closed == []
 
 
-def test_close_stale_is_a_no_op_for_a_job_that_has_never_run():
-    book, b = _book([{"target_id": "NOW", "url": f"{LI}4470941188/"},
-                     {"target_id": "USER", "url": "https://claude.ai/new"}])
-    assert book.close_stale("job-4470941188", "NOW", job_key="4470941188", remembered="") == []
+def test_close_stale_never_closes_the_tab_this_run_is_driving():
+    """A job whose previous run left the very tab this run adopted: the live tab must survive."""
+    book, b = _book([{"target_id": "NOW", "url": ASHBY}])
+    assert book.close_stale("job-4470918779", "NOW", remembered="NOW", host="jobs.ashbyhq.com") == []
+    assert b.closed == []
+
+
+def test_close_stale_is_a_no_op_when_the_tab_is_already_gone():
+    book, b = _book([{"target_id": "NOW", "url": ASHBY}])
+    assert book.close_stale("job-4470918779", "NOW", remembered="CLOSED-BY-THE-USER", host="") == []
     assert b.closed == []

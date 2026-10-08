@@ -227,7 +227,7 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
     baseline = book.handles()
     # The tab THIS job was left on by an earlier run (D13 keeps a parked tab open; see tabs.TabMemory).
     memory = tabs.TabMemory(run_dir.parent / "open-tabs.json")
-    stale = memory.get(job.key)
+    stale, stale_host = memory.get(job.key)
     # The resume is uploaded to the form but its extracted text is NOT a source (user decision 2026-10-06):
     # Profile.md is the one document the user maintains for this, and a PDF's extracted text was giving the
     # model a second, differently-worded copy of the same facts to splice quotes across. `pdf` is still read
@@ -249,8 +249,8 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
         for attempt in (1, 2):
             browser.open(job.linkedin_url, S)
             opened = True
-            try:                                    # the tabs an earlier run of THIS job left (tabs.TabMemory)
-                book.close_stale(S, book.current_handle(S), job_key=job.key, remembered=stale)
+            try:                                    # the tab an earlier run of THIS job left (tabs.TabMemory)
+                book.close_stale(S, book.current_handle(S), remembered=stale, host=stale_host)
             except (DriverError, RuntimeError):
                 pass
             p = ctx.read()
@@ -279,7 +279,9 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
             try:
                 app = book.current_handle(S)
                 book.close_junk(S, baseline, {app})
-                memory.remember(job.key, app)           # so the NEXT run of this job closes this tab
+                # so the NEXT run of this job closes this tab — with its host, so a tab the user has since
+                # navigated elsewhere is recognised as no longer ours.
+                memory.remember(job.key, app, urlparse(ctx.last.url if ctx.last else "").hostname or "")
             except (DriverError, RuntimeError):
                 pass
             try:

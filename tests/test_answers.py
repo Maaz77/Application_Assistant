@@ -594,21 +594,18 @@ def _flex_page() -> Page:
                 table=Table(url=url, elements=els))
 
 
-def test_a_question_label_is_recovered_from_the_page_text():
-    """Ashby's demographic radios have label, context and scope all empty and a compound-UUID group id, so
-    `_group_label` fell back to the placeholder. The page renders "<question> <option> <option>", so the
-    words before the option run are the question — and the previous field's label is trimmed off."""
-    by_q = {q.question: q for q in A.extract_questions(_flex_page()).questions}
-    assert "Gender" in by_q                                        # recovered, not "Select one"
-    assert by_q["Gender"].options == ["Male", "Female", "Prefer not to say"]
-
-
-def test_a_group_below_the_text_cap_names_its_own_options_instead():
-    """There is genuinely no label for it anywhere, so the placeholder at least has to identify the question
-    in answers.json and on the Scratch Pad, where a bare "Select one — A: ___" told the user nothing."""
-    by_q = {q.question: q for q in A.extract_questions(_flex_page()).questions}
-    marital = next(k for k in by_q if k.startswith(A.NO_LABEL))
-    assert marital == "Select one (Single / Married / I prefer not to say / Married with kids)"
+def test_an_unlabelled_group_names_its_own_options():
+    """There is no question text for these groups anywhere — Ashby gives label, context and scope all empty
+    and a compound-UUID group id, and the observation's page text is capped. An earlier attempt recovered the
+    label by slicing the page text before the option run; it took the FIRST match of that run, so two Yes/No
+    groups both got the first group's question and a felony question was silently answered as a visa
+    question. Deleted. The placeholder instead names its own options, so the record and the Scratch Pad can
+    identify the question (a bare "Select one — A: ___" told the user nothing), and `check_answers` refuses
+    to answer it."""
+    labels = sorted(q.question for q in A.extract_questions(_flex_page()).questions
+                    if q.question.startswith(A.NO_LABEL))
+    assert labels == ["Select one (Male / Female / Prefer not to say)",
+                      "Select one (Single / Married / I prefer not to say / Married with kids)"]
 
 
 def test_an_answer_to_an_unlabelled_question_is_refused():
@@ -661,3 +658,72 @@ def test_the_follow_the_company_default_is_declined_and_not_reported():
     follow = pa.questions[0]
     assert follow.answer == "No" and follow.source == "computed"
     assert A.uncovered_optional(pa) == [] and A.uncovered_required(pa) == []     # off the Scratch Pad
+
+
+def run_on(page, *qs, src=SRC, policy=Policy()):
+    """check_answers against a purpose-built page (the module PAGE has its own fields and options)."""
+    pa = PageAnswers.model_validate({"questions": list(qs)})
+    return pa.questions, check_answers(pa, page, src, policy, TODAY)
+
+
+def _choice_page(question: str, options: list[str]) -> Page:
+    url = "https://careers.example.com/apply"
+    return Page(url=url, title="Apply", text=f"{question} {' '.join(options)}",
+                table=Table(url=url, elements=[Element(ref=f"e{i}", role="radio", name=question, label=o)
+                                               for i, o in enumerate(options, 1)]))
+
+
+ADDRESS = "Address: Via Padova, Milano, MI, Italy, 20132"
+
+
+def test_an_address_is_evidence_for_where_you_are_based():
+    """The contact rule's first version dropped this, which is the live answer the <select> fix had just made
+    work: runs/20261008-152050/…Toast…/answers.json records `"Are you currently based in Ireland?" -> "No"`
+    quoting `Address: Via Padova, Milano, MI, Italy, 20132`. The address IS the evidence for that question —
+    the rule is about a MISMATCH, so the question words a contact detail answers have to be in it."""
+    src = Sources(PROFILE + "\n" + ADDRESS, JOB, RESUME)
+    for question in ("Are you currently based in Ireland? (required)", "Where are you currently located?",
+                     "Where do you reside?", "Are you a resident of Ireland?"):
+        (kept,), _ = run_on(_choice_page(question, ["Yes", "No"]),
+                            q(question=question, kind="choice", options=["Yes", "No"], answer="No",
+                              source="profile", quote=ADDRESS), src=src)
+        assert kept.answer == "No", question
+    # The mismatch the rule exists for is still caught: an address does not answer an onsite-willingness
+    # question, which is how Linda AI came to answer "No" on an Ireland role.
+    onsite = "Are you comfortable working in an onsite setting?"
+    (dropped,), _ = run_on(_choice_page(onsite, ["Yes", "No"]),
+                           q(question=onsite, kind="choice", options=["Yes", "No"], answer="No",
+                             source="profile", quote=ADDRESS), src=src)
+    assert dropped.answer is None and "contact detail" in dropped.note
+
+
+def test_a_resume_date_range_is_not_read_as_a_phone_number():
+    """`_PHONE_V` fullmatches "2019 - 2023", so testing the bare quote value against it dropped a
+    years-of-experience answer as a "contact detail". Only a line that announces itself counts now."""
+    years = "Python Engineer 2019 - 2023"
+    url = "https://careers.example.com/apply"
+    page = Page(url=url, title="Apply", text="Years of experience with Python",
+                table=Table(url=url, elements=[Element(ref="e1", role="textbox",
+                                                       name="Years of experience with Python")]))
+    (kept,), _ = run_on(page, q(question="Years of experience with Python", ref="e1", answer="4",
+                                source="profile", quote=years), src=Sources(PROFILE + "\n" + years, JOB, RESUME))
+    assert kept.answer == "4"
+
+
+def test_a_real_select_one_question_is_not_mistaken_for_the_placeholder():
+    """`startswith` also swallowed this, which is a labelled, answerable EEO question and standard phrasing
+    on Workday and Greenhouse (reviewer finding)."""
+    real = "Select one option that best describes your race/ethnicity"
+    opts = ["Asian", "White", "I prefer not to say"]
+    (kept,), _ = run_on(_choice_page(real, opts),
+                        q(question=real, kind="choice", options=opts, answer="I prefer not to say",
+                          source="profile", quote="I prefer not to say"),
+                        src=Sources(PROFILE + "\nI prefer not to say", JOB, RESUME))
+    assert kept.answer == "I prefer not to say"
+    assert A._unlabelled(Q_OF(A.NO_LABEL)) is True                          # the bare placeholder
+    assert A._unlabelled(Q_OF(f"{A.NO_LABEL} (Male / Female)")) is True     # and the options variant
+    assert A._unlabelled(Q_OF(real)) is False
+
+
+def Q_OF(question: str):
+    return PageAnswers.model_validate({"questions": [q(question=question)]}).questions[0]
