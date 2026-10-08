@@ -47,10 +47,12 @@ class FreeLLMAPI(_Strict):
     routing mode and lets the router do the rest."""
     base_url: str = "http://127.0.0.1:31415/v1"
     llm_inference: tuple[str, ...] = ()
-    # The chat timeout, for every request on this route: LLM inference and the System One chat fallback. A free tier
-    # queues a long prompt behind its other traffic, so the same 8.8k-token form page took anywhere from 6.3 s to
-    # 89.2 s over nine live `auto` calls (2026-10-08) — five of the nine over the 45 s this used to be, which is how
-    # three timeouts in a row stopped a run for a "provider outage" while the router was up and answering.
+    # The chat timeout, for every request on this route: LLM inference and the System One chat fallback. It has to
+    # cover the router's own failover, not one model's answer. A stalled upstream costs 60 s before the router may
+    # move on (Cloudflare aborts its own chat call at exactly 60 s), after which the next platform usually answers
+    # in seconds; `auto` also picks a 38-89 s model now and then. At the 45 s this used to be, a run hung up before
+    # that 60 s abort — nine attempts in a row died on the same stalled upstream and stopped the run as a "provider
+    # outage" while the router was up (2026-10-08). 180 s is room for one stall and a slow answer behind it.
     timeout: float = 180.0
 
     @field_validator("llm_inference", mode="before")

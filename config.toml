@@ -30,11 +30,14 @@ base_url = "http://127.0.0.1:31415/v1"
 # three. "auto" also answered while four of five hand-picked model IDs were 429 or 413, because routing around an
 # exhausted free tier is exactly what the router does — a model list here could not.
 llm_inference = "auto"
-# Every chat request's timeout (LLM inference and the System One chat fallback). A free tier queues a long prompt
-# behind its other traffic: the same 8.8k-token form page took 6.3 / 10.4 / 12.6 / 38.6 / 66.1 / 67.1 / 73.0 / 89.2 s
-# over nine live `auto` calls on 2026-10-08 (the ninth HTTP 502 after 60.6 s), every answer schema-valid. Five of
-# the nine were over the 45 s before this, and three such timeouts in a row stopped a run as a "provider outage"
-# while the router was up. Raise it if a page still times out; the wait is someone else's queue, not this program.
+# Every chat request's timeout (LLM inference and the System One chat fallback). It covers the router's own failover
+# across platforms, not one model's answer: the same 8.8k-token form page took 6.3 / 10.4 / 12.6 / 38.6 / 66.1 /
+# 67.1 / 73.0 / 89.2 s over nine live `auto` calls on 2026-10-08 (the ninth HTTP 502 after 60.6 s), every answer
+# schema-valid, while the same body pinned to gemini-3-flash-preview took 6.4 / 7.0 / 9.2 s. The spread is a stalled
+# upstream the router must wait out — Cloudflare aborts its own chat call at 60 s — plus the 38-89 s models `auto`
+# sometimes picks. At 45 s this program hung up before that 60 s abort, so nine attempts in a row died on the same
+# stalled upstream and stopped a run as a "provider outage". Raise it if a page still times out; benching the slow
+# upstreams in the FreeLLMAPI app is the other half, and the half that makes a page fast instead of merely possible.
 timeout = 180.0
 
 [models.local]                     # Kev (github.com/jaredpalmer/kev) on this Mac: the System One decision API

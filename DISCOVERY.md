@@ -2379,13 +2379,32 @@ prompt chars = 8,791 prompt tokens, 1,196 completion tokens), nine calls on `aut
 | 9 | 67.1 s | 200 | nvidia / `meta/muse-glimmer-30b` |
 
 Linda AI's page (27,141 chars) answered in 2.6 s and The Flex – Full-Stack's (34,981 chars) in 5.4 s, both 200 and
-schema-valid. So **the page is not what makes a request slow**: the same `gemini-3-flash-preview` answered the same
-8.8k-token body in 6.3 s and in 73.0 s. What varies is which free tier `auto` lands on and how much of someone
-else's traffic is queued in front of this request. That is a wait to be sat out, not a latency to be predicted —
-and it is precisely what the router is for, so there is nothing to route around on this side.
+schema-valid, so the page is not what makes a request slow. Nor is the model: pinned to
+`gemini-3-flash-preview`, the same 8.8k-token body answered in **6.4 / 7.0 / 9.2 s**, three for three.
 
-**45 s was measured on the wrong workload.** It came from the 6-question page of 2026-10-07 (the table above: 1.2
-to 42.5 s) and from the 5-question routing trials (`auto` 4.8 / 6.0 / 5.2 s). A real form page is 8.8k prompt
+### What the router's own log says (`~/Library/Application Support/FreeLLMAPI/logs/freeapi.log`)
+
+The router logs every attempt it makes per request — `start`/`next`/`ok`/`fail` with the platform, the model and a
+cumulative `lat=`. It explains both halves of the spread, and neither half is a queue in front of one model:
+
+- **A stalled upstream costs 60 s before the router may fail over.** Cloudflare aborts its own chat call at 60 s
+  (`err="The operation was aborted (cloudflare, chat, 60s)"`), and the router then tries the next platform, which
+  usually answers at once: the 73.0 s call was `a0 cloudflare @cf/qwen/qwen3.8-27b` aborted at 60.0 s then
+  `a1 google gemini-3-flash-preview` answering in 13 s, and the 66.1 s call was the same shape with 6 s on the
+  end. Failing over is itself cheap — a spent free tier answers 429 or 404 in well under a second.
+- **`auto` sometimes picks a genuinely slow model, with no failover involved.** Single-attempt calls:
+  `nvidia meta/muse-glimmer-30b` 67.1 s (2,974 output tokens), `nvidia nvidia/nemotron-3-ultra-550b-a55b` 62.8 s
+  and 48.8 s, `cloudflare @cf/zai-org/glm-4.7-flash` 38.5 s and 89.1 s (5,078 and 5,478 output tokens).
+
+**So 45 s was not merely short, it was shorter than the router's own failover horizon** — and the run's nine
+timed-out attempts prove it. In the run's window the log holds **11 starts to
+`cloudflare @cf/qwen/qwen3.8-27b` and only 2 results**: it answered Linda AI's second page in 32.3 s and then
+stalled on every attempt after it. Nine of those eleven have no `ok` and no `fail` line at all, because this
+program hung up at 45 s — before Cloudflare's 60 s abort, so before the router could reach the next platform. The
+one thing that would have rescued each of those requests was a failover that 45 s never let it start.
+
+**And 45 s came from the wrong workload.** It was measured on the 6-question page of 2026-10-07 (the table above:
+1.2 to 42.5 s) and on the 5-question routing trials (`auto` 4.8 / 6.0 / 5.2 s). A real form page is 8.8k prompt
 tokens, and **five of the nine calls above crossed 45 s**.
 
 Two things changed:
@@ -2399,18 +2418,33 @@ Two things changed:
   labelling both "unreachable" is what put "freellmapi unreachable" on a report while the router was answering.
   The message now reads `provider outage — freellmapi timed out: 3 requests in a row failed`.
 
+180 s is room for one 60 s stall and a slow answer behind it, not twice the slowest answer. It is not a
+guarantee: an earlier call of the same kind spent attempt 1 on a 502 (Cloudflare's 60 s abort, then an OpenRouter
+429), had attempt 2 cut at the full 180 s (`[FallbackLoop] client disconnected mid-attempt on
+cloudflare/@cf/zai-org/glm-4.7-flash`) and answered on attempt 3 in 62.8 s — 311.7 s in all, with the retry ladder
+earning its keep. Raising the knob again is a config edit now.
+
 Verified on the real path, not on the replay: `config.load()` -> `gateway.for_config` -> `llm_inference.call_engine`
-with the body that failed the run answered **17 answers in 48.9 s on one attempt** (`CHAT` timeout 180 s, `JEV`
-120 s, 0 failures, breaker untripped). An earlier call of the same kind needed all three attempts and 311.7 s, which
-is the retry ladder doing its job rather than multiplying a timeout: the third attempt answered. At 45 s both of
-those requests were failures.
+with the body that failed the run returned **17 answers in 48.9 s on one attempt** (`CHAT` timeout 180 s, `JEV`
+120 s, 0 failures, breaker untripped). At 45 s that request was a failure too.
+
+**There is a router-side fix as well, and it is the one that makes pages fast rather than merely possible.** The
+upstreams in that log fall into two camps on this workload: 0.2-13 s (`groq qwen/qwen3.8-27b`,
+`google gemini-3-flash-preview`, `nvidia poolside/laguna-xs-2.1`) and 38-89 s or stalled
+(`cloudflare @cf/qwen/qwen3.8-27b`, `@cf/zai-org/glm-4.7-flash`, `nvidia nemotron-3-ultra-550b-a55b`,
+`meta/muse-glimmer-30b`). Benching the slow camp in the FreeLLMAPI app would put a form page back at 5-13 s. That
+is the user's call on their own router, and this program must survive either way.
 
 The breaker itself was not touched: three timed-out requests in a row is still a stopped run, but a timeout now
 means the request really was stuck rather than merely slower than a number measured on a smaller page. Retrying a
 timeout was also left alone — the ladder is 3 attempts, so a genuinely hung route now costs 548 s before the job is
 recorded, against 135 s before.
 
-The three jobs the run gave up on are in `Needs-Attention/` with their records written, and their reason class is
-exactly what separates them from the real outcomes: `requeue --class llm_inference` brings those three back to
-`Applications/` with `Status = Resume Built` and leaves Mastercard and Toast (`closed`) and Genesys (`signup`)
-where they belong.
+**Two** of the three jobs are in `Needs-Attention/` with an `llm_inference` record: Linda AI and The Flex – Senior
+Software Engineer, and `requeue --class llm_inference` brings exactly those back to `Applications/` with
+`Status = Resume Built`, leaving Mastercard and Toast (`closed`) and Genesys (`signup`) where they belong. The
+third failed request belonged to The Flex – Senior Full-Stack Product Engineer, and it is the request that tripped
+the breaker: `StopRun` is raised before any record is written, so that job never left
+`Applications/4470932445_The-Flex_Senior-Full-Stack-Product-Engineer` and needs no requeue — the next run picks it
+up. Its logs are in the run folder all the same, because the Gateway logs every attempt before anything decides
+what it means.

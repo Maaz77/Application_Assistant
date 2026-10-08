@@ -454,8 +454,8 @@ def system_prompt(free_text_max_chars: int) -> str:
 # This module owns no timeout of its own: `timeout=None` leaves it to the Gateway's CHAT timeout, which is
 # `models.freellmapi.timeout` (config.py). The 45 s constant that used to live here was measured on a 6-question
 # page, and a real form page is a different request — 8.8k prompt tokens, and five of nine live calls took longer
-# than 45 s (2026-10-08, the slowest answering at 89.2 s). A caller passes a timeout only to ask for less, as
-# preflight's probe does.
+# than 45 s (2026-10-08, the slowest answering at 89.2 s), because the timeout has to cover the router's failover
+# across platforms and not one model's answer. A caller passes a timeout only to ask for less, as preflight's does.
 def call_engine(*, key: str, models: Rotation | str | list[str], system: str, user: dict,
                 url: str = FREELLM_CHAT, post: Callable | None = None, timeout: float | None = None,
                 sleep: Callable[[float], None] = time.sleep,
