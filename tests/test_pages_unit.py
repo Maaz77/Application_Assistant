@@ -246,3 +246,28 @@ def test_cookie_reject_still_prefers_a_cmp_container_control():
     p = page([Element(ref="e1", role="button", name="Reject all", consent="#onetrust-banner-sdk")],
              text="We use cookies")
     assert navigate.cookie_reject(p).ref == "e1"
+
+
+# --- two more live findings from run 20261008-143810 ------------------------------------------------------
+
+def test_linkedin_words_a_closed_posting_two_ways():
+    """Mastercard's posting reads "Not currently accepting applications" and has no apply control at all, but
+    _CLOSED_RE only knew "No longer accepting applications" — so the job came back as a `navigation` failure,
+    "no way to start the application", which reads as requeueable when the posting is simply shut."""
+    from assistant import navigate
+    for text in ("Dublin, County Dublin, Ireland - 2 weeks ago - Not currently accepting applications",
+                 "This job is no longer accepting applications"):
+        assert pages._CLOSED_RE.search(text) and navigate.CLOSED_RE.search(text)
+    assert not pages._CLOSED_RE.search("Over 100 people clicked apply - On-site - Full-time")
+
+
+def test_the_apply_with_linkedin_widget_host_is_not_a_hosted_form():
+    """Genesys: the run reached the right Workday posting and then hopped to the embedded "Apply with LinkedIn"
+    widget's own host, which matched _FORM_IFRAME_RE on "apply". That host is configured entirely by its query
+    string, so navigating to it bare renders nothing — `load_failure: blank page`, twice."""
+    awli = "https://applywithlinkedin.myworkdaygadgets.com/awli/"
+    assert pages._FORM_IFRAME_RE.search(awli) and pages._NON_FORM_IFRAME_RE.search(awli)
+    real = "https://genesys.wd1.myworkdayjobs.com/Genesys/job/Galway-Ireland/Software-Engineer_JR112303-1"
+    assert pages._FORM_IFRAME_RE.search(real) and not pages._NON_FORM_IFRAME_RE.search(real)
+    greenhouse = "https://boards.greenhouse.io/embed/job_app?token=123"
+    assert pages._FORM_IFRAME_RE.search(greenhouse) and not pages._NON_FORM_IFRAME_RE.search(greenhouse)

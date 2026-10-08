@@ -6,7 +6,10 @@ are not keeping is junk and is closed; a tab the user opened is never touched.
 """
 from __future__ import annotations
 
-from assistant.browser import Browser
+import json
+from pathlib import Path
+
+from assistant.browser import Browser, DriverError
 
 
 class TabError(RuntimeError):
@@ -68,6 +71,27 @@ class TabBook:
                 closed.append(tid)
         return closed
 
+    def close_stale(self, session: str, keep: str, *, job_key: str = "", remembered: str = "") -> list[str]:
+        """Close the tabs an EARLIER run of THIS job left open, and nothing else.
+
+        Two narrow rules, because the two kinds of leftover look different: `remembered` is the exact tab id
+        TabMemory recorded when the job was last released (the only way to recognise an adopted ATS tab, whose
+        URL carries no job id), and a LinkedIn posting tab is recognised by `/jobs/view/<job_key>` in its URL,
+        which needs no state and so works on the first run after this fix. `keep` — the tab this run is
+        driving — is never closed. A failure is ignored: the user may have closed the tab already."""
+        closed = []
+        for t in self.browser.list_tabs():
+            tid = t["target_id"]
+            if tid == keep or not tid:
+                continue
+            if tid == remembered or (job_key and f"/jobs/view/{job_key}" in (t.get("url") or "")):
+                try:
+                    self.browser.close_tab_id(session, tid)
+                except (DriverError, RuntimeError):
+                    continue
+                closed.append(tid)
+        return closed
+
     def release(self, session: str) -> None:
         """Drop the session's bookkeeping and leave its tab open (D13). No scratch tab, no close (P2)."""
         self.browser.forget(session)
@@ -75,3 +99,39 @@ class TabBook:
     def close(self) -> None:
         """No helper tab to close (P2)."""
         return None
+
+
+class TabMemory:
+    """Which tab each job was last left on, remembered ACROSS runs.
+
+    D13 keeps a parked job's tab open on purpose — it is the deliverable, the user submits from it. Nothing
+    closed the tab the PREVIOUS run left, so every re-run added another live, filled form for the same job
+    (live 2026-10-08: 7 jobs x 2 runs = 14 job tabs, and the two tabs for one Flex posting disagreed — the
+    older one held an `Age` the user had typed by hand, the newer one did not). This is what the user saw as
+    "always two tabs on the application".
+
+    Only ids this program recorded as its own job tabs are ever closed, so a tab the user opened is never
+    touched. The file lives beside the run directories (gitignored), not in the user's application folders.
+    """
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def _read(self) -> dict[str, str]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def get(self, key: str) -> str:
+        return str(self._read().get(key) or "")
+
+    def remember(self, key: str, target_id: str) -> None:
+        data = self._read()
+        data[key] = target_id
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        except OSError:
+            pass            # losing the memory costs an extra tab next run; it must never fail a job

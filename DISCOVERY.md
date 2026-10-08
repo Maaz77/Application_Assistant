@@ -1904,3 +1904,91 @@ options, compare against the selected option's **label**, else `current`. Not `v
 option values opaque hashes. The radio-group fallback stays for its real case (a ref gone after a re-render).
 Test: `test_fill_loop.py::test_a_native_select_reads_back_from_the_control_not_the_option`, built from the live
 element above; it fails without the fix and still catches a genuinely unset choice.
+
+## 2026-10-08 — live validation of run 20261008-143810: the tab question answered properly, and three more defects
+
+A read-only inspection of the user's own Chrome (CDP getter-only JS; a census before and after returned the
+identical 17 pages, nothing clicked, typed or closed) confirmed the two parked LinkedIn jobs and both Flex
+applications, and settled the tab question with better evidence than the action log could give.
+
+### "Always two tabs on the application" is real, and it is cross-run accumulation
+
+Within one run there is no leak — exactly one tab per job, and no `linkedin.com/jobs/view/4470918779`,
+`4470932445` or `safety/go` tab is left anywhere. Across runs there is: the user's Chrome held **14 job tabs =
+7 jobs × 2 runs**, attributed by target id (Ashby/Toast/awli, whose ids are in each run's `browser_actions.jsonl`)
+and by `trackingId` (Linda, DMI, whose ids are in each run's `report.md`). The earlier conclusion in the previous
+section — "the two Flex tabs are the two different Flex postings" — was **wrong**: there are **four** Flex tabs,
+two postings × two runs.
+
+This is not cosmetic. The two tabs for one posting **disagree**: the stale 094723 Flex Senior-SWE tab held
+`Age = "27"`, typed by the user; this run's tab has `Age` empty. Both carry a complete, submittable form, and
+LinkedIn would refuse a second Easy Apply but Ashby and Greenhouse would not. D13 ("a job's tab is never closed")
+is right about the tab the run just parked; it had no notion of the tab the *previous* run parked.
+
+**Fix.** `tabs.TabMemory` (a `job.key → target_id` map at `runs/open-tabs.json`, gitignored, written in
+`process`'s `finally` next to `close_junk`) plus `tabs.TabBook.close_stale`, called right after the job's own
+tab is opened. Two narrow rules, because the two kinds of leftover look different:
+
+- **`remembered`** — the exact id the last run released for this job. The only way to recognise an adopted ATS
+  tab, whose URL carries no job id.
+- **`/jobs/view/<job_key>` in the URL** — recognises a LinkedIn posting tab with no stored state, so the fix
+  works on the very first run after it lands rather than from the second.
+
+The tab this run is driving is never closed, a missing or corrupt memory file is an empty memory (losing it
+costs one extra tab, never a job), and a close that fails is ignored because the user may have closed it
+already. Only ids this program recorded, or postings carrying this job's own id, are ever touched.
+`runs/open-tabs.json` was seeded from 143810's action logs for the four external jobs, so the next run closes
+those too; its ids cross-check against the inspection exactly (`02965C797E96…`, `DE84413D2156…`,
+`639C204FA478…`, `F38E987A4A98…`). Tests: `tests/test_tabs_memory.py`.
+
+The ten tabs the 094723 run left are not in the memory and are left for the user to close by hand — one of them
+holds input they typed, so closing it is their call, not the program's. `linkedin.com/feed` is the user's own
+tab: `cli.py` opens one as the `preflight` scratch session and closes it in a `finally`, and its id is in
+neither run's log.
+
+### Mastercard is a closed posting, not a navigation failure
+
+The live page reads *"Not currently accepting applications"* and has **no** apply control in the DOM at all —
+every `<button>` on it is LinkedIn chrome. `_CLOSED_RE` / `navigate.CLOSED_RE` only knew *"No longer accepting
+applications"*, so the job fell through to `_entry_choice` and came back as `navigation: no way to start the
+application`, which reads as something a requeue could fix. Both patterns now accept
+`(no longer|not currently) accepting applications`, so the job gets the `closed` reason code it deserves.
+
+### Genesys: the run navigated to the "Apply with LinkedIn" widget's own host
+
+The run did reach the right destination. Ordered URLs from its action log: the posting →
+`linkedin.com/safety/go?url=…genesys.wd1.myworkdayjobs.com/…JR112303-1` → **the Workday posting itself** →
+`applywithlinkedin.myworkdaygadgets.com/awli/`. That last hop is `pages.classify`'s `iframe` verdict:
+`_FORM_IFRAME_RE` matches the host on `apply`, and `_NON_FORM_IFRAME_RE` did not exclude it, so `run_external`
+called `browser.open` on it.
+
+It can never render there. That host is the *embedded* Apply-with-LinkedIn widget, configured entirely by its
+query string; opened top-level and bare it has `location.search == ""`, `document.referrer == ""`,
+`body.innerText.length == 0`, zero interactive elements, and requests its own script with
+`apiKey=undefined&renderV3=null&applyUrl=` pointing back at the gadget. `load_failure: blank page` was an
+accurate reading of a page with nothing on it. `_NON_FORM_IFRAME_RE` now excludes
+`applywithlinkedin|myworkdaygadgets|talentwidgets`, so the hop is refused and the Workday posting stays the
+current page. Whether Workday itself can then be driven is a separate, open question.
+
+### Still open (user decisions, not yet changed)
+
+- **A `profile`-sourced answer whose quote does not support it is accepted.** `check_answers`' own docstring
+  only requires the quote to appear in one of the three source files, never that it entails the answer. Live
+  consequences: Linda AI's `Are you comfortable working in an onsite setting? → No` cites
+  `quote: "Address: Via Padova, Milano, MI, Italy, 20132"`; `What is your level in English → Fluent/Native`
+  while Profile.md says *"English: C1 Level (TOEFL iBT 101)"*; `Gender → Male` and `Marital Status` are chosen
+  although Profile.md says nothing about either, and the **two Flex forms contradict each other** —
+  `Marital Status` is `Single` on one and `I prefer not to say` on the other, and the job-type question gets
+  opposite answers. The two free-text answers are honestly labelled `source: generated`; it is the
+  `profile`-sourced *choices* that are unsupported.
+- **The "Follow <company>" checkbox is left `checked=true` while being reported as an open question.** Both
+  LinkedIn jobs: `answers.json` records `source: "linkedin-prefill", note: "pre-fill not kept"` and the report
+  lists it under "Questions for your Scratch Pad" with `A: ___`, but nothing unchecked it, so LinkedIn's default
+  stands and submitting follows the company. Either state is defensible; reporting it as open while leaving it
+  checked is not.
+- **`answers.json` records a resume-card pick that never took effect.** Linda AI logs
+  `"Select one" → "Amin_The-Portfolio-Group_AI-Engineer-Gen-AI-RAG.pdf"` and DMI logs a NearTech resume, both
+  stale cards from other companies chosen out of a 25-card list because `job.md` carries a generic
+  `Matched Resume:` line. The live pages show the **correct** tailored PDFs, because the deterministic upload
+  superseded the pick — so the outcome is right and only the record is misleading. Anyone auditing
+  `answers.json` alone would conclude the wrong resume went out.

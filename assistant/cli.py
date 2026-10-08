@@ -225,6 +225,9 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
     pdf = job.resume_pdf()                                              # before any browser work
     S = f"job-{job.key}"
     baseline = book.handles()
+    # The tab THIS job was left on by an earlier run (D13 keeps a parked tab open; see tabs.TabMemory).
+    memory = tabs.TabMemory(run_dir.parent / "open-tabs.json")
+    stale = memory.get(job.key)
     # The resume is uploaded to the form but its extracted text is NOT a source (user decision 2026-10-06):
     # Profile.md is the one document the user maintains for this, and a PDF's extracted text was giving the
     # model a second, differently-worded copy of the same facts to splice quotes across. `pdf` is still read
@@ -246,6 +249,10 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
         for attempt in (1, 2):
             browser.open(job.linkedin_url, S)
             opened = True
+            try:                                    # the tabs an earlier run of THIS job left (tabs.TabMemory)
+                book.close_stale(S, book.current_handle(S), job_key=job.key, remembered=stale)
+            except (DriverError, RuntimeError):
+                pass
             p = ctx.read()
             # P2: only the signed-out check stays here — it is a deterministic URL test. The posting's entry
             # (Easy Apply / closed / applied / external ATS) is decided by navigate.enter inside run_pages, with
@@ -272,6 +279,7 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
             try:
                 app = book.current_handle(S)
                 book.close_junk(S, baseline, {app})
+                memory.remember(job.key, app)           # so the NEXT run of this job closes this tab
             except (DriverError, RuntimeError):
                 pass
             try:

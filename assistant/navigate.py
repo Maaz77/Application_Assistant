@@ -19,7 +19,10 @@ from assistant.blockers import GoExternal, NeedsAttention
 # Entry signals (top-card controls + page text). Matched on the observer's name (aria-label wins).
 EASY_APPLY_RE = re.compile(r"^\s*easy apply\b", re.I)
 APPLY_RE = re.compile(r"^\s*apply\b", re.I)
-CLOSED_RE = re.compile(r"no longer accepting applications|this job is (closed|no longer)", re.I)
+# LinkedIn words a closed posting two ways: "No longer accepting applications" and "Not currently
+# accepting applications" (live 2026-10-08, Mastercard — which was reported as a `navigation` failure,
+# "no way to start the application", and so looked requeueable when the job is simply shut).
+CLOSED_RE = re.compile(r"(no longer|not currently) accepting applications|this job is (closed|no longer)", re.I)
 APPLIED_RE = re.compile(r"\bapplied\b|application submitted|see application", re.I)
 COOKIE_REJECT_RE = re.compile(r"^\s*(reject|decline|refuse|only necessary|necessary (cookies )?only|"
                               r"(i )?do ?n[o']t accept)\b", re.I)

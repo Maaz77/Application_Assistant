@@ -22,7 +22,7 @@ ALARM_RE = re.compile(r"(your )?application (was )?(submitted|sent)|thank(s| you
 RESUME_FILE_RE = re.compile(r"\.(pdf|docx?|rtf|txt)\b", re.I)
 
 # Code-rule patterns (ported from RuleDecider, P3 T2).
-_CLOSED_RE = re.compile(r"no longer accepting applications|this job is (closed|no longer)", re.I)
+_CLOSED_RE = re.compile(r"(no longer|not currently) accepting applications|this job is (closed|no longer)", re.I)
 _APPLIED_RE = re.compile(r"\bapplied \d+ \w+ ago\b|application submitted|see application", re.I)
 _VALIDATION_RE = re.compile(r"this field is required|is required\.|please enter a valid |"
                             r"invalid (value|format|email|phone)", re.I)
@@ -42,8 +42,14 @@ _UPLOAD_TRIGGER_RE = re.compile(r"^\s*(upload|attach|add)\b.{0,20}\b(resume|rés
 _SITE_CHROME_RE = re.compile(r"^\s*(search\b|select language\s*$|set alert for similar jobs\b)", re.I)
 _FORM_IFRAME_RE = re.compile(r"greenhouse|lever\.co|workday|myworkdayjobs|ashbyhq|smartrecruiters|icims|jobvite|"
                              r"apply|application|candidate|career|recruit|/jobs?/|(?<![a-z])forms?(?![a-z])", re.I)
+# The "Apply with LinkedIn" widget host matches _FORM_IFRAME_RE on "apply" but is never the form: it is an
+# iframe on the ATS posting whose whole configuration arrives in its query string, so the hosted-form hop
+# navigates to it bare and it paints nothing (live 2026-10-08, Genesys: the run reached the right Workday
+# posting, then hopped to applywithlinkedin.myworkdaygadgets.com/awli/ and reported `blank page` twice —
+# the widget script is requested with apiKey=undefined and applyUrl pointing back at the gadget itself).
 _NON_FORM_IFRAME_RE = re.compile(r"google\.[a-z.]+/maps|maps\.google|youtube|vimeo|recaptcha|hcaptcha|doubleclick|"
-                                 r"googletagmanager|analytics|onetrust|cookiebot|consent", re.I)
+                                 r"googletagmanager|analytics|onetrust|cookiebot|consent|"
+                                 r"applywithlinkedin|myworkdaygadgets|talentwidgets", re.I)
 
 
 @dataclass
