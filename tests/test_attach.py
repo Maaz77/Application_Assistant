@@ -20,6 +20,22 @@ from assistant.driver.cdp import ChromeLaunchError, attach_chrome, browser_ws
 pytestmark = pytest.mark.unit
 
 
+def test_the_socket_is_opened_with_no_keepalive(monkeypatch):
+    """The library's keepalive closed a live socket with `1011 keepalive ping timeout` mid-navigation
+    (2026-10-08): its reader pauses while `max_queue` frames are unread, and a paused reader answers no
+    ping. This program drains only inside `call`, so one long model call is enough to pause it."""
+    seen = {}
+
+    def fake_connect(url, **kwargs):
+        seen.update(url=url, **kwargs)
+        return object()
+
+    monkeypatch.setattr(cdp_mod, "connect", fake_connect)
+    cdp_mod.Cdp("ws://127.0.0.1:9222/devtools/browser/x")
+    assert seen["ping_interval"] is None
+    assert seen["max_queue"] == 64       # flow control stays: what must not kill the socket is the ping
+
+
 class _Handler(http.server.BaseHTTPRequestHandler):
     status = 404
     body = b""

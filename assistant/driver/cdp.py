@@ -60,8 +60,17 @@ class Cdp:
         self._ids = itertools.count(1)
         # `open_timeout` is separate because Chrome gates each debugging client behind a user-approval
         # dialog: the handshake waits on a person, not on the network, so it gets more room.
+        # `ping_interval=None` switches off the library's keepalive (its default pings every 20 s and
+        # closes the socket when no pong arrives within 20 s). It killed a live connection on 2026-10-08:
+        # the sync reader stops reading entirely while `max_queue` unread frames are buffered (flow
+        # control, `with self.recv_flow_control` in websockets/sync/connection.py), and a reader that
+        # reads nothing cannot answer a ping either. This program drains the socket only inside `call`,
+        # so a long model call between two calls lets a chatty page fill the queue — and the run came
+        # back to `sent 1011 (internal error) keepalive ping timeout` mid-navigation. Nothing is lost by
+        # dropping it: this socket is on loopback, with no NAT or proxy to keep a hole open, and a Chrome
+        # that really went away is caught by `DriverTimeout` on the next call, which is a clean stop.
         self._ws = connect(ws_url, max_size=max_size, open_timeout=open_timeout or timeout,
-                           close_timeout=5, max_queue=64)
+                           close_timeout=5, max_queue=64, ping_interval=None)
         self.events: deque[dict] = deque(maxlen=400)
         # targetId -> openerId, filled from Target.targetCreated. Never cleared, so a tab opened by the
         # job tab is still identifiable after events.clear() (P2 tab handling; deque above can evict).

@@ -2461,3 +2461,34 @@ the breaker: `StopRun` is raised before any record is written, so that job never
 `Applications/4470932445_The-Flex_Senior-Full-Stack-Product-Engineer` and needs no requeue — the next run picks it
 up. Its logs are in the run folder all the same, because the Gateway logs every attempt before anything decides
 what it means.
+
+## 2026-10-08 — run 20261008-212102: the websocket keepalive closed a live CDP socket
+
+The first run with the 180 s chat timeout got two jobs in and then stopped on the third:
+
+```
+■ run stopped: the browser connection closed: Page.navigate: transport closed
+  (sent 1011 (internal error) keepalive ping timeout; no close frame received)
+```
+
+A different fault from the one above, and one the longer timeout makes **more** likely rather than less.
+
+`websockets` 17.1 pings every 20 s and closes the socket when no pong arrives within 20 s
+(`ping_interval=20`, `ping_timeout=20` in `websockets/sync/client.py`; the close is `keepalive()` in
+`sync/connection.py`). Its synchronous reader also implements flow control by **stopping entirely**: the
+assembler is built with `pause=self.recv_flow_control.acquire`, and the reader loop holds
+`with self.recv_flow_control` around its `socket.recv`, so once `max_queue` frames are buffered unread it
+reads nothing at all — ping frames included. A reader that reads nothing cannot answer a ping, so the
+keepalive concludes the peer is gone and closes a socket whose peer is fine.
+
+This program drains the CDP socket only inside `Cdp.call`, which recv's in a loop and files every message
+that is not its own answer into `events`. Between two calls nothing drains, and the gap between two calls
+is exactly where a model request sits: 48.9 s on the page measured above, up to 180 s now. A job page that
+keeps emitting CDP events fills 64 frames in that window, the reader pauses, and ~20 s later the keepalive
+closes the connection. The `Page.navigate` in the message is only the next call, which found the socket
+dead.
+
+`ping_interval=None` on the one `connect` in `assistant/driver/cdp.py`. Nothing is lost: the socket is on
+loopback, where there is no NAT or proxy to keep a hole open, and a Chrome that really went away is caught
+by `DriverTimeout` on the next call — already a clean stop (exit 3) since
+`7a7fdf2`. `max_queue=64` stays, because flow control is not the bug; killing the socket over it was.
