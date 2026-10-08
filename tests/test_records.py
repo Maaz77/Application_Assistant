@@ -250,3 +250,32 @@ def test_recorded_class_falls_back_to_job_md_heading(ws):
     j = Job.from_dir(job)
     assert records.recorded_class(None, j) == "external_ats"
     assert records.recorded_class("Needs Attention: captcha — robots", j) == "captcha"   # Notes wins
+
+
+def test_requeue_takes_a_parked_job_from_pending_review(ws):
+    """`requeue --from pending-review` re-runs a job that is already parked and waiting to be submitted
+    (user decision 2026-10-08, to exercise code paths whose only jobs were all parked). records.requeue
+    already took the source directory; what is new is the CLI naming Pending-Review/ as that source. The
+    "Needs Attention: …" Notes line it strips is simply not there for a parked job, so nothing else changes."""
+    from assistant import cli
+    t = Tracker(ws / "Job_Tracker.numbers").load()
+    q = build_queue(ws / "Applications", t)
+    rec = Recorder(t, Journal(ws / "runs/1/journal.jsonl"), ws, ws / "Pending-Review", ws / "Needs-Attention",
+                   new_rows=set(q.new_rows))
+    job, _new = q.jobs
+    rec.record(job, PENDING_REVIEW, "## parked here", None)
+    assert (ws / "Pending-Review" / job.folder).exists()
+    assert not records.requeue(Tracker(ws / "Job_Tracker.numbers").load(),
+                               Journal(ws / "runs/2/journal.jsonl"),
+                               ws / "Needs-Attention", ws / "Applications")      # not there, so untouched
+
+    lines = records.requeue(Tracker(ws / "Job_Tracker.numbers").load(), Journal(ws / "runs/3/journal.jsonl"),
+                            ws / "Pending-Review", ws / "Applications")
+    assert lines == [f"requeued {job.folder}"]
+    assert (ws / "Applications" / job.folder).exists() and not (ws / "Pending-Review" / job.folder).exists()
+    row = Tracker(ws / "Job_Tracker.numbers").load().find("4100000001")[1]
+    assert row["Status"] == RESUME_BUILT
+    assert "## parked here" in (ws / "Applications" / job.folder / "job.md").read_text()
+    assert "4100000001" in [j.key for j in
+                            build_queue(ws / "Applications", Tracker(ws / "Job_Tracker.numbers").load()).jobs]
+    assert cli.REQUEUE_FROM["both"] == ("needs_attention", "pending_review")

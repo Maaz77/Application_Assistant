@@ -53,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
     rep.add_argument("path", type=Path, help="path to a job folder within a run")
     rep.add_argument("--live", action="store_true", help="call real APIs on cache miss and save to fixture")
     req = sub.add_parser("requeue", help="put Needs-Attention jobs back in the queue (status Resume Built)")
+    req.add_argument("--from", dest="src", default="needs-attention",
+                     choices=("needs-attention", "pending-review", "both"),
+                     help="which folder to take jobs from (default: Needs-Attention/). "
+                          "pending-review re-runs a job that is already parked and WAITING FOR YOU TO SUBMIT, "
+                          "so its filled form is discarded and built again")
     req.add_argument("--job", metavar="URL", help="only the job with this LinkedIn URL")
     req.add_argument("--class", dest="klass", metavar="CLASS",
                      help="only jobs a run recorded under this Needs-Attention class (e.g. external_ats)")
@@ -518,16 +523,28 @@ def capture(cfg: config_mod.Config, url: str) -> int:
     return 0
 
 
-def requeue(cfg: config_mod.Config, job_url: str | None, klass: str | None = None) -> int:
+REQUEUE_FROM = {"needs-attention": ("needs_attention",), "pending-review": ("pending_review",),
+                "both": ("needs_attention", "pending_review")}
+
+
+def requeue(cfg: config_mod.Config, job_url: str | None, klass: str | None = None,
+            src: str = "needs-attention") -> int:
     """Needs-Attention/ → Applications/ with Status back to Resume Built; the tracker is backed up first.
-    `klass` limits it to the jobs a run recorded under that class (T6: `--class external_ats`)."""
+    `klass` limits it to the jobs a run recorded under that class (T6: `--class external_ats`).
+    `src` can instead take jobs from Pending-Review/ — a job that is already parked and waiting for the user
+    to submit, so re-running it DISCARDS that filled form and builds it again (user decision 2026-10-08,
+    to exercise code paths whose only jobs were all parked). `records.requeue` already takes the source
+    directory, and the "Needs Attention: …" Notes line it strips simply is not there for a parked job."""
     from assistant.tracker import job_id
     run_dir = RUNS / f"{datetime.now():%Y%m%d-%H%M%S}-requeue"
     try:
         tracker = Tracker(cfg.path("tracker"), cfg.paths.tracker_sheet).load()
         tracker.backup(run_dir / "tracker-backup.numbers")
-        lines = records.requeue(tracker, records.Journal(run_dir / "journal.jsonl"), cfg.path("needs_attention"),
-                                cfg.path("applications"), job_id(job_url) if job_url else None, klass)
+        journal = records.Journal(run_dir / "journal.jsonl")
+        key = job_id(job_url) if job_url else None
+        lines = []
+        for name in REQUEUE_FROM[src]:
+            lines += records.requeue(tracker, journal, cfg.path(name), cfg.path("applications"), key, klass)
     except (TrackerError, StopRun) as exc:
         print(f"✗ {exc}")
         return EXIT_STOPPED
@@ -554,7 +571,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "capture":
         return capture(cfg, args.url)
     if args.cmd == "requeue":
-        return requeue(cfg, args.job, args.klass)
+        return requeue(cfg, args.job, args.klass, args.src)
     if args.cmd == "replay":
         from tests.replay.harness import replay_job
         return replay_job(args.path, mode="live" if args.live else "strict", cfg=cfg)

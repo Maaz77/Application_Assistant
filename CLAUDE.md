@@ -43,6 +43,7 @@ A plain venv is used, because Poetry's pyenv shim is broken on this Mac. The bro
 .venv/bin/python -m assistant run --no-record --job URL  # fill and park one job; no tracker/folder/job.md writes
 .venv/bin/python -m assistant run --limit 3              # a recorded run
 .venv/bin/python -m assistant requeue [--job URL]        # Needs-Attention/ → Applications/, Status back to Resume Built
+.venv/bin/python -m assistant requeue --from pending-review    # re-run an ALREADY-PARKED job: discards its filled form
 .venv/bin/python -m assistant capture URL                # read-only page snapshot into tests/captured/
 .venv/bin/python -m assistant tripwire [--live]          # the never-submit test suite
 ```
