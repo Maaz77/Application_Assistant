@@ -596,3 +596,31 @@ def test_a_checkbox_whose_own_label_means_no_is_still_ticked(tmp_path):
                     options=["Yes", "No"], required=True, answer="No", source="profile", quote="x",
                     relies_on=None)
     assert wants_checked(auth, no_radio) is True
+
+
+def test_a_toggle_whose_control_vanishes_after_the_click_is_not_a_broken_form(tmp_path):
+    """Live 2026-10-08: `toggle e165 state=False` reported `1/1 ops ok` and the very next observe listed no
+    such element — LinkedIn drops the "Follow <company>" checkbox from the DOM once it is unticked. The
+    read-back then found neither the control nor a checked member of its group and called it "field would not
+    accept its value", sending a job that had parked cleanly to Needs Attention. A control that is gone
+    cannot be re-read, and `pages.gate` still checks every required field on the final page."""
+    from assistant.browser import Element, Table
+    from assistant.fill import mismatches
+    from assistant.llm_inference import Question
+    from assistant.pages import Page
+
+    follow = "Follow Digital Manufacturing Ireland to stay up to date with their page"
+    url = "https://www.linkedin.com/jobs/view/4470941188/"
+    gone = Page(url=url, title="Apply", text="Review your application",
+                table=Table(url=url, elements=[Element(ref="e153", role="button", name="Back")]))
+    q = Question(id="c_e165", question=follow, kind="choice", ref="e165", option_ref="e165",
+                 options=[follow, "No"], required=False, answer="No", source="computed", quote=None,
+                 relies_on=None)
+    assert mismatches([q], gone) == []
+
+    # A radio group has no ref of its own, so its own fallback must keep deciding — an unanswered group on a
+    # page that no longer lists it is still a mismatch, not a free pass.
+    group = Question(id="r_e149", question="Are you comfortable working in an onsite setting?", kind="choice",
+                     ref=None, option_ref="e149", options=["Yes", "No"], required=True, answer="No",
+                     source="profile", quote="x", relies_on=None)
+    assert mismatches([group], gone) == [group]

@@ -389,7 +389,16 @@ def mismatches(items: list[Question], p: Page) -> list[Question]:
                 return bool(picked) and _fuzzy_holds(q.answer or "", picked)
             # Otherwise the ref is gone after a re-render: ask this question's own group what is checked.
             cur = checked_option(q.question, p)
-            return cur is not None and pages.norm_label(cur) == pages.norm_label(q.answer or "")
+            if cur is not None:
+                return pages.norm_label(cur) == pages.norm_label(q.answer or "")
+            # Neither the control nor its group is on the page any more. LinkedIn DROPS the
+            # "Follow <company>" checkbox from the DOM once it is unticked (live 2026-10-08: the toggle
+            # reported 1/1 ops ok and the next observe listed no such element, which read back as "field
+            # would not accept its value" and sent a parked job to Needs Attention). A control that is gone
+            # cannot be re-read, the act itself succeeded, and `pages.gate` still checks every required
+            # field on the final page — so this is not a field refusing its value. Only when the question
+            # HAD a ref of its own: a radio group has none, and its fallback above must keep deciding.
+            return bool(q.ref) and by_ref.get(q.ref) is None
         e = by_ref.get(q.ref or "")
         if e is None:
             return False

@@ -22,7 +22,11 @@ ALARM_RE = re.compile(r"(your )?application (was )?(submitted|sent)|thank(s| you
 RESUME_FILE_RE = re.compile(r"\.(pdf|docx?|rtf|txt)\b", re.I)
 
 # Code-rule patterns (ported from RuleDecider, P3 T2).
-_CLOSED_RE = re.compile(r"(no longer|not currently) accepting applications|this job is (closed|no longer)", re.I)
+# A posting can also simply be taken down: careers.toasttab.com served "The page you are trying to view is
+# no longer available." for a job that had parked four hours earlier (live 2026-10-08), and with no form
+# on it the run reported `unsupported_ats: no application form`, which reads like a site we cannot drive
+# rather than a job that is gone.
+_CLOSED_RE = re.compile(r"(no longer|not currently) accepting applications|this job is (closed|no longer)|no longer available", re.I)
 _APPLIED_RE = re.compile(r"\bapplied \d+ \w+ ago\b|application submitted|see application", re.I)
 _VALIDATION_RE = re.compile(r"this field is required|is required\.|please enter a valid |"
                             r"invalid (value|format|email|phone)", re.I)

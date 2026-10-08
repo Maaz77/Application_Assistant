@@ -2198,3 +2198,80 @@ which is part of the application rather than a cookie banner.
 - `observer.js`'s overlay list is `.slice(0, 3)`, so a fourth visible dialog never reaches `Page.dialogs`.
 - US-004's "the tester never clicked anything" is the tester's own account of its own restraint; no
   third-party artifact corroborates it.
+
+## 2026-10-08 — run 20261008-192511: the strict refusal works, and two defects only a run could find
+
+The user authorised `requeue --from both`, discarding five parked forms, so the paths whose only jobs were all
+parked could finally be exercised. The run had to be made twice: the first attempt died after two jobs with
+
+```
+assistant.driver.cdp.CdpError: Page.navigate: transport closed
+  (sent 1011 (internal error) keepalive ping timeout; no close frame received)
+```
+
+— the CDP websocket's keepalive ping timed out between jobs. `process()`'s own `browser.open` sits **outside**
+`run_pages` and `run_external`, whose `DriverError` handlers would have caught it, so the traceback escaped
+`main()` and aborted the whole run. `external.py` already carried a comment saying a CDP error outside the loop
+body must be a job outcome rather than a traceback; the same reasoning had never been applied to the open that
+**starts** every job. A dead socket needs another "Allow remote debugging?" grant and every later job would fail
+identically, so it is now a clean stop — exit 3, which CLAUDE.md already covers as a hung browser call, with the
+job left untouched. Any other open failure stays one job's `load_failure`.
+
+### The strict refusal, live
+
+All seven unlabelled Flex groups came back refused, on both forms:
+
+```
+'Select one (Male / Female / Prefer not to say)'            -> None  "the form gives this question no label…"
+'Select one (Single / Married / I prefer not to say / …)'    -> None
+'Select one (Beginner / Intermediate / Fluent/Native)'      -> None
+'Select one (Yes, I graduated / No, I never went to …)'      -> None
+```
+
+No `Gender → Male` quoting the candidate's own name, and the placeholder naming its options makes the Scratch
+Pad readable. Linda AI parked as `⏸ parked — 1 answer needed` on the onsite question — US-001's intended
+behaviour, where the first run of the day had reported `broken_form: the Easy Apply step did not advance`.
+
+It also fixed, incidentally, the misleading record noted earlier in this file: Linda AI's resume-card question
+is now `Select one (Amin_Accenture_AI-Engineer.pdf / …)` and **refused**, so `answers.json` no longer carries a
+stale resume pick that never took effect, while the deterministic upload still attaches the right file.
+
+Both Flex forms kept their legitimately-sourced answers (`Full Name`, `Email`, `Phone`, `nationality`, and on
+one of them `Age → 27` and the salary, both `source: profile`). The two forms still differ — one answered Age
+and salary, the other left them for the Scratch Pad — which is ordinary model variance on the same profile, not
+a rule misfiring.
+
+### Toast was not a regression: the posting had been taken down
+
+`needs attention — no application form on careers.toasttab.com (other)`. The final observation explains it:
+
+```
+https://careers.toasttab.com/en-US/jobs/8226021?gh_jid=8226021
+text: … The page you are trying to view is no longer available. Check out these resources below: …
+```
+
+The job parked cleanly at 15:21 and was gone by 19:25. `unsupported_ats: no application form` reads like a site
+the program cannot drive rather than a job that no longer exists, so `_CLOSED_RE` now also matches
+`no longer available` and the outcome is `closed`.
+
+### DMI regressed on the Follow checkbox — LinkedIn deletes the control once it is unticked
+
+`field would not accept its value: 'Follow Digital Manufacturing Ireland to stay up to date with their page'
+(after 2 attempts)`, which sent a job that had parked cleanly to Needs Attention. The untick itself worked:
+
+```
+63 act {'ops': [{'op': 'toggle', 'ref': 'e165', 'state': False}]}   ->  1/1 ops ok  + toggle e165  138ms
+64 observe …                                                       ->  no element named "Follow …" at all
+```
+
+So `mismatches.holds` found neither `e165` nor a checked member of its group, took the radio-group fallback,
+and called a successful untick a refused field. A control that is gone cannot be re-read, the act reported
+success, and `pages.gate` independently checks every required field on the final page — so a toggle whose own
+`ref` has vanished is no longer treated as a refusal. Scoped by `bool(q.ref)`: a radio group has no ref of its
+own, so its existing `checked_option` fallback keeps deciding, and an unanswered group on a page that no longer
+lists it is still a mismatch.
+
+Both defects are the same lesson this file has now recorded twice in one day: **the unit test proves the
+mechanism, the run finds the integration.** The toggle fix passed seven unit tests, including one driving
+`run_pages` over a pre-ticked DIV checkbox, and still broke on the one behaviour no fixture had — LinkedIn
+removing the element afterwards.

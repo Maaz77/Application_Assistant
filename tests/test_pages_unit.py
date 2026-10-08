@@ -307,3 +307,13 @@ def test_a_consent_click_the_guard_refuses_is_not_reported_as_declined():
 
     ctx = SimpleNamespace(browser=SimpleNamespace(act=act), session="t")
     assert navigate.decline_consent(ctx, p) is False and len(calls) == 1
+
+
+def test_a_posting_that_has_been_taken_down_is_closed_not_an_unsupported_ats():
+    """careers.toasttab.com served "The page you are trying to view is no longer available." for a job that
+    had parked four hours earlier. With no form on it the run reported `unsupported_ats: no application form
+    on careers.toasttab.com`, which reads like a site we cannot drive rather than a job that is gone."""
+    gone = ("Explore Locations See all jobs The page you are trying to view is no longer available. "
+            "Check out these resources below: View Current Openings")
+    assert pages._CLOSED_RE.search(gone)
+    assert not pages._CLOSED_RE.search("Apply for this job. Resume/CV required. Submit application")
