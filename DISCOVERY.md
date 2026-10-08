@@ -1849,3 +1849,58 @@ cannot settle it either, because `browser.close_tab_id` was the one browser call
 `close_tab_id` now logs (`"tool": "close_tab"`). The competing explanation to rule out live is that the two
 tabs are the two *different* Flex postings (`.../The-Flex/d9457005-…` and `.../The-Flex/59e8ac69-…`), whose
 titles are nearly identical — both jobs parked in this run, and D13 keeps a parked job's tab open on purpose.
+
+## 2026-10-08 — run 20261008-143810 (after the three fixes): what it settled and what it exposed
+
+```
+⚠ needs attention  Genesys: load_failure: blank page (after 2 attempts)
+⚠ needs attention  Mastercard: no way to start the application
+✓ parked           Linda AI – Founding Software Engineer
+⏸ parked — 2 answers needed  The Flex – Senior Software Engineer
+⚠ needs attention  Toast: field would not accept its value: 'Are you currently based in Ireland? (required)'
+⏸ parked — 3 answers needed  The Flex – Senior Full-Stack Product Engineer
+✓ parked           Digital Manufacturing Ireland
+```
+
+**The consent fix works.** `click e53 → I do not accept` (action 22), and the next delta shows the page coming
+back to life — `reachable=10/48` and a run of `(now reachable)` markers. The fill then reported **8/8 ops ok**
+where the previous run reported `1/8 ops ok (stopped early)` with seven `occluded: occluded`.
+
+**The Flex "two tabs" is two jobs, not a leak.** `close_tab` now logs, and every external-ATS job in this run
+logs exactly one: Genesys 1, The Flex (SSE) 1, Toast 1, The Flex (Full-Stack) 1; the three LinkedIn-only jobs log
+0, as they should. Action 11 switches to the ATS tab and action 12 closes the LinkedIn tab
+(`closed tab 16A8DED68E4D128BB49A4684B3A3AC1B`). The two Ashby tabs left open are the two *different* Flex
+postings (`d9457005-…` and `59e8ac69-…`), both parked, both waiting for the user to submit — which is D13 working
+as designed, not a bug.
+
+**Linda AI parked.** The router answered the onsite question `No` from the profile this time, so the new
+required-radio rule was not the thing that saved it; the rule is the net for the next time the router returns
+prose. Both runs agree the question is answerable from Profile.md.
+
+### Toast, second defect: a native `<select>`'s read-back could never pass
+
+With the form finally fillable, one field remained: `'Are you currently based in Ireland? (required)'`, failing
+twice while its own op succeeded — `+ select e31 → No  33ms` followed by `= no change (48 elements)`. The
+observation explains it:
+
+```json
+{"ref": "e31", "role": "combobox", "name": "Are you currently based in Ireland? (required)",
+ "value": "3e6420fe23fa0dd5632749f038b51ae0", "current": "No", "tag": "SELECT",
+ "options": [{"ref": "e31:1", "label": "", "selected": false},
+             {"ref": "e31:2", "label": "Yes", "value": "81d4831b…", "selected": false},
+             {"ref": "e31:3", "label": "No",  "value": "3e6420fe…", "selected": true}]}
+```
+
+The field **was** set correctly. `answers.json` has `ref: "e31", option_ref: "e31:3"`, and `fill.mismatches`'
+`holds` starts with `by_ref.get(q.option_ref)` — but a `<select>`'s `<option>` is not a top-level element, it
+lives in the combobox's own `options` list, so that lookup always misses. `holds` then took the
+`if q.option_ref:` branch and asked `checked_option(q.question, p)`, which looks for a **checked radio** in that
+question's group. A `<select>` has none, so `holds` returned False for every select the plan drove through an
+`option_ref` — the read-back could not pass for this shape at all. It was simply invisible before, because the
+seven occluded siblings failed first and the error listed all eight together.
+
+**Fix.** Inside that branch, resolve the option ref's owner (`q.option_ref.partition(":")[0]`) and, when it has
+options, compare against the selected option's **label**, else `current`. Not `value` — Greenhouse makes the
+option values opaque hashes. The radio-group fallback stays for its real case (a ref gone after a re-render).
+Test: `test_fill_loop.py::test_a_native_select_reads_back_from_the_control_not_the_option`, built from the live
+element above; it fails without the fix and still catches a genuinely unset choice.
