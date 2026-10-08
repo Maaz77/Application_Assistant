@@ -147,6 +147,10 @@ def _hand_off(ctx) -> pages.Page:
         p = ctx.read()
         if ctx.book.current_handle(ctx.session) != before:              # a tab was already adopted
             return p
+        # A consent modal over the landed form makes pages.covered true, so form_is_here stays false and
+        # the hand-off would time out on a form that is right there. Decline it; the next read sees the
+        # form (live 2026-10-08, careers.toasttab.com's "Cookie consent" <dialog>).
+        navigate.decline_consent(ctx, p)
         if pages.form_is_here(p) and "linkedin" not in p.host:          # same-tab navigation to the form
             return p
         il = _leaving_control(p)
@@ -204,6 +208,11 @@ def run_external(ctx) -> Parked:
                 # the loop. settle re-reads until the page is no longer `unsettled` (an Apply control or real
                 # field is present), so classify runs on the stable page.
                 p = pages.settle(ctx.read, sleep=ctx.sleep)
+                # A cookie-consent modal <dialog> makes the rest of the page inert, so no field can be
+                # typed and no forward control can be clicked. Decline it first (live 2026-10-08, Toast).
+                if navigate.decline_consent(ctx, p):
+                    filled = False
+                    continue
                 v = pages.classify(p)
                 if v.kind == "alarm":
                     raise StopRun(f"ALARM: confirmation text on {p.url}")

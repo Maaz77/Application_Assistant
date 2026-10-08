@@ -21,7 +21,10 @@ EASY_APPLY_RE = re.compile(r"^\s*easy apply\b", re.I)
 APPLY_RE = re.compile(r"^\s*apply\b", re.I)
 CLOSED_RE = re.compile(r"no longer accepting applications|this job is (closed|no longer)", re.I)
 APPLIED_RE = re.compile(r"\bapplied\b|application submitted|see application", re.I)
-COOKIE_REJECT_RE = re.compile(r"^\s*(reject|decline|only necessary|refuse)\b", re.I)
+COOKIE_REJECT_RE = re.compile(r"^\s*(reject|decline|refuse|only necessary|necessary (cookies )?only|"
+                              r"(i )?do ?n[o']t accept)\b", re.I)
+# An open modal dialog that is a cookie/consent dialog rather than the application's own.
+CONSENT_DIALOG_RE = re.compile(r"cookie|consent|privacy preference|gdpr", re.I)
 
 DIALOG_WAIT = 8            # s: LinkedIn shows the Easy Apply dialog a moment after the click
 ADVANCE_WAIT = 8          # s: wait for the dialog to change after an advance click
@@ -48,10 +51,37 @@ def external_apply(p: pages.Page):
                  and APPLY_RE.search(e.name or "") and not EASY_APPLY_RE.search(e.name or "")), None)
 
 
+def consent_modal(p: pages.Page) -> bool:
+    """True when every open modal dialog is a cookie/consent dialog.
+
+    A native modal <dialog> makes the rest of the page inert (HTML: "blocked by a modal dialog"), so every
+    field reads back `occluded` and nothing can be typed. careers.toasttab.com opens exactly that over its
+    embedded Greenhouse form (live 2026-10-08: eight fields failed with `occluded`, twice, → broken_form).
+    The observer's `consent` marker keys off a CMP container selector and Toast's own <dialog> is in none of
+    them, so the dialog's accessible name is the signal. `all` keeps the application's own dialog out: the
+    Easy Apply modal is named "Apply to <company>"."""
+    return bool(p.dialogs) and all(CONSENT_DIALOG_RE.search(name or "") for name in p.dialogs)
+
+
 def cookie_reject(p: pages.Page):
-    """A cookie-consent reject/decline control (inside a known consent container, per the observer)."""
+    """A cookie-consent reject/decline control: inside a known consent container (per the observer), or
+    inside an open consent modal (Toast's own <dialog>, which no CMP selector matches)."""
+    # ponytail: reject/decline labels only. A consent wall offering just Accept and Close stays stuck —
+    # add "close" here when a live site needs it, and keep the privacy-preserving option first.
+    modal = consent_modal(p)
     return next((e for e in p.elements
-                 if e.role in {"button", "link"} and e.consent and COOKIE_REJECT_RE.search(e.name or "")), None)
+                 if e.role in {"button", "link"} and (e.consent or (modal and e.dialog))
+                 and COOKIE_REJECT_RE.search(e.name or "")), None)
+
+
+def decline_consent(ctx, p: pages.Page) -> bool:
+    """Click a cookie-consent reject when one is up. True if something was clicked, so the caller re-reads
+    and looks again. Used by both entry (LinkedIn) and the external ATS loop."""
+    c = cookie_reject(p)
+    if c is None:
+        return False
+    ctx.browser.act([{"op": "click", "ref": c.ref}], ctx.session, p.table, stop_on_error=False)
+    return True
 
 
 def in_dialog(p: pages.Page) -> list:
@@ -111,9 +141,7 @@ def enter(ctx, p: pages.Page) -> str:
     if external_apply(p) is not None:
         raise GoExternal()
     # 5. a cookie banner: decline it, then look again.
-    c = cookie_reject(p)
-    if c is not None:
-        ctx.browser.act([{"op": "click", "ref": c.ref}], ctx.session, p.table, stop_on_error=False)
+    if decline_consent(ctx, p):
         return "cookie"
     # 6. last resort: one Jev choice over the visible, guard-allowed buttons.
     return _entry_choice(ctx, p)

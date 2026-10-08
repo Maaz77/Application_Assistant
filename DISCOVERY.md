@@ -1749,3 +1749,103 @@ a new `test_settle_is_bounded_by_wall_clock_not_read_count` proves a slow, alway
 a 10 s budget, not 10. **Confirmed live:** `run --no-record --limit 3` finished on its own in ~97 s (exit 2) —
 Genesys now gives up in 48 s (`load_failure: blank page (after 2 attempts)`) instead of hanging, Mastercard
 `navigation` in 2 s, Linda AI **parked** in 19 s; no submit, no ALARM, report written.
+
+## 2026-10-08 — three defects from run 20261008-094723
+
+### Linda AI: a required LinkedIn radio group was invisible to every required check
+
+`Linda AI – Founding Software Engineer` came back `broken_form — the Easy Apply step did not advance (after 2
+attempts)` after parking cleanly for the previous ten runs. The reported symptom is a dead end; the page text in
+`browser_actions.jsonl` (actions 62 and 72, the two `click e154 → Review`) names the cause:
+
+```
+Apply to Linda AI 3/4 pages Additional Questions
+Have you completed the following level of education: Bachelor's Degree?* Yes No
+Are you comfortable working in an onsite setting?* Yes No This field is required
+Are you legally authorized to work in Ireland?* Yes No   Back Review
+```
+
+`Review` did nothing because LinkedIn was refusing it: the onsite radio group was still empty.
+
+**Why it was empty.** `answers.json` for that run: `"Are you comfortable working in an onsite setting?" →
+answer: null, source: "generated", note: "generated text not allowed for this question"`. The free router
+answered a `choice` question with prose, `judge_questions` dropped it (correctly), and the question was left
+unanswered. In the ten previous runs the same router answered `Yes`/`No` from the profile — so this is **model
+variance exposing a latent gap, not a code regression**.
+
+**Why the gap.** An unanswered *required* question raises `ParkedAtQuestion` and the job parks with the question
+noted. This group was classified **optional**, so it went to `ctx.optional_empty` and the loop advanced. All three
+required signals miss a LinkedIn radio group at once:
+
+- the radios are `DIV role=radio`, so `e.required` is false and there is no `aria-required`;
+- `observer.js` derives `required` partly from `/\*/.test(name)`, but the aria-label is the bare question —
+  LinkedIn puts the asterisk in a separate span of the label text, not in the accessible name;
+- `probes.REQUIRED_EMPTY` queries `input,select,textarea`, so it returned `{"n": 0, "items": []}` on this page
+  (visible in the action log) and `_is_required`'s third branch had nothing to match.
+
+**Fix.** `llm_inference._starred_in_text(name, p)`: true when the page text shows `<name>*` (or `<name> *`).
+It is OR-ed into the radio-group `required` only — deliberately **not** into `_is_required` generally, because a
+text field's label is routinely a substring of another one's (`Name` inside `Last Name*`), which would mark
+optional fields required and park jobs that fill fine today. Tests in `test_answers.py`:
+`test_a_starred_radio_group_is_required_even_when_the_dom_says_otherwise` (built from the live page-3 elements,
+asserting first that the probe and the observer both see nothing), `test_the_asterisk_rule_does_not_leak_into_
+text_fields`, and `test_an_unanswered_starred_radio_group_is_an_uncovered_required_question`.
+
+**Expected new outcome:** `⏸ parked — 1 answer needed`, with the onsite question on the Scratch Pad. That is the
+distinct park-at-question label from 6975e36, not `✓ parked`.
+
+### Toast: a cookie-consent modal `<dialog>` made the whole form inert
+
+`Toast – Software Engineer II, IQ Grow` failed with `field would not accept its value` on eight fields, twice.
+Every `type` op reported `occluded: occluded` while one line in the same observation explained it:
+
+```
+! dialog open: Cookie consent [modal]
+  x type e21 → Legal First Name (required)  occluded: occluded
+  + select e31 → No  33ms
+```
+
+`careers.toasttab.com` opens a **native modal `<dialog>`** named `Cookie consent` over its embedded Greenhouse
+form. A modal dialog makes the rest of the page inert (HTML: "blocked by a modal dialog"), so the press path's
+hit test refuses every click and focus-click; `select` still worked, which is why one op in eight succeeded and
+made the failure look like a field-level problem.
+
+Three things kept the existing cookie handling from firing:
+
+- the observer's `consent` marker keys off `CONSENT_SELECTOR` (OneTrust, Cookiebot, Didomi, Usercentrics,
+  TrustArc, Quantcast). Toast's dialog is in none of them, so `consent` was `''` on all six of its controls;
+- `COOKIE_REJECT_RE` (`reject|decline|only necessary|refuse`) does not match Toast's `I do not accept`;
+- `external.run_external` never called `cookie_reject` at all — only `navigate.enter` did, on the LinkedIn side.
+
+**Fix.** `navigate.consent_modal(p)` is true when **every** open modal dialog name matches
+`cookie|consent|privacy preference|gdpr` — `all`, so the Easy Apply modal (`Apply to <company>`) is never
+mistaken for one, alone or alongside a consent dialog. `cookie_reject` accepts a control that is either in a
+known CMP container or inside such a modal; `COOKIE_REJECT_RE` gained `refuse|necessary (cookies) only|(i) do
+n(o)t accept`. `decline_consent(ctx, p)` is the one click path, used by `navigate.enter` (replacing its inline
+step 5), by the `run_external` loop right after `settle`, and by `external._hand_off`.
+
+The hand-off call fixes a second, latent bug found while testing: `pages.judge().covered` is already true for a
+consent dialog, so `form_is_here` is false and `_hand_off`'s same-tab branch would poll for 24 s and raise
+`navigation: the apply click did not open the external application` on a form that was right there. Toast only
+escaped it by arriving through the new-tab branch.
+
+Toast's reject button is `tag=BUTTON type=button form=""`, so `guard.never_click_element` already allows it: no
+guard change was needed, and `tripwire` still passes (48 tests). `ponytail:` only reject/decline labels are
+matched — a consent wall offering just *Accept* and *Close* would still stick; add `close` when a live site needs
+it. Tests: `test_pages_unit.py` (selection, the Easy Apply dialog, the CMP container still winning) and
+`test_external.py::test_a_consent_modal_is_declined_before_the_external_form_is_filled`, which drives the whole
+`run_external` loop over a fake Toast and fails without the fix. `tests/fake_browser.py` now renders
+`FakePage.modal` into the observation's `overlays`, so `Page.dialogs` is reachable from the fake at all (the field
+was declared and unused).
+
+### The Flex: "two tabs per job" — no cause found by code reading; logging added
+
+The user reports two tabs left open on the Flex application. Code reading does not support a leak:
+`process()` takes `baseline = book.handles()` **before** `browser.open`, so the job's LinkedIn tab is not in the
+baseline, and `tabs.hand_off` switches to the adopted ATS tab and then closes the old one. The run artifacts
+cannot settle it either, because `browser.close_tab_id` was the one browser call that wrote **no** line to
+`browser_actions.jsonl` — the Flex logs show the `tabs switch` (action 11) and nothing after it.
+
+`close_tab_id` now logs (`"tool": "close_tab"`). The competing explanation to rule out live is that the two
+tabs are the two *different* Flex postings (`.../The-Flex/d9457005-…` and `.../The-Flex/59e8ac69-…`), whose
+titles are nearly identical — both jobs parked in this run, and D13 keeps a parked job's tab open on purpose.

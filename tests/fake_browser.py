@@ -103,8 +103,11 @@ class FakeSession:
                 d["opts_total"] = len(e.options)
             actions.append(d)
         files = " ".join(e.value for e in self._page.els if e.role == "file" and e.value)
+        # FakePage.modal → the observation's overlays, which is what renders the real driver's
+        # "! dialog open: <name> [modal]" line and so what pages.read_page reads into Page.dialogs.
+        overlays = [{"name": self._page.modal, "role": "dialog", "modal": True}] if self._page.modal else []
         return {"url": self._page.url, "title": self._page.title, "text": self._page.text + " " + files,
-                "actions": actions, "reachable": len(actions)}
+                "actions": actions, "reachable": len(actions), "overlays": overlays}
 
     def observe(self, *, include_text: bool = True, full: bool = False, focus=None) -> Observation:
         obs = Observation.from_raw(self._raw())

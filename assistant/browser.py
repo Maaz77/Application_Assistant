@@ -283,7 +283,12 @@ class Browser:
         return s.target_id if s is not None else ""
 
     def close_tab_id(self, session: str, target_id: str) -> None:
+        """Close one tab by target id. Logged, so a hand-off's tab close is auditable in the run's
+        browser_actions.jsonl (it was invisible there before, which made a suspected tab leak unprovable)."""
+        t0 = time.monotonic()
         self._session(session).cdp.call("Target.closeTarget", targetId=target_id)
+        self._log("close_tab", {"session": session, "target_id": target_id},
+                  f"closed tab {target_id}", int((time.monotonic() - t0) * 1000))
 
     def close(self, session: str) -> str:
         """Close a session's tab. Use only for the program's own scratch tabs (preflight); never for a

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from assistant import pages
+from assistant import guard, pages
 from assistant.browser import Element, Option, Table
 from assistant.pages import Page, classify, gate
 
@@ -202,3 +202,47 @@ def test_enrich_adds_file_group_labels_and_shown_combo_values():
     t2 = Table(url="u", elements=[Element(ref="e1", role="file", name="Attach")])
     pages.enrich(t2, {"FILE_LABELS": {"n": 2, "more": False, "items": [["a", ""], ["b", ""]]}})
     assert t2.elements[0].label == ""                                            # counts disagree: untouched
+
+
+# --- a cookie-consent modal <dialog> on an external ATS (live 2026-10-08, careers.toasttab.com) ------------
+
+TOAST_CONSENT = [Element(ref="e49", role="button", name="Close", tag="BUTTON", type="button", dialog="<dialog>"),
+                 Element(ref="e50", role="link", name="Cookie Policy", tag="A", dialog="<dialog>"),
+                 Element(ref="e52", role="button", name="Manage Cookies", tag="BUTTON", type="submit",
+                         dialog="<dialog>"),
+                 Element(ref="e53", role="button", name="I do not accept", tag="BUTTON", type="button",
+                         dialog="<dialog>"),
+                 Element(ref="e54", role="button", name="I accept", tag="BUTTON", type="button",
+                         dialog="<dialog>")]
+
+
+def test_a_cookie_consent_modal_is_declined_without_a_cmp_marker():
+    """Toast's consent dialog is a native modal <dialog>, so the page behind it is inert and every field read
+    back `occluded` (eight of them, twice, → broken_form). It is in no CMP container, so the observer sets no
+    `consent` marker: the dialog's own name is the signal, and "I do not accept" is the reject control."""
+    from assistant import navigate
+    p = page(TOAST_CONSENT, text="We use cookies", dialogs=["Cookie consent"])
+    assert navigate.consent_modal(p) is True
+    c = navigate.cookie_reject(p)
+    assert c is not None and c.name == "I do not accept"
+    assert guard.never_click_element(c) is None          # the never-submit guard allows it
+
+
+def test_the_application_dialog_is_never_mistaken_for_a_consent_dialog():
+    """`all` over the open modals keeps the Easy Apply dialog out: its name is "Apply to <company>", so no
+    control inside it is ever treated as a cookie control."""
+    from assistant import navigate
+    els = [Element(ref="e153", role="button", name="Back", dialog="<dialog>"),
+           Element(ref="e154", role="button", name="Review", dialog="<dialog>")]
+    p = page(els, text="Apply to Linda AI 3/4 pages", dialogs=["Apply to Linda AI"])
+    assert navigate.consent_modal(p) is False
+    assert navigate.cookie_reject(p) is None
+    # A consent dialog open at the same time as the application dialog is also not treated as consent-only.
+    assert navigate.consent_modal(page(TOAST_CONSENT, dialogs=["Cookie consent", "Apply to Linda AI"])) is False
+
+
+def test_cookie_reject_still_prefers_a_cmp_container_control():
+    from assistant import navigate
+    p = page([Element(ref="e1", role="button", name="Reject all", consent="#onetrust-banner-sdk")],
+             text="We use cookies")
+    assert navigate.cookie_reject(p).ref == "e1"

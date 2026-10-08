@@ -193,6 +193,25 @@ def _is_required(name: str, attr_required: bool, p: Page) -> bool:
     return False
 
 
+def _starred_in_text(name: str, p: Page) -> bool:
+    """True when the page SHOWS '<name>*' although the control itself carries no required marker.
+
+    LinkedIn's Yes/No radios are DIV role=radio: `required` is false, `aria-required` is absent, the
+    aria-label drops the asterisk, and probes.REQUIRED_EMPTY only scans input/select/textarea — so the
+    only required signal left is the visible question text (live 2026-10-08, Linda AI page 3: "Are you
+    comfortable working in an onsite setting?*" was treated as optional, left empty, and "Review" then
+    refused to advance → a bogus broken_form instead of parking with the question noted).
+
+    Radio groups only. A text field's label is routinely a substring of another one's ("Name" inside
+    "Last Name*"), which would mark optional fields required and park jobs that fill fine today.
+    """
+    label = pages.norm_label(name)
+    if not label:
+        return False
+    text = pages.norm_label(p.text)
+    return f"{label}*" in text or f"{label} *" in text
+
+
 def _group_radios(radios: list) -> dict[str, list]:
     """Group radio elements: by group field, then by shared name, then by scope."""
     grouped: dict[str, list] = {}
@@ -323,7 +342,7 @@ def extract_questions(p: Page) -> Extraction:
     for _key, members in _group_radios(radios).items():
         qid = f"r_{members[0].ref}"
         q_text, opts, omap, cur = _radio_q(_key, members, p)
-        req = _is_required(q_text, any(m.required for m in members), p)
+        req = _is_required(q_text, any(m.required for m in members), p) or _starred_in_text(q_text, p)
         questions.append(Question(
             id=qid, question=q_text, kind="choice", ref=None, option_ref=None,
             options=opts, required=req, answer=None, source=None, quote=None, relies_on=None))

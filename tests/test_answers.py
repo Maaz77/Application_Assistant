@@ -505,3 +505,65 @@ def test_extract_questions_current_values_tracked():
     visa_q = next(q for q in ext.questions if q.kind == "choice")
     assert ext.current_values.get(city_q.id) == "Milan"
     assert ext.current_values.get(visa_q.id) == "Yes"
+
+
+# --- a required LinkedIn radio group the control itself does not mark (live 2026-10-08, Linda AI) ---------
+
+LINDA_P3_TEXT = ("Apply to Linda AI 3/4 pages Additional Questions "
+                 "Have you completed the following level of education: Bachelor's Degree?* Yes No "
+                 "Are you comfortable working in an onsite setting?* Yes No "
+                 "Are you legally authorized to work in Ireland?* Yes No Back Review")
+ONSITE = "Are you comfortable working in an onsite setting?"
+
+
+def _linda_page_3() -> Page:
+    """Linda AI's Easy Apply page 3 as the driver saw it: DIV role=radio, required False, aria-label without
+    the asterisk, and REQUIRED_EMPTY empty (it scans input/select/textarea only)."""
+    els = []
+    for ref, question, label in (("e162", "Have you completed the following level of education: "
+                                  "Bachelor's Degree?", "Yes"),
+                                 ("e148", "Have you completed the following level of education: "
+                                  "Bachelor's Degree?", "No"),
+                                 ("e149", ONSITE, "Yes"), ("e150", ONSITE, "No")):
+        els.append(Element(ref=ref, role="radio", name=question, label=label, tag="DIV",
+                           required=False, dialog="<dialog>", scope="<dialog>", group=question))
+    return Page(url="https://www.linkedin.com/jobs/view/4470454940/", title="Founding Software Engineer",
+                text=LINDA_P3_TEXT, table=Table(url="https://www.linkedin.com/jobs/view/4470454940/",
+                                                elements=els),
+                dialogs=["Apply to Linda AI"])
+
+
+def test_a_starred_radio_group_is_required_even_when_the_dom_says_otherwise():
+    """Live 2026-10-08: the free router returned a generated (so rejected) answer for the onsite question, and
+    nothing marked the group required — LinkedIn's DIV radios carry no `required`, their aria-label drops the
+    asterisk, and REQUIRED_EMPTY never sees them. The group was treated as optional, left empty, and "Review"
+    then refused to advance, which the loop reported as broken_form instead of parking at the question."""
+    p = _linda_page_3()
+    assert p.required_empty["items"] == []                        # the probe cannot see DIV radios
+    assert all(not e.required for e in p.elements)                # nor can the observer
+    by_q = {q.question: q for q in A.extract_questions(p).questions}
+    assert by_q[ONSITE].required is True
+
+
+def test_the_asterisk_rule_does_not_leak_into_text_fields():
+    """Radio groups only: a text field's label is routinely a substring of another one's, so a page-text rule
+    there would mark optional fields required and park jobs that fill fine today."""
+    p = Page(url="https://acme.io/apply", title="Apply", text="Last Name* Name Email*",
+             table=Table(url="https://acme.io/apply", elements=[
+                 Element(ref="e1", role="textbox", name="Name", required=False),
+                 Element(ref="e2", role="textbox", name="Last Name", required=False)]))
+    by_q = {q.question: q for q in A.extract_questions(p).questions}
+    assert by_q["Name"].required is False and by_q["Last Name"].required is False
+
+
+def test_an_unanswered_starred_radio_group_is_an_uncovered_required_question():
+    """The point of the required flag: with no answer the fill path parks at the question (ParkedAtQuestion)
+    rather than advancing into LinkedIn's "This field is required"."""
+    p = _linda_page_3()
+    ext = A.extract_questions(p)
+    pa = PageAnswers.model_validate({"questions": [
+        {**que.model_dump(), "answer": "Yes" if que.question != ONSITE else None,
+         "source": "profile" if que.question != ONSITE else None,
+         "quote": None, "relies_on": None}
+        for que in ext.questions]})
+    assert [q.question for q in A.uncovered_required(pa)] == [ONSITE]
