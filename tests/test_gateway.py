@@ -102,6 +102,26 @@ def send(gateway, url, kind=G.JEV, body=None, **kw):
     return gateway.send(kind, url, body or {"model": "m", "state": "s", "questions": {}}, {}, **kw)
 
 
+class _Clock:
+    """A fake clock: `sleep` records what it was asked to wait for and advances the clock instead of waiting.
+
+    Pacing is a decision — "wait out what is left of the interval, then start" — so the tests below assert what
+    the Gateway asked for. Timing it on the real clock measured `time.sleep`'s precision instead, which made it
+    flaky against any threshold tight enough to prove the interval was not skipped.
+    """
+
+    def __init__(self):
+        self.now = 0.0
+        self.slept: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
 # ------------------------------------------------------------------ the queue
 
 
@@ -119,35 +139,36 @@ def test_only_one_request_is_in_flight_at_a_time(server):
 
 
 def test_requests_start_at_least_the_minimum_interval_apart():
-    """P1 T2: limits.min_interval_s. Timed where the Gateway decides it, with a real sleep — over a socket the
-    connect latency of each request adds more jitter than the interval being measured."""
+    """P1 T2: limits.min_interval_s. On a fake clock, so this asserts the wait the Gateway decides on rather than
+    the precision of the host's sleep. Skipping the interval leaves `slept` empty and every start at 0.0."""
+    clock = _Clock()
     starts = []
 
     def post(url, body, headers, timeout):
-        starts.append(time.monotonic())
+        starts.append(clock.now)
         return 200, {"answers": {}}
-    gateway = gw(min_interval_s=0.15, post=post)
+    gateway = gw(min_interval_s=0.25, post=post, sleep=clock.sleep, monotonic=clock.monotonic)
     for _ in range(4):
         send(gateway, "http://127.0.0.1:1/v1/systemone")
-    gaps = [b - a for a, b in zip(starts, starts[1:])]
-    # time.sleep may return a millisecond or two early; what matters is that the interval is not skipped.
-    assert len(starts) == 4 and all(g >= 0.145 for g in gaps), gaps
-    assert sum(gaps) >= 3 * 0.145
+    assert clock.slept == [0.25, 0.25, 0.25]      # the whole interval, before every request but the first
+    assert starts == [0.0, 0.25, 0.5, 0.75]       # and waited out before the request goes out, not after
 
 
 def test_a_slow_request_does_not_add_its_duration_to_the_interval():
-    """The interval is between request STARTS: a request that took a second does not then wait another 0.25 s."""
+    """The interval is between request STARTS: a request that took a second does not then wait another 0.25 s.
+    On the same fake clock, where a slow request is one that advances the clock past the interval itself."""
+    clock = _Clock()
     starts = []
 
     def post(url, body, headers, timeout):
-        starts.append(time.monotonic())
-        time.sleep(0.2)
+        starts.append(clock.now)
+        clock.now += 0.2                     # the request itself takes twice the interval
         return 200, {"answers": {}}
-    slept = []
-    gateway = gw(min_interval_s=0.1, post=post, sleep=slept.append)
+    gateway = gw(min_interval_s=0.1, post=post, sleep=clock.sleep, monotonic=clock.monotonic)
     for _ in range(3):
         send(gateway, "http://127.0.0.1:1/v1/systemone")
-    assert slept == []                       # each request already outlasted the interval
+    assert clock.slept == []                 # each request already outlasted the interval
+    assert starts == [0.0, 0.2, 0.4]         # so the starts are its duration apart, not duration + interval
 
 
 # ------------------------------------------------------------------ the one retry layer

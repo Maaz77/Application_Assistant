@@ -63,8 +63,6 @@ Tests (markers are defined in `pyproject.toml`; there is no linter configured):
 
 `preflight` requires **one** model to answer, not all of them (`_probe_llm_inference` returns `(answered, out)` and raises only when none answers). Free tiers go in and out of quota minute by minute, and a run only needs one model per page — that is what the rotation is for. Do not tighten this back to "every model".
 
-Known unrelated flake: `tests/test_gateway.py::test_requests_start_at_least_the_minimum_interval_apart` fails under full-suite load when `time.sleep` returns ~0.2 ms early against its `>= 0.145` threshold. It passes in isolation and fails identically on the pre-P6 code.
-
 ## The model gateway
 
 Every model request — `decide.Decider`, `decide.ChatDecider` and `llm_inference` — leaves through one `Gateway`

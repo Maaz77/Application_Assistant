@@ -2539,3 +2539,19 @@ that ran out printed `provider outage — model requests: …`; it now passes
   no result line, and the next request begins 180 s later; earlier in the same run it answered in 25.7 s, and in
   the 20:21 run in 89.1 s with 5,478 output tokens. The router carries a `GLM_47_FLASH_TIMEOUT_MS` special case
   for this model. It is the first upstream worth benching in the FreeLLMAPI app.
+
+## 2026-10-08 — the pacing tests run on a fake clock (recovered from a stale worktree)
+
+`tests/test_gateway.py::test_requests_start_at_least_the_minimum_interval_apart` had been a known flake, written
+off in CLAUDE.md as "fails under full-suite load, passes in isolation". It does not pass in isolation: 3 of 10
+isolated runs today on this branch, 6 of 10 on `33aff3a` before it. The threshold was the problem, not the load —
+it asserted real elapsed time `>= 0.145` for a `0.15` sleep, so it was measuring `time.sleep`'s precision on a
+busy Mac, not the Gateway.
+
+The fix was already written, in an abandoned worktree at `.claude/worktrees/keen-satoshi-4d95e8` (P4-era, branch
+`claude/keen-satoshi-4d95e8` at `dddd62c`), as the only uncommitted change there. Both pacing tests now take a
+`_Clock` whose `sleep` records the wait and advances the clock, which is what `Gateway.__init__`'s `sleep` and
+`monotonic` seams were for: pacing is a decision — wait out what is left of the interval, then start — so the
+tests assert the decision (`clock.slept == [0.25, 0.25, 0.25]`, `starts == [0.0, 0.25, 0.5, 0.75]`) instead of
+the host's timer. Skipping the interval now leaves `slept` empty and every start at 0.0, which no threshold can
+excuse. 10 of 10 isolated runs pass, and the worktree is gone.
