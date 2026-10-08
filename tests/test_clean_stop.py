@@ -163,3 +163,53 @@ def test_the_report_names_no_money(tmp_path):
 # browser thread (no policy._post), so the Gateway stop always trips on the run's own thread — the P1 sticky
 # re-raise from Jev.call is unnecessary and gone. The clean-stop invariant (records nothing, exit 3) is proved by
 # test_a_gateway_stop_records_nothing_and_exits_three above; recorded in DISCOVERY.
+
+
+def test_a_dead_browser_socket_stops_the_run_instead_of_crashing_it(tmp_path):
+    """Live 2026-10-08: a CDP keepalive ping timed out between jobs and closed the socket, so `browser.open`
+    raised `CdpError: Page.navigate: transport closed (... keepalive ping timeout ...)`. That open sits
+    outside run_pages/run_external, whose DriverError handlers would have caught it, so the traceback escaped
+    main() and aborted the whole run after two jobs had already been recorded. A dead socket needs a fresh
+    "Allow remote debugging?" grant and every later job would fail the same way, so it is a clean stop
+    (exit 3), and this job is left untouched."""
+    from datetime import date
+    from assistant.blockers import StopRun
+    from assistant.driver.cdp import CdpError
+    from tests.fake_browser import FakeBook
+
+    class DeadBrowser:
+        """The socket is gone: every call through it raises, as the live one did."""
+        def open(self, url, session, **kw):
+            raise CdpError("Page.navigate: transport closed (sent 1011 (internal error) keepalive ping "
+                           "timeout; no close frame received)")
+
+    (tmp_path / "job.md").write_text("# Senior Software Engineer\nURL: x\n")
+    (tmp_path / "r.pdf").write_bytes(b"%PDF")
+    job = SimpleNamespace(key="4470918779", label="The Flex", folder="4470918779_The-Flex",
+                          linkedin_url="https://www.linkedin.com/jobs/view/4470918779",
+                          job_md=tmp_path / "job.md", resume_pdf=lambda: tmp_path / "r.pdf")
+    with pytest.raises(StopRun, match="the browser connection closed"):
+        cli.process(job, browser=DeadBrowser(), book=FakeBook(), cfg=config_mod.load(), key="k",
+                    profile="", run_dir=tmp_path / "runs" / "x", today=date(2026, 10, 8))
+
+
+def test_an_ordinary_open_failure_is_still_just_that_job(tmp_path):
+    """Only a dead transport stops the run. A page that will not load is one job's load_failure, as before."""
+    from datetime import date
+    from assistant.blockers import NeedsAttention
+    from assistant.driver.cdp import CdpError
+    from tests.fake_browser import FakeBook
+
+    class FlakyBrowser:
+        def open(self, url, session, **kw):
+            raise CdpError("Page.navigate: net::ERR_NAME_NOT_RESOLVED")
+
+    (tmp_path / "job.md").write_text("# Senior Software Engineer\nURL: x\n")
+    (tmp_path / "r.pdf").write_bytes(b"%PDF")
+    job = SimpleNamespace(key="4470918779", label="The Flex", folder="4470918779_The-Flex",
+                          linkedin_url="https://www.linkedin.com/jobs/view/4470918779",
+                          job_md=tmp_path / "job.md", resume_pdf=lambda: tmp_path / "r.pdf")
+    with pytest.raises(NeedsAttention) as exc:
+        cli.process(job, browser=FlakyBrowser(), book=FakeBook(), cfg=config_mod.load(), key="k",
+                    profile="", run_dir=tmp_path / "runs" / "x", today=date(2026, 10, 8))
+    assert exc.value.cls == "load_failure"

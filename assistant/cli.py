@@ -252,7 +252,18 @@ def process(job: records.Job, *, browser: Browser, book: tabs.TabBook, cfg: conf
     opened = False
     try:
         for attempt in (1, 2):
-            browser.open(job.linkedin_url, S)
+            try:
+                browser.open(job.linkedin_url, S)
+            except DriverError as exc:
+                # This open sits OUTSIDE run_pages / run_external, so their DriverError handlers never saw
+                # it and the traceback aborted the whole run — after two jobs had already been recorded
+                # (live 2026-10-08: a CDP keepalive ping timed out between jobs and closed the socket,
+                # `Page.navigate: transport closed`). A dead socket cannot be recovered without another
+                # "Allow remote debugging?" grant, and every later job would fail the same way, so it is a
+                # clean stop (exit 3, CLAUDE.md's "hung browser call"); this job is left untouched.
+                if "transport closed" in str(exc):
+                    raise StopRun(f"the browser connection closed: {exc}") from exc
+                raise NeedsAttention("load_failure", str(exc)[:160]) from exc
             opened = True
             try:                                    # the tab an earlier run of THIS job left (tabs.TabMemory)
                 book.close_stale(S, book.current_handle(S), remembered=stale, host=stale_host)
