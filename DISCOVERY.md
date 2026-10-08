@@ -2492,3 +2492,50 @@ dead.
 loopback, where there is no NAT or proxy to keep a hole open, and a Chrome that really went away is caught
 by `DriverTimeout` on the next call — already a clean stop (exit 3) since
 `7a7fdf2`. `max_queue=64` stays, because flow control is not the bug; killing the socket over it was.
+
+## 2026-10-08 — run 20261008-213327: a model that answers without `relies_on` cost three whole pages
+
+Both earlier fixes held: no request was cut at 45 s and no socket was closed by a keepalive. The run reached
+the fill pages, and then threw them away:
+
+```
+⚠ needs attention  Linda AI – Founding Software Engineer: LLM inference: none of 1 models answered (auto: output invalid)
+⚠ needs attention  The Flex – Senior Software Engineer:   the same
+■ run stopped: provider outage — model requests: 3 requests in a row failed
+```
+
+The three "invalid" completions are in the run's logs and they are **correct answers**. `ModelAnswer` declared
+`quote: str | None` and `relies_on: list[str] | None` with no defaults, which in pydantic is required-but-nullable,
+and `nvidia meta/muse-glimmer-30b` simply omits a field it has nothing to put in:
+
+| Job | What the model returned | Pydantic |
+|---|---|---|
+| The Flex – Senior SWE | `{"id": "r_e21", "answer": null, "source": null}` | 27 errors: `answers.0.quote Field required`, `answers.0.relies_on Field required` |
+| Linda AI | `{"id": "r_e184", "answer": "Yes", "source": "profile", "quote": "…"}` | 3 errors: `relies_on Field required` |
+| The Flex – Full-Stack | `{"id": "r_e20", "answer": null, "source": null, "quote": null}` | `relies_on Field required` |
+
+Every one of them is valid JSON; only the model class rejected them. A missing nullable field and an explicit
+`null` mean the same thing to everything downstream, so the four nullable fields of `ModelAnswer` now default to
+`None`. Replaying the three logged completions through `ModelResponse` after the change: **17, 3 and 17 answers**,
+all three pages recovered. `ANSWER_ITEM_SCHEMA` still asks for all five fields — that is what steers a model which
+honours the schema, and the defaults are only what happens when one does not.
+
+No safety was traded away for it. The rule that matters for generated prose is `check_answers`:
+`if not q.relies_on or not all(src.any_contains(s) for s in q.relies_on)` — an answer with no citations fails,
+is regenerated once and then dropped. `relies_on = None` reaches that rule exactly as an explicit `null` did.
+
+The outage message also stopped being mute. `call_engine` reported its verdict with no `where`, so a rotation
+that ran out printed `provider outage — model requests: …`; it now passes
+`"<route> no model answered"` and the message names the route.
+
+### Two more router-side numbers, both in this run's evidence
+
+- **The router keeps a 45 s retry budget of its own.** One request came back HTTP 200 carrying
+  `{"error": {"message": "All 2 routed attempt(s) failed with upstream provider errors (provider_bad_request ×1,
+  timeout ×1) (stopped early: retry time budget 45s exceeded — one failover hop is always allowed)"}}`. So the
+  60 s per-platform chat limit is not the only clock inside one request: after 45 s the router stops starting new
+  hops, bar one.
+- **`cloudflare @cf/zai-org/glm-4.7-flash` outran even 180 s, twice.** Its starts at 19:34:14Z and 19:38:02Z have
+  no result line, and the next request begins 180 s later; earlier in the same run it answered in 25.7 s, and in
+  the 20:21 run in 89.1 s with 5,478 output tokens. The router carries a `GLM_47_FLASH_TIMEOUT_MS` special case
+  for this model. It is the first upstream worth benching in the FreeLLMAPI app.

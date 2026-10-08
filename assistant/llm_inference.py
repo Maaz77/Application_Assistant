@@ -53,12 +53,18 @@ class PageAnswers(BaseModel):
 
 
 class ModelAnswer(BaseModel):
+    """One answer as the model returns it. Every field but `id` defaults to None, because a missing nullable
+    field and an explicit null mean the same thing to everything downstream — and a model that omits one is
+    not rare: `nvidia meta/muse-glimmer-30b` left out `relies_on` (and sometimes `quote`) on three pages
+    while answering them correctly, and without these defaults all three whole pages were discarded as
+    "output invalid" (run 20261008-213327). ANSWER_ITEM_SCHEMA still asks for all five, which is what steers
+    a model that honours the schema; this is only what happens when one does not."""
     model_config = ConfigDict(extra="forbid")
     id: str
-    answer: str | None
-    source: Source | None
-    quote: str | None
-    relies_on: list[str] | None
+    answer: str | None = None
+    source: Source | None = None
+    quote: str | None = None
+    relies_on: list[str] | None = None
 
 
 class ModelResponse(BaseModel):
@@ -486,7 +492,7 @@ def call_engine(*, key: str, models: Rotation | str | list[str], system: str, us
         # provider that is answering — a free tier behind the FreeLLMAPI router is rate-limited in bursts, so a
         # busy first model plus a second that answers is a steady alternation of failures and successes (D21, and
         # the same rule as T4's fallback).
-        gateway.note_failure(True)
+        gateway.note_failure(True, f"{inference_log.gateway_of(url)} no model answered")
         raise LLMInferenceError(f"LLM inference: {exc}") from None
     else:
         gateway.note_failure(False)

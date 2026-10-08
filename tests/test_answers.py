@@ -11,6 +11,24 @@ from assistant.pages import Page
 pytestmark = pytest.mark.unit
 TODAY = date(2026, 9, 23)
 
+
+def test_an_answer_that_omits_a_nullable_field_is_still_an_answer():
+    """`nvidia meta/muse-glimmer-30b` answers without `relies_on`, and sometimes without `quote`. Three
+    correct pages were thrown away as "output invalid" over it (run 20261008-213327). A missing nullable
+    field is the same answer as an explicit null."""
+    pa = A.ModelResponse.model_validate_json(
+        '{"answers": [{"id": "r_e21", "answer": null, "source": null},'
+        ' {"id": "r_e31", "answer": "Fluent/Native", "source": "profile", "quote": "English: C1"}]}')
+    assert [a.id for a in pa.answers] == ["r_e21", "r_e31"]
+    assert pa.answers[0].quote is None and pa.answers[0].relies_on is None
+    assert pa.answers[1].answer == "Fluent/Native" and pa.answers[1].relies_on is None
+
+
+def test_an_answer_without_an_id_is_still_refused():
+    """The id is how an answer finds its question, so it has no default to fall back on."""
+    with pytest.raises(Exception):
+        A.ModelResponse.model_validate_json('{"answers": [{"answer": "x", "source": "profile"}]}')
+
 PROFILE = """# Resume
 **Full Stack Software Engineer** · Feb 2026 – Present
 **Deep Learning Engineer & Researcher** · Dec 2024 – Dec 2025
