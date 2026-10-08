@@ -376,7 +376,17 @@ def mismatches(items: list[Question], p: Page) -> list[Question]:
         opt = by_ref.get(q.option_ref or "")
         if opt is not None:
             return bool(opt.checked)
-        if q.option_ref:            # ref gone after a re-render: ask this question's own group what is checked
+        if q.option_ref:
+            # A <select>'s option is not a top-level element: its ref is "<combobox>:<n>", so the lookup above
+            # always misses and the radio-group fallback below can never answer for it. The choice shows on the
+            # control itself — `current` is the selected option's LABEL, while `value` is the option's value,
+            # which Greenhouse makes an opaque hash (live 2026-10-08, Toast: 'Are you currently based in
+            # Ireland? (required)' was correctly set to "No" and still read back as a mismatch, twice).
+            owner = by_ref.get(q.option_ref.partition(":")[0])
+            if owner is not None and owner.options:
+                picked = next((o.label for o in owner.options if o.selected), None) or owner.current or ""
+                return bool(picked) and _fuzzy_holds(q.answer or "", picked)
+            # Otherwise the ref is gone after a re-render: ask this question's own group what is checked.
             cur = checked_option(q.question, p)
             return cur is not None and pages.norm_label(cur) == pages.norm_label(q.answer or "")
         e = by_ref.get(q.ref or "")

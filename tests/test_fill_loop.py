@@ -466,3 +466,31 @@ def test_the_submit_button_is_never_clicked(tmp_path):
     assert fake.sent == []
     assert not any(k == "click" and "Submit" in (op.get("target", "") or "")
                    for k, op in fake.log)
+
+
+def test_a_native_select_reads_back_from_the_control_not_the_option(tmp_path):
+    """Live 2026-10-08, Toast: 'Are you currently based in Ireland? (required)' is a native <select> whose
+    option values Greenhouse makes opaque hashes. The plan's option_ref is "e31:3", which is NOT a top-level
+    element, so `mismatches` fell through to the radio-group fallback — which can never answer for a select —
+    and reported a mismatch on a field that was correctly set to "No", twice, → broken_form."""
+    from assistant.browser import Element, Option, Table
+    from assistant.fill import mismatches
+    from assistant.llm_inference import Question
+    from assistant.pages import Page
+
+    url = "https://careers.toasttab.com/jobs/software-engineer-ii-iq-grow"
+    sel = Element(ref="e31", role="combobox", name="Are you currently based in Ireland? (required)",
+                  value="3e6420fe23fa0dd5632749f038b51ae0", current="No", tag="SELECT", required=True,
+                  options=[Option(ref="e31:1", label="", value="", selected=False),
+                           Option(ref="e31:2", label="Yes", value="81d4831bf958d43c9c970450a1301992",
+                                  selected=False),
+                           Option(ref="e31:3", label="No", value="3e6420fe23fa0dd5632749f038b51ae0",
+                                  selected=True)])
+    p = Page(url=url, title="Software Engineer II, IQ Grow", text="Are you currently based in Ireland?",
+             table=Table(url=url, elements=[sel]))
+    q = Question(id="s_e31", question=sel.name, kind="choice", ref="e31", option_ref="e31:3",
+                 options=["Yes", "No"], required=True, answer="No", source="profile", quote="Italy",
+                 relies_on=None)
+    assert mismatches([q], p) == []
+    wrong = q.model_copy(update={"answer": "Yes", "option_ref": "e31:2"})
+    assert mismatches([wrong], p) == [wrong]        # a genuinely unset choice is still caught
