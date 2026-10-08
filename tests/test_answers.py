@@ -647,17 +647,23 @@ def test_a_real_question_citing_a_real_fact_is_untouched():
     assert auth.answer == "No" and auth.source == "profile"
 
 
-def test_the_follow_the_company_default_is_declined_and_not_reported():
-    """LinkedIn ticks "Follow <company>" inside the Easy Apply dialog. It is not an application answer, and
-    leaving it alone meant submitting followed the company while the report listed it as an open question."""
-    pa = PageAnswers.model_validate({"questions": [
-        q(question="Follow Digital Manufacturing Ireland to stay up to date with their page", kind="choice",
-          ref="e9", options=["Follow Digital Manufacturing Ireland to stay up to date with their page", "No"],
-          answer=None, source=None)]})
-    A.decline_follow_the_company(pa)
-    follow = pa.questions[0]
-    assert follow.answer == "No" and follow.source == "computed"
-    assert A.uncovered_optional(pa) == [] and A.uncovered_required(pa) == []     # off the Scratch Pad
+def test_the_follow_the_company_checkbox_is_never_a_question():
+    """It is not an application question, so it must not sit on the Scratch Pad as one — and it must not be
+    CLICKED either. Unticking it was the user's preference and it is not safely achievable: that click on the
+    review step tears the Easy Apply dialog down (live, twice — see FOLLOW_RE). Never creating the question
+    leaves nothing to answer, nothing to report and nothing to act on."""
+    follow = "Follow Digital Manufacturing Ireland to stay up to date with their page"
+    url = "https://www.linkedin.com/jobs/view/4470941188/"
+    # The real element: a DIV role=checkbox inside the Easy Apply dialog, already ticked.
+    page = Page(url=url, title="Apply", text=f"Review your application {follow}",
+                table=Table(url=url, elements=[
+                    Element(ref="e165", role="checkbox", name=follow, tag="DIV", checked=True,
+                            dialog="<dialog>", scope="<dialog>"),
+                    Element(ref="e166", role="textbox", name="Mobile phone number", scope="<dialog>")]))
+    questions = A.extract_questions(page).questions
+    assert [q.question for q in questions] == ["Mobile phone number"]
+    pa = PageAnswers.model_validate({"questions": [que.model_dump() for que in questions]})
+    assert all(follow != o.question for o in A.uncovered_optional(pa) + A.uncovered_required(pa))
 
 
 def run_on(page, *qs, src=SRC, policy=Policy()):

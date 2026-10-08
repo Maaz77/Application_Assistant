@@ -548,34 +548,24 @@ def test_an_unanswered_required_radio_group_parks_at_the_question(tmp_path):
     assert all(e.checked is not True for e in site["s1"].els if e.role == "radio")   # nothing was guessed
 
 
-def test_the_follow_checkbox_is_actually_unticked_end_to_end(tmp_path):
-    """The reviewer's finding: FOUR places decide what a toggle answer means, and only _carry_out had been
-    taught to untick — `_set_option_refs` nulled the "No", `_goal_items` skipped an already-checked box and
-    `mismatches` read `checked` as success. So the box stayed ticked AND went back on the Scratch Pad. This
-    drives the whole loop over a pre-ticked box and asserts the live DOM state, not an intermediate."""
-    # The real element, from runs/20261008-143810/…Digital-Manufacturing-Ireland…: a DIV role=checkbox with
-    # no `label`, `checked: true`, inside the Easy Apply <dialog>. The driver reads `aria-checked` for an
-    # ARIA checkbox and clicks only when it differs from the requested state (driver/session.py:492-504).
-    follow = "Follow Digital Manufacturing Ireland to stay up to date with their page"
-    answers = {"Data Engineer | Acme | LinkedIn": [
-        Q("City", "Milan", ref="auto"),
-        Q(follow, "No", kind="choice", options=[follow, "No"], ref="auto", option_ref="same",
-          source="computed", required=False),
-        Q("Resume", None, kind="file", ref="auto", source=None)]}
+def test_the_follow_checkbox_is_left_alone_end_to_end(tmp_path):
+    """Two live runs proved the click is unsafe: 20261008-192511 reported `field would not accept its value`
+    because LinkedIn had removed the control by the next observe, and 20261008-193650, with that read-back
+    fixed, ended in `dialog_closed: LinkedIn asked to save the application` — the click had dismissed the
+    Easy Apply dialog and raised "Save this application?". So the box keeps LinkedIn's default and the loop
+    never touches it: no toggle op for it anywhere, and the job still parks."""
+    follow = "Follow Acme to stay up to date with their page"
+    answers = {"Data Engineer | Acme | LinkedIn": SINGLE_ANSWERS["Data Engineer | Acme | LinkedIn"]}
     site = single_dialog()
     box = El("checkbox", follow, dialog="d", checked=True, tag="DIV")
     site["s1"].els.insert(1, box)
     browser, fake = fake_browser(site, "job")
     parked = run_pages(ctx_for(browser, answers, tmp_path))
     assert isinstance(parked, Parked) and fake.sent == []
-    assert box.checked is False                                  # unticked on the page
-    assert follow not in [o.question for o in parked.optional_empty]      # and off the Scratch Pad
-    # The never-submit guard must allow the click: this control is on the review step, so if it were ever
-    # reached with FORM.final set it would be refused and the decline would silently not happen.
-    from assistant import guard as g
-    from assistant.browser import Element
-    el = Element(ref="e165", role="checkbox", name=follow, tag="DIV", checked=True, dialog="<dialog>")
-    assert g.never_click_element(el, g._FormStage()) is None
+    assert box.checked is True                                              # untouched
+    assert not [op for kind, op in fake.log if kind == "act"
+                for o in op.get("ops", []) if o.get("ref") == box.ref]      # and never acted on
+    assert follow not in [o.question for o in parked.optional_empty]        # and off the Scratch Pad
 
 
 def test_a_checkbox_whose_own_label_means_no_is_still_ticked(tmp_path):

@@ -2058,10 +2058,9 @@ model was guessing which question it was being asked, independently, twice.
 
 ### The "Follow <company>" checkbox is declined, and a checkbox can finally be unticked
 
-**Falsified by review, then actually fixed — see the reviewer section below: the decline was inert,
-because four separate places decide what a toggle answer means and only one of them had been
-taught about unticking. The box stayed ticked AND stayed on the Scratch Pad.**
-
+**Falsified twice. The decline was first inert (four sites decide what a toggle answer means), and once
+that was fixed the click itself proved unsafe — it tears the Easy Apply dialog down. The box is now left at
+LinkedIn's default and the question is never created. See the 192511/193650 sections below.**
 `decline_follow_the_company` answers a `^follow\b` checkbox as unchecked, `source: computed`, after all the
 checks — so it leaves the Scratch Pad and submitting no longer follows the company silently (user decision
 2026-10-08). That exposed a second gap: `fill._carry_out`'s `check` branch hard-coded `"state": True`, so a
@@ -2275,3 +2274,52 @@ Both defects are the same lesson this file has now recorded twice in one day: **
 mechanism, the run finds the integration.** The toggle fix passed seven unit tests, including one driving
 `run_pages` over a pre-ticked DIV checkbox, and still broke on the one behaviour no fixture had — LinkedIn
 removing the element afterwards.
+
+## 2026-10-08 — run 20261008-193650: unticking "Follow <company>" abandons the application
+
+The vanished-toggle fix held — DMI no longer reports `field would not accept its value` — and revealed what the
+read-back had been masking. With the untick now accepted, the job ended as
+`dialog_closed: LinkedIn asked to save the application`. The log is unambiguous:
+
+```
+64 act {'ops': [{'op': 'toggle', 'ref': 'e165', 'state': False}]}   ->  1/1 ops ok  + toggle e165  159ms
+   [delta#46]  ! dialog open: Dismiss Save this application? Save to return to this application later… [modal]
+             + e171 btn Dismiss   + e172 btn Discard   + e173 btn Save
+```
+
+**That click tears the Easy Apply dialog down.** The driver reports success — it reads `aria-checked`, sees a
+difference and clicks — but the click dismisses the dialog and LinkedIn raises "Save this application? … Any
+uploaded files will not be saved." Two runs, two different failures, one cause: 192511 saw the control
+disappear by the next observe (read as a refused field), 193650 saw the whole dialog go.
+
+Abandoning a filled application to avoid following a company is a bad trade, so **the box is left at
+LinkedIn's default and the question is never created**: `extract_questions` skips a checkbox or switch whose
+label starts `follow`. Nothing to answer, nothing on the Scratch Pad, nothing to click — which is also a
+smaller diff than the `decline_follow_the_company` + `wants_checked` machinery it replaces for this control.
+`wants_checked` stays, because it is what makes the other three toggle sites agree.
+
+This reverses the user's stated preference on evidence, not taste, and it is reported to them as such. If
+following the company matters, the safe place to undo it is LinkedIn's own company page after submitting.
+
+### Toast's `closed` reason code needed one more step
+
+`_CLOSED_RE` matched, but the job still reported
+`unsupported_ats: no application form on careers.toasttab.com (closed)` — because `pages.classify`'s fallback
+is `Verdict("navigate", j.kind)`, and `pages.blocker()` had no `closed` case, so the kind travelled as a
+*detail* of a navigation verdict. `blocker()` now returns `Blocker("closed", …)`, and since `ATTEMPT2` has no
+`closed` entry the first failure is final — right for a job that no longer exists.
+
+### What three runs of the same five jobs taught
+
+Every defect in this whole session was found by a run and missed by the suite, in both directions:
+
+| Claimed from unit tests | What the run said |
+|---|---|
+| the consent decline works | correct — 8/8 fields where it had been 1/8 |
+| the Follow box is unticked and off the report | the box stayed ticked and stayed on the report |
+| the Follow box is unticked (after the 4-site fix) | the click closed the dialog and abandoned the application |
+| `_label_from_text` recovers a label | it relabels a second group with the first group's question |
+| the contact rule only drops mismatches | it dropped the live answer the previous fix had just repaired |
+| Toast regressed | the posting had been taken down |
+
+The suite is at 390 unit tests and every one of those six was provable only against the real page.

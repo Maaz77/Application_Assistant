@@ -519,6 +519,12 @@ def blocker(p: Page) -> Blocker | None:
         return Blocker("credentials", "site asks for a password")
     if j.kind == "error":
         return Blocker("load_failure", f"error page: {p.title or p.text[:60]!r}")
+    if j.kind == "closed":
+        # Without this, `classify`'s fallback returns Verdict("navigate", "closed") and run_external reports
+        # `unsupported_ats: no application form on <host> (closed)` — which reads like a site the program
+        # cannot drive rather than a job that no longer exists (live 2026-10-08, Toast's posting was taken
+        # down four hours after it parked). ATTEMPT2 has no "closed" entry, so this is final on sight.
+        return Blocker("closed", "the site says this posting is no longer available")
     return None
 
 

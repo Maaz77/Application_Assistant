@@ -317,3 +317,20 @@ def test_a_posting_that_has_been_taken_down_is_closed_not_an_unsupported_ats():
             "Check out these resources below: View Current Openings")
     assert pages._CLOSED_RE.search(gone)
     assert not pages._CLOSED_RE.search("Apply for this job. Resume/CV required. Submit application")
+
+
+def test_a_taken_down_posting_is_a_blocker_so_it_gets_the_closed_reason_code():
+    """`classify`'s fallback returned Verdict("navigate", "closed"), so run_external reported
+    `unsupported_ats: no application form on careers.toasttab.com (closed)` — which reads like a site the
+    program cannot drive rather than a job that no longer exists. ATTEMPT2 has no "closed" entry, so a
+    blocker verdict is final on sight and the job is recorded as closed."""
+    from assistant.blockers import ATTEMPT2
+    gone = page([Element(ref="e1", role="link", name="View Current Openings")],
+                text="The page you are trying to view is no longer available. Check out these resources below:",
+                url="https://careers.toasttab.com/en-US/jobs/8226021")
+    assert pages.judge(gone).kind == "closed"
+    b = pages.blocker(gone)
+    assert b is not None and b.cls == "closed"
+    v = pages.classify(gone)
+    assert v.kind == "blocker" and v.detail.split(":", 1)[0] == "closed"
+    assert "closed" not in ATTEMPT2          # final on sight: no retry for a job that is gone

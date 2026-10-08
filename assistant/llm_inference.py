@@ -339,6 +339,19 @@ def _single_question(e, p: Page) -> tuple[Question | None, str]:
     return None, ""
 
 
+# LinkedIn ticks "Follow <company>" by default inside the Easy Apply dialog. It is not an application
+# question, so it must not sit on the user's Scratch Pad as one — and it must not be CLICKED either.
+#
+# Unticking it was the user's preference (2026-10-08) and it is not safely achievable: clicking that control
+# on the review step tears the Easy Apply dialog down. Live, twice — run 20261008-192511 reported
+# `field would not accept its value` because LinkedIn had removed the control by the very next observe, and
+# run 20261008-193650, with that read-back fixed, ended in `dialog_closed: LinkedIn asked to save the
+# application`: the click had dismissed the dialog and raised "Save this application?". Abandoning a filled
+# application to avoid following a company is a bad trade, so the box is left at LinkedIn's default and the
+# question is never created — nothing to answer, nothing to report, nothing to click.
+FOLLOW_RE = re.compile(r"^\s*follow\b", re.I)
+
+
 def extract_questions(p: Page) -> Extraction:
     """Code extracts questions from page elements (P3 T4). Model only answers them."""
     app_refs = pages.code_app_fields(p)
@@ -363,6 +376,8 @@ def extract_questions(p: Page) -> Extraction:
     for e in p.elements:
         if e.ref not in app_refs or e.ref in consumed:
             continue
+        if e.role in ("checkbox", "switch") and FOLLOW_RE.search(e.name or e.label or ""):
+            continue            # not an application question and not safe to click — see FOLLOW_RE
         q, cur = _single_question(e, p)
         if q:
             questions.append(q)
@@ -906,7 +921,6 @@ def answer_page(p: Page, src: Sources, *, key: str, models: Rotation | str | lis
         for q in still:
             _drop(q, "generated text failed its checks twice")
     fill_contact_from_profile(pa, src)
-    decline_follow_the_company(pa)
     _set_option_refs(pa, ext.option_maps, p)
     return pa
 
@@ -916,21 +930,6 @@ _PHONE_Q = re.compile(r"\b(phone|mobile|cell|telephone)\b", re.I)
 _EMAIL_V = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
 _PHONE_V = re.compile(r"\+?\d[\d().\-\s]{6,}\d")
 _PHONE_HINT = re.compile(r"phone|mobile|cell|tel|contact|whatsapp", re.I)
-
-
-_FOLLOW_Q_RE = re.compile(r"^\s*follow\b", re.I)
-
-
-def decline_follow_the_company(pa: PageAnswers, *, answer: str = "No") -> None:
-    """LinkedIn ticks "Follow <company>" by default inside the Easy Apply dialog. It is not an application
-    answer, and leaving it alone meant submitting followed the company silently — while the report listed it
-    on the Scratch Pad as a question the user still owed an answer to (live 2026-10-08, both LinkedIn jobs:
-    `source: linkedin-prefill, note: "pre-fill not kept"` yet `checked=true` on the page). Untick it and stop
-    reporting it (user decision 2026-10-08). Runs after the checks, so nothing can revive it."""
-    for q in pa.questions:
-        if _FOLLOW_Q_RE.search(q.question or "") and q.kind == "choice":
-            q.answer, q.source, q.quote, q.relies_on = answer, "computed", None, None
-            q.note = "LinkedIn's follow-the-company default is not an application answer"
 
 
 def fill_contact_from_profile(pa: PageAnswers, src: Sources) -> None:
