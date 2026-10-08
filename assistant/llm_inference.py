@@ -258,12 +258,48 @@ def checked_option(question: str, p: Page) -> str | None:
     return hits[0] or None if len(hits) == 1 else None
 
 
+NO_LABEL = "Select one"          # the placeholder for a radio group whose question text we cannot find
+_LABEL_MAX = 120
+
+
+def _label_from_text(options: list[str], p: Page) -> str:
+    """The question a radio group's own elements do not carry, read off the page text.
+
+    Ashby groups its demographic radios under a compound-UUID id with `label`, `context` and `scope` all
+    empty, so `_group_label` fell back to the placeholder and the model was asked SEVEN questions all titled
+    "Select one" (live 2026-10-08, The Flex). It answered them anyway: `Gender -> Male` citing the candidate's
+    own name as the quote, and the same question got opposite answers on two forms of the same company.
+
+    An ATS renders "<question> <option1> <option2> ...", so the words immediately before the option run are
+    the question. The window reaches back into the previous field, so everything up to the last OTHER element
+    label in it is cut. Returns "" when the option run is not in the text at all — the observation's text is
+    capped, so for a group below that cap there is genuinely no label anywhere in what we collected, and
+    `check_answers` then refuses to answer it rather than guessing."""
+    # Matched case-insensitively but SLICED from the original, so the question keeps the page's own casing.
+    flat = re.sub(r"\s+", " ", p.text or "").strip()
+    low = flat.lower()
+    run = pages.norm_label(" ".join(options))
+    if not run or run not in low:
+        return ""
+    head = flat[: low.index(run)]
+    cut = 0
+    for e in p.elements:
+        for other in (e.name, e.label):
+            n = pages.norm_label(other).strip(" *?:|-")
+            if len(n) > 2 and n != head.strip().lower():
+                k = head.lower().rfind(n)
+                if k >= 0:
+                    cut = max(cut, k + len(n))
+    head = head[cut:].strip(" *?:|-\u2022")
+    return head if 2 <= len(head) <= _LABEL_MAX else ""
+
+
 def _group_label(group_key: str, members: list) -> str:
     """Human-readable question text from a radio group key."""
     if not group_key or group_key.startswith("_"):
-        return members[0].context or "Select one"
+        return members[0].context or NO_LABEL
     if _UUID_RE.match(group_key) or _OPAQUE_ID_RE.search(group_key) or len(group_key) > 80:
-        return members[0].context or "Select one"
+        return members[0].context or NO_LABEL
     all_native = all(m.tag == "INPUT" for m in members)
     if not all_native:
         return group_key
@@ -288,6 +324,10 @@ def _radio_q(group_key: str, members: list, p: Page) -> tuple[str, list[str], di
         if o not in seen:
             unique.append(o)
             seen.add(o)
+    if q_text == NO_LABEL:
+        # Last resort: the options at least identify the question in the record and on the Scratch Pad,
+        # where a bare "Select one — A: ___" told the user nothing (live 2026-10-08).
+        q_text = _label_from_text(unique, p) or f"{NO_LABEL} ({' / '.join(unique[:6])})"
 
     omap: dict[str, str] = {}
     for m in members:
@@ -690,6 +730,24 @@ def _held(e, v: Verdicts) -> str:
     return "" if norm(held) in v.placeholders else held
 
 
+_CONTACT_Q_RE = re.compile(r"\b(full name|first name|last name|given name|family name|name|e-?mail|phone|"
+                           r"mobile|cell|telephone|address|location|city|country|postcode|zip)\b", re.I)
+# A quote that is only a contact detail: an email, a phone number, or a line that announces itself as one.
+_CONTACT_QUOTE_RE = re.compile(r"^(address|location|phone|mobile|cell|telephone|e-?mail)\b\s*[:\-]", re.I)
+
+
+def _unlabelled(q: Question) -> bool:
+    """True when this question carries only the NO_LABEL placeholder (plus, maybe, its own option list)."""
+    return pages.norm_label(q.question).startswith(pages.norm_label(NO_LABEL))
+
+
+def _contact_quote(quote: str | None) -> bool:
+    q = (quote or "").strip()
+    if not q:
+        return False
+    return bool(_CONTACT_QUOTE_RE.match(q) or _EMAIL_V.fullmatch(q) or _PHONE_V.fullmatch(q))
+
+
 def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today: date,
                   verdicts: Verdicts | None = None, current_values: dict[str, str] | None = None) -> list[Question]:
     """Apply §7 checks in place (a failed check sets answer=None with a note).
@@ -712,6 +770,20 @@ def check_answers(pa: PageAnswers, p: Page, src: Sources, policy: Policy, today:
             q.answer = None
             continue
         if q.answer is None:
+            continue
+        if _unlabelled(q):
+            # The form gives this question no text at all (see _label_from_text). An answer to a question
+            # nobody can read is not an answer: live 2026-10-08, The Flex, seven groups titled "Select one"
+            # got `Gender -> Male` quoting the candidate's own name, and the SAME question got opposite
+            # answers on two forms of the same company. Strict: leave it to the user (user decision).
+            _drop(q, "the form gives this question no label, so the answer cannot be checked")
+            continue
+        if q.source in ("profile", "job", "resume") and _contact_quote(q.quote) and not _CONTACT_Q_RE.search(
+                q.question or ""):
+            # A contact datum is evidence for a contact field and nothing else. Live 2026-10-08, Linda AI:
+            # "Are you comfortable working in an onsite setting?" was answered `No` -- on an Ireland role --
+            # citing `Address: Via Padova, Milano, MI, Italy, 20132`. An address does not answer that.
+            _drop(q, f"the quote is a contact detail, not evidence for this question: {q.quote!r}"[:160])
             continue
         if q.source in ("profile", "job", "resume"):
             # A verbatim quote is the evidence for free text, and the only evidence it has. A `choice` answer has
@@ -836,6 +908,7 @@ def answer_page(p: Page, src: Sources, *, key: str, models: Rotation | str | lis
         for q in still:
             _drop(q, "generated text failed its checks twice")
     fill_contact_from_profile(pa, src)
+    decline_follow_the_company(pa)
     _set_option_refs(pa, ext.option_maps, p)
     return pa
 
@@ -845,6 +918,21 @@ _PHONE_Q = re.compile(r"\b(phone|mobile|cell|telephone)\b", re.I)
 _EMAIL_V = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
 _PHONE_V = re.compile(r"\+?\d[\d().\-\s]{6,}\d")
 _PHONE_HINT = re.compile(r"phone|mobile|cell|tel|contact|whatsapp", re.I)
+
+
+_FOLLOW_Q_RE = re.compile(r"^\s*follow\b", re.I)
+
+
+def decline_follow_the_company(pa: PageAnswers, *, answer: str = "No") -> None:
+    """LinkedIn ticks "Follow <company>" by default inside the Easy Apply dialog. It is not an application
+    answer, and leaving it alone meant submitting followed the company silently — while the report listed it
+    on the Scratch Pad as a question the user still owed an answer to (live 2026-10-08, both LinkedIn jobs:
+    `source: linkedin-prefill, note: "pre-fill not kept"` yet `checked=true` on the page). Untick it and stop
+    reporting it (user decision 2026-10-08). Runs after the checks, so nothing can revive it."""
+    for q in pa.questions:
+        if _FOLLOW_Q_RE.search(q.question or "") and q.kind == "choice":
+            q.answer, q.source, q.quote, q.relies_on = answer, "computed", None, None
+            q.note = "LinkedIn's follow-the-company default is not an application answer"
 
 
 def fill_contact_from_profile(pa: PageAnswers, src: Sources) -> None:

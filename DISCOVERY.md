@@ -1992,3 +1992,76 @@ current page. Whether Workday itself can then be driven is a separate, open ques
   `Matched Resume:` line. The live pages show the **correct** tailored PDFs, because the deterministic upload
   superseded the pick — so the outcome is right and only the record is misleading. Anyone auditing
   `answers.json` alone would conclude the wrong resume went out.
+
+## 2026-10-08 — run 20261008-152050: all three re-tested jobs changed verdict
+
+```
+⚠ needs attention  Genesys: signup: site asks to create an account; guest link not usable:
+                   no 'apply without an account' / 'continue as guest' link
+⚠ needs attention  Mastercard: LinkedIn says this job is no longer accepting applications
+✓ parked           Toast – Software Engineer II, IQ Grow
+```
+
+- **Toast parks.** The `<select>` read-back fix was the last thing in its way.
+- **Mastercard gets the `closed` reason code** instead of `navigation: no way to start the application`.
+- **Genesys gets much further.** Its action log is now: posting → click *Apply on company website* → the
+  Workday posting → click *Apply* → click **Apply Manually** → `…/apply/applyManually`, where it stops at
+  `signup: site asks to create an account; guest link not usable`. The `awli` hop is gone; the remaining
+  obstacle is real and correct — Workday wants an account and the program never creates one.
+- **Tab accounting is right.** Six stale tabs closed, three new ones opened, net −3:
+  Genesys closed the seeded `F38E987A4A98…` (the dead `awli` tab) and the stale posting tab `702D1DE6409C…`;
+  Toast closed the seeded ATS tab `639C204FA478…` and a stale posting tab `5BDF8737E0CA…`; Mastercard closed
+  **both** `AEA95B61BA1B…` and `5443265B5E3F…` — the two tabs the inspection could not attribute, found by the
+  `/jobs/view/<job_key>` rule with no stored state, which is exactly the case that rule exists for.
+
+### Why the ungrounded answers happened: the questions had no text at all
+
+The live inspection reported *"answers with no Profile.md support"*. The artifacts show the cause, and it is
+deterministic rather than a model-quality problem. Every one of the seven suspect answers on both Flex forms
+was to a question whose recorded label is **`Select one`**:
+
+```
+'Select one' -> 'Male'                | profile | 'Amin Abbaszadeh'
+'Select one' -> 'Single'              | profile | 'Amin Abbaszadeh'
+'Select one' -> 'Male'                | profile | 'abbaszadehmohammadamin@yahoo.com'
+'Select one' -> 'I prefer not to say' | profile | 'abbaszadehmohammadamin@yahoo.com'
+'Select one' -> 'Fluent/Native'       | profile | 'English: C1 Level (TOEFL iBT 101)'
+```
+
+Ashby groups these radios under a compound-UUID id with `label`, `context` and `scope` **all empty**, so
+`_group_label` fell through to its placeholder. The model was asked seven questions all titled "Select one"
+and answered them from whatever was at hand — the candidate's own name, then their email. It is also why the
+two forms **contradict each other** (`Single` vs `I prefer not to say`, and opposite job-type answers): the
+model was guessing which question it was being asked, independently, twice.
+
+**Fixes (user decision 2026-10-08: strict — an answer that cannot be checked is left to the user).**
+
+1. `_label_from_text(options, p)` recovers the question from the page text, which renders
+   `"<question> <option1> <option2> …"`: take the words before the option run and cut everything up to the
+   last *other* element label in that window, so the previous field's label is not dragged in. Matched
+   case-insensitively but sliced from the original text, so the label keeps the page's own casing (`Gender`,
+   not `gender`). The observation's text is capped, so this recovers the first group on the Flex form and
+   nothing below the cap — for those there is genuinely no label anywhere in what the program collected.
+2. Such a group's placeholder now names its own options —
+   `Select one (Single / Married / I prefer not to say / Married with kids)` — because the earlier reports
+   listed `Q: Select one — A: ___` on the Scratch Pad, which told the user nothing.
+3. `check_answers` **refuses** an answer to a question that still carries only the placeholder. Those
+   questions are `required: false` on Ashby, so the job still parks; they land on the Scratch Pad instead of
+   going out as guesses.
+4. A **contact detail is not evidence for a non-contact question**. Linda AI answered
+   *"Are you comfortable working in an onsite setting?"* with `No` — on an Ireland role — citing
+   `Address: Via Padova, Milano, MI, Italy, 20132`. `_contact_quote` matches a quote that is an email, a phone
+   number, or a line announcing itself as one (`Address:`, `Phone:`, `Location:`), and the answer is dropped
+   unless the question is itself a contact field. Deliberately narrow: a labelled question quoting an ordinary
+   sentence is untouched, which is what keeps *"Are you legally authorized to work in Ireland? → No"* and the
+   Bachelor's-degree answer working.
+
+### The "Follow <company>" checkbox is declined, and a checkbox can finally be unticked
+
+`decline_follow_the_company` answers a `^follow\b` checkbox as unchecked, `source: computed`, after all the
+checks — so it leaves the Scratch Pad and submitting no longer follows the company silently (user decision
+2026-10-08). That exposed a second gap: `fill._carry_out`'s `check` branch hard-coded `"state": True`, so a
+toggle could only ever **tick** a box and the decline could not have been carried out. It now unticks when a
+**checkbox or switch** is answered `no/false/off/unchecked/decline/none`. A radio keeps `state: True`
+unconditionally, because a radio's `option_ref` already *is* the option to pick — "No" there means click the
+No radio, not clear it.

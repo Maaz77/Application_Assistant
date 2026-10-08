@@ -567,3 +567,97 @@ def test_an_unanswered_starred_radio_group_is_an_uncovered_required_question():
          "quote": None, "relies_on": None}
         for que in ext.questions]})
     assert [q.question for q in A.uncovered_required(pa)] == [ONSITE]
+
+
+# --- a radio group the form gives no question text at all (live 2026-10-08, The Flex) ---------------------
+
+# The page text as the driver captured it. It is capped, which is the point: only the FIRST group's question
+# survives in it, so the groups below the cap have no label anywhere in what we collected.
+FLEX_TEXT = ("Overview Application Autofill from resume Upload your resume here to autofill key application "
+             "fields. Upload file Full Name Email Phone Number (include country code +XXX) "
+             "Gender Male Female Prefer not to say Age")
+_UUID_GROUP = "1a66a310-8efc-4043-b917-29a4ac8fbaca_989df077-cf11-484d-9ed8-603271fad6ba"
+_UUID_GROUP2 = "1a66a310-8efc-4043-b917-29a4ac8fbaca_c731c0cc-d9e7-43a2-b5b9-6f0a3ff59854"
+
+
+def _flex_page() -> Page:
+    url = "https://jobs.ashbyhq.com/The-Flex/d9457005/application"
+    els = [Element(ref="e18", role="textbox", name="Full Name"),
+           Element(ref="e19", role="textbox", name="Email"),
+           Element(ref="e20", role="textbox", name="Phone Number (include country code +XXX)")]
+    for ref, name in (("e21", "Male"), ("e22", "Female"), ("e23", "Prefer not to say")):
+        els.append(Element(ref=ref, role="radio", name=name, tag="INPUT", group=_UUID_GROUP))
+    for ref, name in (("e25", "Single"), ("e26", "Married"), ("e27", "I prefer not to say"),
+                      ("e28", "Married with kids")):
+        els.append(Element(ref=ref, role="radio", name=name, tag="INPUT", group=_UUID_GROUP2))
+    return Page(url=url, title="Senior Software Engineer @ The Flex", text=FLEX_TEXT,
+                table=Table(url=url, elements=els))
+
+
+def test_a_question_label_is_recovered_from_the_page_text():
+    """Ashby's demographic radios have label, context and scope all empty and a compound-UUID group id, so
+    `_group_label` fell back to the placeholder. The page renders "<question> <option> <option>", so the
+    words before the option run are the question — and the previous field's label is trimmed off."""
+    by_q = {q.question: q for q in A.extract_questions(_flex_page()).questions}
+    assert "Gender" in by_q                                        # recovered, not "Select one"
+    assert by_q["Gender"].options == ["Male", "Female", "Prefer not to say"]
+
+
+def test_a_group_below_the_text_cap_names_its_own_options_instead():
+    """There is genuinely no label for it anywhere, so the placeholder at least has to identify the question
+    in answers.json and on the Scratch Pad, where a bare "Select one — A: ___" told the user nothing."""
+    by_q = {q.question: q for q in A.extract_questions(_flex_page()).questions}
+    marital = next(k for k in by_q if k.startswith(A.NO_LABEL))
+    assert marital == "Select one (Single / Married / I prefer not to say / Married with kids)"
+
+
+def test_an_answer_to_an_unlabelled_question_is_refused():
+    """Live 2026-10-08: seven groups titled "Select one" were all answered anyway — `Gender -> Male` citing
+    the candidate's own NAME as the quote, and the same question got opposite answers on two forms of the
+    same company. Strict: a question nobody can read does not get an answer (user decision)."""
+    (gender, marital), _ = run(
+        q(question="Select one", kind="choice", options=["Male", "Female", "Prefer not to say"],
+          answer="Male", source="profile", quote="Amin Abbaszadeh"),
+        q(question="Select one (Single / Married / I prefer not to say)", kind="choice",
+          options=["Single", "Married", "I prefer not to say"], answer="Single", source="profile",
+          quote="abbaszadehmohammadamin@yahoo.com"))
+    assert gender.answer is None and "no label" in gender.note
+    assert marital.answer is None and "no label" in marital.note
+
+
+def test_a_contact_detail_is_not_evidence_for_a_non_contact_question():
+    """Live 2026-10-08, Linda AI: "Are you comfortable working in an onsite setting?" was answered `No` — on
+    an Ireland role — citing `Address: Via Padova, Milano, MI, Italy, 20132`. An address does not answer it."""
+    (onsite,), _ = run(q(question="Are you comfortable working in an onsite setting?", kind="choice",
+                         options=["Yes", "No"], answer="No", source="profile",
+                         quote="Address: Via Padova, Milano, MI, Italy, 20132"))
+    assert onsite.answer is None and "contact detail" in onsite.note
+
+
+def test_a_contact_question_may_still_cite_a_contact_detail():
+    """The rule is about mismatch, not about addresses: the contact fields themselves are unaffected."""
+    (email,), _ = run(q(question="Email", ref="e1", answer="amin@example.com", source="profile",
+                        quote="amin@example.com"))
+    assert email.answer == "amin@example.com"
+
+
+def test_a_real_question_citing_a_real_fact_is_untouched():
+    """The strict rules must not cost a good answer: neither of them looks at a labelled question whose
+    quote is an ordinary sentence."""
+    (auth,), _ = run(q(question="Are you legally authorized to work in Ireland?", kind="choice",
+                       options=["Yes", "No"], answer="No", source="profile",
+                       quote="I built a real-time computer vision pipeline reaching 200 FPS on an NPU."))
+    assert auth.answer == "No" and auth.source == "profile"
+
+
+def test_the_follow_the_company_default_is_declined_and_not_reported():
+    """LinkedIn ticks "Follow <company>" inside the Easy Apply dialog. It is not an application answer, and
+    leaving it alone meant submitting followed the company while the report listed it as an open question."""
+    pa = PageAnswers.model_validate({"questions": [
+        q(question="Follow Digital Manufacturing Ireland to stay up to date with their page", kind="choice",
+          ref="e9", options=["Follow Digital Manufacturing Ireland to stay up to date with their page", "No"],
+          answer=None, source=None)]})
+    A.decline_follow_the_company(pa)
+    follow = pa.questions[0]
+    assert follow.answer == "No" and follow.source == "computed"
+    assert A.uncovered_optional(pa) == [] and A.uncovered_required(pa) == []     # off the Scratch Pad

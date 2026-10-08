@@ -494,3 +494,32 @@ def test_a_native_select_reads_back_from_the_control_not_the_option(tmp_path):
     assert mismatches([q], p) == []
     wrong = q.model_copy(update={"answer": "Yes", "option_ref": "e31:2"})
     assert mismatches([wrong], p) == [wrong]        # a genuinely unset choice is still caught
+
+
+def test_a_checkbox_answered_no_is_unticked_but_a_radio_is_always_clicked(tmp_path):
+    """`state` was hard-coded True, so a toggle could only ever TICK a box — LinkedIn's "Follow <company>"
+    default could not be declined (live 2026-10-08). A radio is different: its option_ref already IS the
+    option to pick, so "No" there means click the No radio."""
+    from assistant.browser import Element, Table
+    from assistant.fill import _carry_out
+    from assistant.llm_inference import Question
+    from assistant.pages import Page
+
+    box = Element(ref="e9", role="checkbox", name="Follow Acme to stay up to date with their page",
+                  tag="INPUT", type="checkbox", checked=True)
+    no_radio = Element(ref="e151", role="radio", name="Are you legally authorized to work in Ireland?",
+                       label="No", tag="DIV")
+    by_ref = {e.ref: e for e in (box, no_radio)}
+
+    follow = Question(id="c_e9", question=box.name, kind="choice", ref="e9", option_ref="e9",
+                      options=[box.name, "No"], required=False, answer="No", source="computed",
+                      quote=None, relies_on=None)
+    assert _carry_out(follow, "check", "e9", "e9", by_ref) == {"op": "toggle", "ref": "e9", "state": False}
+
+    keep = follow.model_copy(update={"answer": box.name})
+    assert _carry_out(keep, "check", "e9", "e9", by_ref)["state"] is True
+
+    auth = Question(id="r_e151", question=no_radio.name, kind="choice", ref=None, option_ref="e151",
+                    options=["Yes", "No"], required=True, answer="No", source="profile", quote="x",
+                    relies_on=None)
+    assert _carry_out(auth, "check", None, "e151", by_ref) == {"op": "toggle", "ref": "e151", "state": True}

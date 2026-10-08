@@ -204,6 +204,7 @@ OPTION_REF_RE = re.compile(r"^(e\d+):\d+$")     # an option of a native <select>
 
 
 TOGGLES = {"radio", "checkbox", "switch"}
+_UNCHECKED = {"no", "false", "off", "unchecked", "decline", "none"}   # a checkbox answer that means clear it
 LISTS = {"combobox", "listbox"}
 FILL_OPS = {
     "type": "Type the answer into the field: a text box, a text area or a number field.",
@@ -325,7 +326,12 @@ def _carry_out(q: Question, how: str | None, field: str | None, option: str | No
     if how == "check":
         t = by_ref.get(option or "")
         if t is not None and t.role in TOGGLES:
-            return {"op": "toggle", "ref": t.ref, "state": True}
+            # A self-labelled checkbox/switch is answered with its own label or "No", so "No" means UNCHECK.
+            # A radio's option_ref already IS the option to pick, so it is always a check (live 2026-10-08:
+            # with `state` hard-coded True a toggle could only ever tick a box, so LinkedIn's
+            # "Follow <company>" default could not be declined).
+            off = t.role != "radio" and pages.norm_label(q.answer) in _UNCHECKED
+            return {"op": "toggle", "ref": t.ref, "state": not off}
     return None
 
 
