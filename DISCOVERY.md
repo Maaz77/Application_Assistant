@@ -2323,3 +2323,28 @@ Every defect in this whole session was found by a run and missed by the suite, i
 | Toast regressed | the posting had been taken down |
 
 The suite is at 390 unit tests and every one of those six was provable only against the real page.
+
+## 2026-10-08 — run 20261008-194557: every job now ends with an honest outcome
+
+```
+⚠ needs attention  Genesys:    signup: site asks to create an account; guest link not usable
+⚠ needs attention  Mastercard: LinkedIn says this job is no longer accepting applications
+⚠ needs attention  Toast:      closed: the site says this posting is no longer available
+✓ parked           Digital Manufacturing Ireland – Manufacturing Computer Vision Engineer
+```
+
+with run 192511 covering the other three — Linda AI `⏸ parked — 1 answer needed`, The Flex – Senior Software
+Engineer `✓ parked`, The Flex – Senior Full-Stack Product Engineer `⏸ parked — 2 answers needed`.
+
+Genesys's `Where` is now
+`genesys.wd1.myworkdayjobs.com/en-US/Genesys/job/Galway%2C-Ireland/…_JR112303-1/apply/applyManually` with the
+title `"Create Account"` — the run reaches Workday's own apply flow and stops at an account wall, which is the
+correct and final answer for a site that will not take an application without one.
+
+Tab accounting across the run: Genesys 2 closes, Mastercard 1, Toast 2, DMI 1 — each job closing the tab the
+previous run left plus, for the external ones, the LinkedIn tab after the hand-off. `runs/open-tabs.json` now
+carries `{id, host}` for all seven jobs.
+
+One cosmetic fix on the way out: the external path put `"<cls>: <cue>"` in the message while the reason code
+already carries the class, so the report read `Reason: closed — closed: the site says…` and
+`Reason: signup — signup: site asks…`. `run_external` now passes the cue alone.

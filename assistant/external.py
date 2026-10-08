@@ -226,12 +226,16 @@ def run_external(ctx) -> Parked:
                     signed_in, filled = True, False
                     continue
                 if v.kind == "blocker":
-                    cls = v.detail.split(":", 1)[0].strip()
+                    # `v.detail` is "<cls>: <cue>", and the reason code carries the class already, so the cue
+                    # alone goes in the message — otherwise the report reads "closed — closed: the site says
+                    # this posting is no longer available" (live 2026-10-08, and the same for signup).
+                    head, _, cue = v.detail.partition(":")
+                    cls, why = head.strip(), (cue.strip() or v.detail)
                     if cls == "load_failure":
-                        ctx.attempts.fail("load_failure", v.detail)     # raises NeedsAttention when exhausted
+                        ctx.attempts.fail("load_failure", why)          # raises NeedsAttention when exhausted
                         fill._reload(ctx)
                     else:
-                        fill._attempt2(ctx, p, cls, v.detail)           # captcha wait-reload / signup guest link
+                        fill._attempt2(ctx, p, cls, why)                # captcha wait-reload / signup guest link
                     filled = False
                     continue
                 if v.kind == "iframe":
