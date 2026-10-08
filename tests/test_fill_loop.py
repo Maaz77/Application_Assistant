@@ -553,20 +553,29 @@ def test_the_follow_checkbox_is_actually_unticked_end_to_end(tmp_path):
     taught to untick — `_set_option_refs` nulled the "No", `_goal_items` skipped an already-checked box and
     `mismatches` read `checked` as success. So the box stayed ticked AND went back on the Scratch Pad. This
     drives the whole loop over a pre-ticked box and asserts the live DOM state, not an intermediate."""
-    follow = "Follow Acme to stay up to date with their page"
+    # The real element, from runs/20261008-143810/…Digital-Manufacturing-Ireland…: a DIV role=checkbox with
+    # no `label`, `checked: true`, inside the Easy Apply <dialog>. The driver reads `aria-checked` for an
+    # ARIA checkbox and clicks only when it differs from the requested state (driver/session.py:492-504).
+    follow = "Follow Digital Manufacturing Ireland to stay up to date with their page"
     answers = {"Data Engineer | Acme | LinkedIn": [
         Q("City", "Milan", ref="auto"),
         Q(follow, "No", kind="choice", options=[follow, "No"], ref="auto", option_ref="same",
           source="computed", required=False),
         Q("Resume", None, kind="file", ref="auto", source=None)]}
     site = single_dialog()
-    box = El("checkbox", follow, dialog="d", checked=True)
+    box = El("checkbox", follow, dialog="d", checked=True, tag="DIV")
     site["s1"].els.insert(1, box)
     browser, fake = fake_browser(site, "job")
     parked = run_pages(ctx_for(browser, answers, tmp_path))
     assert isinstance(parked, Parked) and fake.sent == []
     assert box.checked is False                                  # unticked on the page
     assert follow not in [o.question for o in parked.optional_empty]      # and off the Scratch Pad
+    # The never-submit guard must allow the click: this control is on the review step, so if it were ever
+    # reached with FORM.final set it would be refused and the decline would silently not happen.
+    from assistant import guard as g
+    from assistant.browser import Element
+    el = Element(ref="e165", role="checkbox", name=follow, tag="DIV", checked=True, dialog="<dialog>")
+    assert g.never_click_element(el, g._FormStage()) is None
 
 
 def test_a_checkbox_whose_own_label_means_no_is_still_ticked(tmp_path):
