@@ -49,10 +49,11 @@ class FreeLLMAPI(_Strict):
     llm_inference: tuple[str, ...] = ()
     # The chat timeout, for every request on this route: LLM inference and the System One chat fallback. It has to
     # cover the router's own failover, not one model's answer. A stalled upstream costs 60 s before the router may
-    # move on (Cloudflare aborts its own chat call at exactly 60 s), after which the next platform usually answers
-    # in seconds; `auto` also picks a 38-89 s model now and then. At the 45 s this used to be, a run hung up before
-    # that 60 s abort — nine attempts in a row died on the same stalled upstream and stopped the run as a "provider
-    # outage" while the router was up (2026-10-08). 180 s is room for one stall and a slow answer behind it.
+    # move on — its own per-platform chat limit, `providerTimeoutMs("cloudflare", 6e4)` — after which the next
+    # platform usually answers in seconds; `auto` also picks a 38-89 s model now and then. At the 45 s this used to
+    # be, a run hung up before that limit: nine attempts in a row died on the same stalled upstream, never reaching
+    # the failover that would have answered, and stopped the run as a "provider outage" while the router was up
+    # (2026-10-08). 180 s is room for one stall and a slow answer behind it.
     timeout: float = 180.0
 
     @field_validator("llm_inference", mode="before")

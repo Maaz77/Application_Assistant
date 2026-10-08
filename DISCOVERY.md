@@ -2387,21 +2387,28 @@ schema-valid, so the page is not what makes a request slow. Nor is the model: pi
 The router logs every attempt it makes per request — `start`/`next`/`ok`/`fail` with the platform, the model and a
 cumulative `lat=`. It explains both halves of the spread, and neither half is a queue in front of one model:
 
-- **A stalled upstream costs 60 s before the router may fail over.** Cloudflare aborts its own chat call at 60 s
-  (`err="The operation was aborted (cloudflare, chat, 60s)"`), and the router then tries the next platform, which
-  usually answers at once: the 73.0 s call was `a0 cloudflare @cf/qwen/qwen3.8-27b` aborted at 60.0 s then
-  `a1 google gemini-3-flash-preview` answering in 13 s, and the 66.1 s call was the same shape with 6 s on the
-  end. Failing over is itself cheap — a spent free tier answers 429 or 404 in well under a second.
+- **A stalled upstream costs 60 s before the router may fail over.** The 60 s is the router's own per-platform
+  chat limit, not Cloudflare's: its bundle holds `CHAT_TIMEOUT_MS = providerTimeoutMs("cloudflare", 6e4)` (and a
+  `GLM_47_FLASH_TIMEOUT_MS` special case), and the abort is logged as
+  `err="The operation was aborted (cloudflare, chat, 60s)"` — provider, kind, limit. When that limit is reached
+  the router tries the next platform, which usually answers at once: the 73.0 s call was
+  `a0 cloudflare @cf/qwen/qwen3.8-27b` abandoned at 60.0 s then `a1 google gemini-3-flash-preview` answering in
+  13 s, and the 66.1 s call was the same shape with 6 s on the end. Failing over is itself cheap — a spent free
+  tier answers 429 or 404 in well under a second.
 - **`auto` sometimes picks a genuinely slow model, with no failover involved.** Single-attempt calls:
   `nvidia meta/muse-glimmer-30b` 67.1 s (2,974 output tokens), `nvidia nvidia/nemotron-3-ultra-550b-a55b` 62.8 s
   and 48.8 s, `cloudflare @cf/zai-org/glm-4.7-flash` 38.5 s and 89.1 s (5,078 and 5,478 output tokens).
 
 **So 45 s was not merely short, it was shorter than the router's own failover horizon** — and the run's nine
-timed-out attempts prove it. In the run's window the log holds **11 starts to
-`cloudflare @cf/qwen/qwen3.8-27b` and only 2 results**: it answered Linda AI's second page in 32.3 s and then
-stalled on every attempt after it. Nine of those eleven have no `ok` and no `fail` line at all, because this
-program hung up at 45 s — before Cloudflare's 60 s abort, so before the router could reach the next platform. The
-one thing that would have rescued each of those requests was a failover that 45 s never let it start.
+timed-out attempts prove it. Between 18:21:34Z and 18:29:56Z the log holds **10 starts to
+`cloudflare @cf/qwen/qwen3.8-27b` and 1 result**: `9171ab` answered Linda AI's second page in 32.3 s, and the nine
+starts after it have no `ok` and no `fail` line at all, three per job, spaced 45 + 2 s and 45 + 6 s apart — this
+program's own ladder, hanging up before the router's 60 s limit and so before it could reach the next platform.
+
+The counterfactual is in the same log. `048dee` at 18:35:35Z is the first replay of The Flex's body, the one that
+took 73.0 s: the same stalled `@cf/qwen/qwen3.8-27b`, but given time it was abandoned at 60.0 s, failed over to
+`google gemini-3-flash-preview` and answered. The failover that would have rescued every one of those nine
+requests was the one thing 45 s never let the router start.
 
 **And 45 s came from the wrong workload.** It was measured on the 6-question page of 2026-10-07 (the table above:
 1.2 to 42.5 s) and on the 5-question routing trials (`auto` 4.8 / 6.0 / 5.2 s). A real form page is 8.8k prompt
@@ -2428,12 +2435,18 @@ Verified on the real path, not on the replay: `config.load()` -> `gateway.for_co
 with the body that failed the run returned **17 answers in 48.9 s on one attempt** (`CHAT` timeout 180 s, `JEV`
 120 s, 0 failures, breaker untripped). At 45 s that request was a failure too.
 
-**There is a router-side fix as well, and it is the one that makes pages fast rather than merely possible.** The
-upstreams in that log fall into two camps on this workload: 0.2-13 s (`groq qwen/qwen3.8-27b`,
-`google gemini-3-flash-preview`, `nvidia poolside/laguna-xs-2.1`) and 38-89 s or stalled
-(`cloudflare @cf/qwen/qwen3.8-27b`, `@cf/zai-org/glm-4.7-flash`, `nvidia nemotron-3-ultra-550b-a55b`,
-`meta/muse-glimmer-30b`). Benching the slow camp in the FreeLLMAPI app would put a form page back at 5-13 s. That
-is the user's call on their own router, and this program must survive either way.
+**There is a router-side fix as well, and it is the one that makes pages fast rather than merely possible.** Two
+levers, both on the router and both the user's call:
+
+- **Its per-platform chat limit.** 60 s on Cloudflare is what a stall costs before a failover may start. Lower it
+  and every stall fails over sooner; that is the number this program has to wait behind.
+- **Which upstreams `auto` may pick.** On this workload they fall into two camps: 0.2-13 s
+  (`groq qwen/qwen3.8-27b`, `google gemini-3-flash-preview`, `nvidia poolside/laguna-xs-2.1`) and 38-89 s or
+  stalled (`cloudflare @cf/qwen/qwen3.8-27b`, `@cf/zai-org/glm-4.7-flash`,
+  `nvidia nemotron-3-ultra-550b-a55b`, `meta/muse-glimmer-30b`). Benching the slow camp puts a form page back at
+  5-13 s.
+
+Neither is this program's business, and it must survive either way — which is what the knob is for.
 
 The breaker itself was not touched: three timed-out requests in a row is still a stopped run, but a timeout now
 means the request really was stuck rather than merely slower than a number measured on a smaller page. Retrying a
